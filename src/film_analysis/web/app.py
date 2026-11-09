@@ -2,7 +2,9 @@
 
 import asyncio
 import contextlib
+import csv
 import inspect
+import io
 import json
 import logging
 import os
@@ -14,6 +16,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -60,7 +63,7 @@ from film_analysis.plays.scan import (
     processing_percent,
     scan_film,
 )
-from film_analysis.plays.segments import FilmSpan, format_play
+from film_analysis.plays.segments import FilmSpan, format_clock, format_play
 from film_analysis.scout.report import (
     chart_kinds,
     live_snapshot,
@@ -931,6 +934,27 @@ def create_app(
             content=sheet,
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="scouting-report.csv"'},
+        )
+
+    @app.get("/api/projects/{project_id}/plays.zip")
+    def export_plays(project_id: int) -> FileResponse:
+        """Zip every kept play clip so a team manager can take the cut film."""
+
+        try:
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None:
+            raise HTTPException(status_code=404, detail="That analysis is no longer available.")
+        plays = _report_plays(saved)
+        if not plays:
+            raise HTTPException(status_code=400, detail="No plays to export.")
+        packed = _pack_play_clips(catalog, saved, plays)
+        return FileResponse(
+            packed,
+            media_type="application/zip",
+            filename=_export_filename(saved.name, "plays.zip"),
+            background=BackgroundTask(_remove_temp, packed),
         )
 
     @app.post("/api/projects/{project_id}/archive")
@@ -2426,6 +2450,58 @@ def _report_plays(project: ProjectDetail) -> list[PlayRecord]:
     return [play for play in _ordered_plays(project) if not play.discarded]
 
 
+def _export_filename(title: str, suffix: str) -> str:
+    """A safe attachment name from the film title."""
+
+    cleaned = "".join(ch if ch.isalnum() or ch in "-_ " else " " for ch in (title or "film"))
+    stem = "-".join(part for part in cleaned.split() if part) or "film"
+    return f"{stem[:72]}-{suffix}"
+
+
+def _remove_temp(path: Path) -> None:
+    path.unlink(missing_ok=True)
+
+
+def _pack_play_clips(catalog: Catalog, project: ProjectDetail, plays: list[PlayRecord]) -> Path:
+    """Write kept clips and a small sheet into one zip file."""
+
+    handle = tempfile.NamedTemporaryFile(prefix="plays-", suffix=".zip", delete=False)
+    packed = Path(handle.name)
+    handle.close()
+    sheet = io.StringIO()
+    writer = csv.writer(sheet)
+    writer.writerow(["play", "start", "end", "family", "call", "unit", "formation", "file"])
+    packed_any = False
+    try:
+        with zipfile.ZipFile(packed, "w", compression=zipfile.ZIP_STORED) as archive:
+            for play in plays:
+                clip = catalog.clip_file(project.project, play.play_number)
+                if clip is None or not clip.is_file():
+                    continue
+                name = f"play-{play.play_number:03d}.mp4"
+                archive.write(clip, arcname=name)
+                writer.writerow(
+                    [
+                        play.play_number,
+                        format_clock(play.start_seconds),
+                        format_clock(play.end_seconds),
+                        play.family or "",
+                        play.play_type or "",
+                        play.unit or "",
+                        play.formation or "",
+                        name,
+                    ]
+                )
+                packed_any = True
+            if not packed_any:
+                raise HTTPException(status_code=400, detail="No play clips are ready to export.")
+            archive.writestr("plays.csv", sheet.getvalue())
+    except Exception:
+        packed.unlink(missing_ok=True)
+        raise
+    return packed
+
+
 def _remember_edit(
     catalog: Catalog,
     project: ProjectDetail,
@@ -2675,7 +2751,8 @@ def _chart_formation_play(
     """Plot the snap and name the formation after the run/pass call is known.
 
     Both offenses are read, so each team's report can group its snaps by
-    formation. The side tells whose uniform is on offense.
+    formation. The side tells whose uniform is on offense. The scouted team's
+    jersey is drawn primary on the plot.
     """
 
     call = (play.play_type or "").strip().lower()
@@ -2684,18 +2761,24 @@ def _chart_formation_play(
     if not force and play.unit not in {"offense", "defense"}:
         return 0, 0, ""
     has_plot = False
+    has_layout = False
     with contextlib.suppress(CatalogError):
         has_plot = catalog.play_image(project.project, play.play_number, "formation") is not None
-    # Skip only when the name and plot are already on the play.
-    if not force and play.formation and has_plot:
+        has_layout = catalog.play_layout(project.project, play.play_number) is not None
+    # Skip only when the name, plot, and layout are already on the play.
+    if not force and play.formation and has_plot and has_layout:
         return 0, 0, ""
     frames = _scrimmage_frames(catalog, project, play, snap=True)
     offense, defense = (other, mine) if play.unit != "offense" else (mine, other)
-    answer = _call_formation_reader(reader, frames, offense, defense, call)
-    named, incoming, outgoing, model, plot = _formation_answer(answer)
+    # Scouted team is ``mine`` — emphasize their jersey on the graph.
+    focus = "offense" if play.unit == "offense" else "defense"
+    answer = _call_formation_reader(reader, frames, offense, defense, call, focus=focus)
+    named, incoming, outgoing, model, plot, layout = _formation_answer(answer)
     try:
         if plot:
             catalog.save_play_image(project.project, play.play_number, "formation", plot)
+        if layout:
+            catalog.save_play_layout(project.project, play.play_number, layout)
         if named in FORMATIONS:
             catalog.set_play_formation(project.project, play.play_number, named)
         elif (force or not play.formation) and not named:
@@ -2712,31 +2795,41 @@ def _call_formation_reader(
     offense: Uniform,
     defense: Uniform,
     call: str,
+    *,
+    focus: str = "offense",
 ) -> FormationRead | str | None:
     try:
         signature = inspect.signature(reader)
     except (TypeError, ValueError):
         signature = None
-    if signature is not None and len(signature.parameters) >= 4:
+    if signature is None:
+        return reader(frames, offense, defense)
+    params = signature.parameters
+    if "focus" in params:
+        return reader(frames, offense, defense, call, focus=focus)
+    if len(params) >= 4:
         return reader(frames, offense, defense, call)
     return reader(frames, offense, defense)
 
 
 def _formation_answer(
     value: object,
-) -> tuple[str | None, int, int, str, bytes]:
+) -> tuple[str | None, int, int, str, bytes, dict[str, object] | None]:
     if isinstance(value, str):
-        return value, 0, 0, "", b""
+        return value, 0, 0, "", b"", None
     named = getattr(value, "formation", None)
     incoming = int(getattr(value, "input_tokens", 0) or 0)
     outgoing = int(getattr(value, "output_tokens", 0) or 0)
     model = str(getattr(value, "model", "") or "")
     plot = getattr(value, "plot", b"")
+    layout = getattr(value, "layout", None)
     if not isinstance(plot, (bytes, bytearray)):
         plot = b""
+    if not isinstance(layout, dict):
+        layout = None
     if not isinstance(named, str):
-        return None, incoming, outgoing, model, bytes(plot)
-    return named, incoming, outgoing, model, bytes(plot)
+        return None, incoming, outgoing, model, bytes(plot), layout
+    return named, incoming, outgoing, model, bytes(plot), layout
 
 
 def _team_uniforms(teams: FilmTeams) -> tuple[Uniform, Uniform]:
@@ -3037,47 +3130,88 @@ def _analyze_report_play(
     formations: Callable[..., FormationRead | str | None],
     kinds: frozenset[str],
     chosen: frozenset[str],
+    *,
+    phase: str = "all",
 ) -> None:
-    """Chart one play, then write its scouting-analysis row."""
+    """Chart one play. ``phase`` is call, formation, or both."""
 
     try:
         project = _require_project(catalog, project_id)
         latest = _play_by_number(project, play.play_number) or play
-        incoming, outgoing, model = _chart_play(
-            catalog, project, latest, mine, other, reader, kinds
-        )
-        project = _require_project(catalog, project_id)
-        latest = _play_by_number(project, play.play_number) or latest
+        incoming = 0
+        outgoing = 0
+        model = ""
+        if phase in {"all", "call"}:
+            more_in, more_out, model = _chart_play(
+                catalog, project, latest, mine, other, reader, kinds
+            )
+            incoming += more_in
+            outgoing += more_out
+            project = _require_project(catalog, project_id)
+            latest = _play_by_number(project, play.play_number) or latest
         want_formation = "formations" in chosen
         if not want_formation:
             with contextlib.suppress(CatalogError):
                 want_formation = catalog.formation_reads()
-        if want_formation:
+        if want_formation and phase in {"all", "formation"}:
             more_in, more_out, formed_model = _chart_formation_play(
-                catalog, project, latest, mine, other, formations
+                catalog,
+                project,
+                latest,
+                mine,
+                other,
+                formations,
+                force=phase == "formation",
             )
             incoming += more_in
             outgoing += more_out
             model = model or formed_model
         project = _require_project(catalog, project_id)
         latest = _play_by_number(project, play.play_number) or latest
-        cost = read_cost(model, incoming, outgoing)
+        prior = None
+        with contextlib.suppress(CatalogError):
+            prior = next(
+                (
+                    row
+                    for row in catalog.list_report_analysis(project_id)
+                    if row.play_number == play.play_number
+                ),
+                None,
+            )
+        cost = read_cost(model, incoming, outgoing) + (prior.cost_usd if prior else 0.0)
         learned = bool(latest.play_type or latest.unit)
+        has_plot = False
+        with contextlib.suppress(CatalogError):
+            has_plot = (
+                catalog.play_image(project_id, play.play_number, "formation") is not None
+            )
+        detail = ""
+        status = "ready" if learned else "missed"
+        if learned and want_formation and phase in {"all", "formation"}:
+            call = (latest.play_type or "").strip().lower()
+            if (
+                latest.family != "special_teams"
+                and call in {"run", "pass"}
+                and not has_plot
+            ):
+                status = "missed"
+                detail = "Could not plot the starting formation."
+        if not learned:
+            detail = "Could not tell whether the opponent was on offense or defense."
         catalog.set_report_analysis(
             project_id,
             ReportAnalysis(
                 play.play_number,
-                "ready" if learned else "missed",
+                status,
                 call=latest.play_type or "",
                 side=latest.unit or "",
                 formation=latest.formation or "",
-                input_tokens=incoming,
-                output_tokens=outgoing,
+                input_tokens=incoming + (prior.input_tokens if prior and phase == "formation" else 0),
+                output_tokens=outgoing
+                + (prior.output_tokens if prior and phase == "formation" else 0),
                 cost_usd=cost,
-                model=model,
-                detail=""
-                if learned
-                else "Could not tell whether the opponent was on offense or defense.",
+                model=model or (prior.model if prior else ""),
+                detail=detail,
             ),
         )
     except Exception as error:

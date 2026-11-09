@@ -41,19 +41,32 @@ def plot_formation(
     frames: Sequence[bytes],
     offense: Uniform,
     defense: Uniform,
+    *,
+    focus: str = "offense",
 ) -> FormationLayout | None:
-    """Build an 11-on-11 plot from the clearest pre-snap frame."""
+    """Build an 11-on-11 plot from the clearest pre-snap frame.
+
+    Coordinates are LOS-relative using the O-line as the stable anchor. ``focus``
+    is ``offense`` or ``defense`` — that side's jersey color is drawn primary.
+    """
 
     picked = _best_frame(frames, offense, defense)
     if picked is None:
         return None
     jpeg, offense_pts, defense_pts = picked
+    offense_pts, defense_pts = normalize_to_los(offense_pts, defense_pts)
     offense_players = _fill_team(offense_pts, "offense", backfield=True)
     defense_players = _fill_team(defense_pts, "defense", backfield=False)
     guessed = sum(
         1 for player in (*offense_players, *defense_players) if player.confidence == "low"
     )
-    drawing = render_formation_plot(offense_players, defense_players, offense, defense)
+    drawing = render_formation_plot(
+        offense_players,
+        defense_players,
+        offense,
+        defense,
+        focus=focus if focus in {"offense", "defense"} else "offense",
+    )
     if not drawing:
         return None
     return FormationLayout(
@@ -65,13 +78,83 @@ def plot_formation(
     )
 
 
+def normalize_to_los(
+    offense: Sequence[tuple[float, float]],
+    defense: Sequence[tuple[float, float]],
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Shift points so the O-line sits on y=0.5 and the center is x=0.5.
+
+    Offense stays below the LOS (y > 0.5); defense above (y < 0.5). Ball
+    direction is mirrored so the offense always faces up the diagram.
+    """
+
+    if not offense:
+        return list(offense), list(defense)
+    from film_analysis.chart.formation_features import _oline_anchor
+
+    los_y, center_x = _oline_anchor(offense)
+    # If most "offense" points are above the line, the detector flipped sides —
+    # keep geometry but mirror so offense is in the bottom half for drawing.
+    offense_below = sum(1 for _x, y in offense if y >= los_y)
+    mirror = offense_below < len(offense) / 2
+
+    def map_point(x: float, y: float, *, offense_side: bool) -> tuple[float, float]:
+        dx = x - center_x
+        dy = y - los_y
+        if mirror:
+            dy = -dy
+        # Diagram: LOS at 0.5; offense deeper = larger y; defense = smaller y.
+        if offense_side:
+            out_y = 0.5 + abs(dy) * 0.9
+        else:
+            out_y = 0.5 - abs(dy) * 0.9
+        return _clamp(0.5 + dx), _clamp(out_y)
+
+    return (
+        [map_point(x, y, offense_side=True) for x, y in offense],
+        [map_point(x, y, offense_side=False) for x, y in defense],
+    )
+
+
+def layout_payload(
+    layout: FormationLayout,
+    *,
+    features: dict[str, object] | None = None,
+    ai_guess: str = "",
+    focus: str = "offense",
+) -> dict[str, object]:
+    """JSON saved beside the plot for the movable graph and grouping."""
+
+    return {
+        "offense": [_player_dict(player) for player in layout.offense],
+        "defense": [_player_dict(player) for player in layout.defense],
+        "guessed": layout.guessed,
+        "ai_guess": ai_guess,
+        "focus": focus,
+        "features": features or {},
+    }
+
+
+def players_from_payload(
+    payload: dict[str, object],
+) -> tuple[list[PlottedPlayer], list[PlottedPlayer]]:
+    """Rebuild plotted players from a saved layout JSON."""
+
+    return (
+        [_player_from_dict(item, "offense") for item in _list(payload.get("offense"))],
+        [_player_from_dict(item, "defense") for item in _list(payload.get("defense"))],
+    )
+
+
 def render_formation_plot(
     offense: Sequence[PlottedPlayer],
     defense: Sequence[PlottedPlayer],
     offense_uniform: Uniform,
     defense_uniform: Uniform,
+    *,
+    focus: str = "offense",
 ) -> bytes:
-    """Draw a bird's-eye view of the snap. Low-confidence spots are hollow."""
+    """Draw a bird's-eye view of the snap. The focused side is louder."""
 
     try:
         import cv2
@@ -98,17 +181,37 @@ def render_formation_plot(
     )
     offense_color = _bgr_from_hex(offense_uniform.jersey_hex) or (240, 240, 240)
     defense_color = _bgr_from_hex(defense_uniform.jersey_hex) or (40, 40, 200)
-    for player in offense:
-        _draw_marker(field, player, offense_color, width, height, mid, offense_side=True)
+    # Scouted focus: primary side is large and saturated; the other is muted.
+    offense_primary = focus != "defense"
     for player in defense:
-        _draw_marker(field, player, defense_color, width, height, mid, offense_side=False)
+        _draw_marker(
+            field,
+            player,
+            defense_color if not offense_primary else _mute(defense_color),
+            width,
+            height,
+            mid,
+            offense_side=False,
+            primary=not offense_primary,
+        )
+    for player in offense:
+        _draw_marker(
+            field,
+            player,
+            offense_color if offense_primary else _mute(offense_color),
+            width,
+            height,
+            mid,
+            offense_side=True,
+            primary=offense_primary,
+        )
     cv2.putText(
         field,
         "Offense",
         (24, height - 18),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
-        offense_color,
+        offense_color if offense_primary else _mute(offense_color),
         1,
         cv2.LINE_AA,
     )
@@ -118,7 +221,7 @@ def render_formation_plot(
         (24, 28),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
-        defense_color,
+        defense_color if not offense_primary else _mute(defense_color),
         1,
         cv2.LINE_AA,
     )
@@ -271,32 +374,61 @@ def _draw_marker(
     mid: int,
     *,
     offense_side: bool,
+    primary: bool = True,
 ) -> None:
     import cv2
 
     x = int(24 + player.x * (width - 48))
-    band = (height // 2) - 36
-    y = (
-        int(mid + 18 + player.y * band)
-        if offense_side
-        else int(mid - 18 - (1.0 - player.y) * band)
-    )
+    # Points are already LOS-normalized: y>0.5 offense, y<0.5 defense.
+    y = int(24 + player.y * (height - 48))
     y = max(30, min(height - 30, y))
+    radius = 12 if primary else 7
     if player.confidence == "low":
-        cv2.circle(field, (x, y), 10, color, 2, cv2.LINE_AA)
-        cv2.putText(
-            field,
-            "?",
-            (x - 4, y + 4),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.4,
-            color,
-            1,
-            cv2.LINE_AA,
-        )
+        cv2.circle(field, (x, y), radius, color, 2, cv2.LINE_AA)
+        if primary:
+            cv2.putText(
+                field,
+                "?",
+                (x - 4, y + 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
     else:
-        cv2.circle(field, (x, y), 9, color, -1, cv2.LINE_AA)
-        cv2.circle(field, (x, y), 9, (20, 20, 20), 1, cv2.LINE_AA)
+        cv2.circle(field, (x, y), radius, color, -1, cv2.LINE_AA)
+        cv2.circle(field, (x, y), radius, (20, 20, 20), 1, cv2.LINE_AA)
+
+
+def _mute(color: tuple[int, int, int]) -> tuple[int, int, int]:
+    return tuple(min(255, int(40 + channel * 0.45)) for channel in color)
+
+
+def _player_dict(player: PlottedPlayer) -> dict[str, object]:
+    return {
+        "x": round(player.x, 4),
+        "y": round(player.y, 4),
+        "side": player.side,
+        "confidence": player.confidence,
+    }
+
+
+def _player_from_dict(value: object, side: str) -> PlottedPlayer:
+    if not isinstance(value, dict):
+        return PlottedPlayer(0.5, 0.5, side, "low")
+    return PlottedPlayer(
+        _clamp(float(value.get("x") or 0.5)),
+        _clamp(float(value.get("y") or 0.5)),
+        str(value.get("side") or side),
+        "high" if value.get("confidence") == "high" else "low",
+    )
+
+
+def _list(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    return []
 
 
 def _jersey_sample(image, box: PlayerBox) -> tuple[int, int, int] | None:

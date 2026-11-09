@@ -1,6 +1,7 @@
 """Play clips in a Cloudflare R2 bucket."""
 
 import contextlib
+import json
 import shutil
 import tempfile
 import time
@@ -10,6 +11,7 @@ from botocore.exceptions import ClientError
 
 from film_analysis.storage.catalog import (
     PLAY_IMAGE_KINDS,
+    PLAY_LAYOUT_KIND,
     TEAM_IMAGE_KINDS,
     CatalogError,
     team_media,
@@ -62,6 +64,25 @@ class R2Clips:
         if path.is_file() and path.stat().st_size:
             return path
         return None
+
+    def save_play_layout(
+        self, project_id: int, play_number: int, payload: dict[str, object]
+    ) -> str:
+        key = f"projects/{project_id}/plays/{play_number}-{PLAY_LAYOUT_KIND}.json"
+        with tempfile.NamedTemporaryFile(suffix=".json", mode="w", encoding="utf-8") as tmp:
+            tmp.write(json.dumps(payload))
+            tmp.flush()
+            return self._put(Path(tmp.name), key, "application/json")
+
+    def play_layout(self, project_id: int, play_number: int) -> dict[str, object] | None:
+        path = self._local(f"projects/{project_id}/plays/{play_number}-{PLAY_LAYOUT_KIND}.json")
+        if not path.is_file() or not path.stat().st_size:
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return raw if isinstance(raw, dict) else None
 
     def source_path(self, project_id: int) -> Path:
         return self._local(f"projects/{project_id}/source.mp4")

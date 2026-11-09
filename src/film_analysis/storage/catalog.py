@@ -41,6 +41,7 @@ TEAM_IMAGE_KINDS = frozenset(
 
 
 PLAY_IMAGE_KINDS = frozenset({"formation"})
+PLAY_LAYOUT_KIND = "formation-layout"
 
 
 def team_media(kind: str, suffix: str) -> tuple[str, str]:
@@ -555,6 +556,16 @@ class Catalog(Protocol):
     def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
         """Return a still for one play, when it has been stored."""
 
+    def save_play_layout(
+        self, project_id: int, play_number: int, payload: dict[str, object]
+    ) -> None:
+        """Store XY coords and football features for one formation plot."""
+
+    def play_layout(
+        self, project_id: int, play_number: int
+    ) -> dict[str, object] | None:
+        """Return the formation layout JSON for one play, when stored."""
+
     def save_poster(self, project_id: int, data: bytes) -> None:
         """Store the action still used as this film's thumbnail."""
 
@@ -587,6 +598,14 @@ class ClipStore(Protocol):
 
     def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
         """Return a still for one play, when one exists."""
+
+    def save_play_layout(
+        self, project_id: int, play_number: int, payload: dict[str, object]
+    ) -> str:
+        """Store formation XY JSON for one play and return its key."""
+
+    def play_layout(self, project_id: int, play_number: int) -> dict[str, object] | None:
+        """Return formation XY JSON for one play, when one exists."""
 
     def remove(self, project_id: int) -> None:
         """Delete every object for a project."""
@@ -643,6 +662,24 @@ class ClipDirectory:
         if path.is_file() and path.stat().st_size:
             return path
         return None
+
+    def save_play_layout(
+        self, project_id: int, play_number: int, payload: dict[str, object]
+    ) -> str:
+        dest = self._project(project_id) / "plays" / f"{play_number}-{PLAY_LAYOUT_KIND}.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(payload), encoding="utf-8")
+        return dest.relative_to(self.root).as_posix()
+
+    def play_layout(self, project_id: int, play_number: int) -> dict[str, object] | None:
+        path = self._project(project_id) / "plays" / f"{play_number}-{PLAY_LAYOUT_KIND}.json"
+        if not path.is_file() or not path.stat().st_size:
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return raw if isinstance(raw, dict) else None
 
     def source_path(self, project_id: int) -> Path:
         return self._project(project_id) / "source.mp4"
@@ -1303,6 +1340,17 @@ class MemoryCatalog:
         if self._find(project_id) is None:
             return None
         return self._clips.play_image(project_id, play_number, kind)
+
+    def save_play_layout(
+        self, project_id: int, play_number: int, payload: dict[str, object]
+    ) -> None:
+        self._require(project_id)
+        self._clips.save_play_layout(project_id, play_number, payload)
+
+    def play_layout(self, project_id: int, play_number: int) -> dict[str, object] | None:
+        if self._find(project_id) is None:
+            return None
+        return self._clips.play_layout(project_id, play_number)
 
     def _replace(self, project_id: int, updated: ProjectDetail) -> None:
         self._projects = [
@@ -2188,6 +2236,18 @@ class D1Catalog:
         if not self._project_exists(project_id):
             return None
         return self._clips.play_image(project_id, play_number, kind)
+
+    def save_play_layout(
+        self, project_id: int, play_number: int, payload: dict[str, object]
+    ) -> None:
+        if not self._project_exists(project_id):
+            raise CatalogError(f"Project {project_id} was not found.")
+        self._clips.save_play_layout(project_id, play_number, payload)
+
+    def play_layout(self, project_id: int, play_number: int) -> dict[str, object] | None:
+        if not self._project_exists(project_id):
+            return None
+        return self._clips.play_layout(project_id, play_number)
 
     def _query(self, sql: str, params: list[object] | None = None) -> list[dict[str, object]]:
         result = self._execute(sql, params)

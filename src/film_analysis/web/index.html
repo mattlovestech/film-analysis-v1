@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Film analysis</title>
+  <title>Opponent scouting</title>
   <style>
     :root {
       color-scheme: dark;
@@ -33,6 +33,9 @@
       border-bottom: 1px solid var(--line);
     }
     h1 { margin: 0; font-size: 1.5rem; font-weight: 650; letter-spacing: -0.03em; }
+    header h1 a { color: inherit; text-decoration: none; }
+    header h1 a:hover { color: #fff; }
+    header .tagline { margin: 0.2rem 0 0; font-size: 0.85rem; }
     h2 { margin: 2rem 0 0; font-size: 0.8rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
     .section-head {
       display: flex;
@@ -1292,19 +1295,15 @@
       text-transform: uppercase;
     }
     #report-settings #teams { margin: 0; }
-    #scout-side,
-    #report-options {
-      display: flex;
-      flex-wrap: wrap;
+    #scout-side {
+      display: grid;
       gap: 0.45rem;
       margin: 0;
       padding: 0;
       border: 0;
       min-width: 0;
     }
-    #scout-side { display: grid; gap: 0.45rem; }
-    #scout-side legend,
-    #report-options legend {
+    #scout-side legend {
       width: 100%;
       margin: 0 0 0.15rem;
       padding: 0;
@@ -1314,21 +1313,6 @@
       letter-spacing: 0.04em;
       text-transform: uppercase;
     }
-    #report-options label {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.45rem 0.75rem;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      cursor: pointer;
-    }
-    #report-options label:has(input:checked) {
-      border-color: transparent;
-      background: var(--gold);
-      color: #111;
-    }
-    #report-options input { accent-color: currentColor; }
     #report-settings .exports { margin: 0.15rem 0 0; }
     #report-view { margin: 1.15rem 0 0.4rem; }
     #report-view h3 {
@@ -1547,6 +1531,29 @@
     #report-analysis-table[data-formation="0"] td:nth-child(5) { display: none; }
     #report .exports { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
     #report .exports[hidden] { display: none; }
+    #film-exports {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem 0.9rem;
+      align-items: center;
+      margin: 0 0 1.1rem;
+    }
+    #film-exports[hidden] { display: none; }
+    #film-exports .export-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    #plays-zip {
+      display: inline-block;
+      padding: 0.75rem 1.15rem;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #111;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    #plays-zip:hover { filter: brightness(1.06); color: #111; }
     #report-downloads { margin-top: 1rem; }
     #report-generate { border-radius: 999px; padding: 0.75rem 1.2rem; }
     #report-generate:disabled { cursor: not-allowed; }
@@ -2105,53 +2112,74 @@
     #report #teams { margin: 0; }
     #report #teams-note {
       margin: 0;
-      max-width: 38rem;
-      color: var(--muted);
-      font-size: 0.84rem;
+      max-width: 40rem;
+      color: var(--ink);
+      font-size: 1rem;
       line-height: 1.4;
     }
-    #report #teams .team-row {
+    #report #teams-telemetry { display: none; }
+    #report #teams .team-row[role="radiogroup"] {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: 0.45rem;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+      align-items: stretch;
     }
     #report #teams .team-row[hidden] { display: none; }
     #report #teams .team-card {
       display: grid;
-      grid-template-columns: 2.6rem minmax(0, 1fr) auto;
-      gap: 0.65rem 0.75rem;
-      align-items: center;
-      padding: 0.55rem 0.65rem;
-      border-radius: 12px;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 0.75rem;
+      align-items: stretch;
+      align-content: start;
+      padding: 0.75rem;
+      border-radius: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.14);
       background: #111;
     }
     #report #teams .team-card.chosen {
       transform: none;
-      box-shadow: 0 0 0 1px var(--gold);
+      border-color: var(--gold);
+      box-shadow: 0 0 0 3px var(--gold);
     }
-    #report #teams .team-card.other { opacity: 0.72; }
+    #report #teams .team-card.other { opacity: 0.5; }
     #report #teams .team-meta {
       display: grid;
-      gap: 0.28rem;
+      gap: 0.45rem;
       min-width: 0;
     }
-    #report #teams .team-kicker {
-      margin: 0;
-      color: rgba(255, 255, 255, 0.4);
-      font-size: 0.68rem;
-      font-weight: 650;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-    #report #teams .team-kicker::before {
-      content: "id " attr(data-id);
-    }
+    #report #teams .team-kicker { display: none; }
     #report #teams .team-shots {
+      position: relative;
+      display: grid;
+      min-height: 16rem;
       gap: 0;
-      justify-items: center;
+      place-items: stretch;
+      overflow: hidden;
+      border-radius: 12px;
+      background:
+        linear-gradient(90deg, #1a1c20 25%, #2a2d33 50%, #1a1c20 75%);
+      background-size: 200% 100%;
     }
+    #report #teams .team-card.finding .team-shots { animation: activity-shimmer 1.2s ease-in-out infinite; }
+    #report #teams .team-card.finding .team-shots::before,
+    #report #teams .team-card.awaiting .team-shots::before {
+      content: "Finding a player";
+      display: grid;
+      place-items: center;
+      min-height: 16rem;
+      padding: 1rem;
+      color: var(--ink);
+      font-size: 1.05rem;
+      font-weight: 700;
+      text-align: center;
+    }
+    #report #teams .team-card.awaiting .team-shots {
+      animation: none;
+      background: #1a1c20;
+    }
+    #report #teams .team-card.awaiting .team-shots::before { content: "No photo yet"; }
     #report #teams .team-card img,
-    #report #teams .team-card .team-shots img,
     #report #teams .player-ghost {
       width: 2.6rem;
       height: 3.45rem;
@@ -2159,6 +2187,16 @@
       margin: 0;
       object-fit: cover;
       border-radius: 6px;
+      background: #0a0a0a;
+    }
+    #report #teams .team-card .team-shots img {
+      width: 100%;
+      height: 16rem;
+      aspect-ratio: auto;
+      margin: 0;
+      object-fit: cover;
+      object-position: center top;
+      border-radius: 12px;
       background: #0a0a0a;
     }
     #report #teams .team-colors {
@@ -2175,38 +2213,45 @@
     }
     #report #teams .team-card label {
       display: grid;
-      gap: 0.15rem;
+      gap: 0.3rem;
       color: var(--muted);
-      font-size: 0.62rem;
-      font-weight: 650;
+      font-size: 0.8rem;
+      font-weight: 700;
       letter-spacing: 0.03em;
       text-transform: uppercase;
     }
     #report #teams .team-card input {
       width: 100%;
       min-width: 0;
-      padding: 0.4rem 0.5rem;
+      min-height: 2.75rem;
+      padding: 0.65rem 0.75rem;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 10px;
       background: #0a0a0a;
       color: var(--ink);
       font: inherit;
-      font-size: 0.9rem;
+      font-size: 1.15rem;
+      font-weight: 650;
       letter-spacing: 0;
       text-transform: none;
     }
     #report #teams .team-card button.mine {
-      justify-self: end;
-      align-self: center;
-      width: auto;
-      min-width: 6.4rem;
-      gap: 0.35rem;
-      padding: 0.45rem 0.7rem;
-      font-size: 0.78rem;
+      justify-self: stretch;
+      align-self: end;
+      width: 100%;
+      min-height: 3.1rem;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      font-size: 1.05rem;
+      font-weight: 750;
     }
     #report #teams .team-card button.mine::before {
-      width: 0.7rem;
-      height: 0.7rem;
+      width: 1.05rem;
+      height: 1.05rem;
+    }
+    @media (max-width: 720px) {
+      #report #teams .team-row[role="radiogroup"] { grid-template-columns: 1fr; }
     }
     #report #teams .team-card .team-refresh {
       justify-self: start;
@@ -2497,18 +2542,21 @@
 <body>
   <main>
     <header>
-      <h1>Film analysis</h1>
+      <div class="brand">
+        <h1><a href="/projects">Opponent scouting</a></h1>
+        <p class="tagline">Break down an opponent's game film before you play them.</p>
+      </div>
       <nav>
         <a class="quiet" href="/projects">Projects</a>
         <a class="quiet" href="/activity">Activity</a>
         <a class="quiet" href="/settings">Settings</a>
-        <a id="new-analysis" href="/">New analysis</a>
+        <a id="new-analysis" href="/">Scout an opponent</a>
       </nav>
     </header>
     <p id="status" role="status"></p>
     <section id="composer">
-      <h2>New analysis</h2>
-      <p class="lead">Paste a YouTube link. The film is cut into plays.</p>
+      <h2>Scout an opponent</h2>
+      <p class="lead">Paste a YouTube link to your opponent's game. Each play is cut out and charted so you can see their formations and tendencies.</p>
       <p class="lead" id="start-place">This film will run on this computer.</p>
       <form id="upload">
         <div class="source primary">
@@ -2530,7 +2578,7 @@
         </div>
         <button type="submit" id="analyze" aria-busy="false">
           <span class="spin" hidden></span>
-          <span class="label">Analyze</span>
+          <span class="label">Scout this film</span>
         </button>
       </form>
     </section>
@@ -2543,13 +2591,13 @@
         </button>
       </div>
       <div id="project-filters" role="group" aria-label="Show films" hidden></div>
-      <p id="projects-lead" class="lead">Each film is cut into plays you can study on their own.</p>
+      <p id="projects-lead" class="lead">Opponent games you've scouted. Open one to study their plays, formations, and scouting report.</p>
       <p id="projects-summary" class="lead" hidden></p>
       <div id="projects-loading" hidden role="status" aria-live="polite">
         <p id="projects-loading-note">Loading your films…</p>
         <ul id="projects-loading-grid" aria-hidden="true"></ul>
       </div>
-      <p id="empty" class="lead" hidden>No films yet. Use New analysis to add a game. Each play is cut out so you can study it on its own.</p>
+      <p id="empty" class="lead" hidden>No opponents scouted yet. Use Scout an opponent to add their game film. Each play is cut out so you can study it on its own.</p>
       <p id="filter-empty" class="lead" hidden>No films in this view.</p>
       <ul id="projects"></ul>
     </section>
@@ -2738,6 +2786,10 @@
           <p class="stage-kicker">Scout report</p>
           <h2>Scouting report</h2>
           <p id="report-note" class="lead"></p>
+          <p id="film-exports" class="exports" hidden>
+            <a id="plays-zip" href="">Download all plays</a>
+            <span class="export-note">Every kept clip from this film, zipped for the team.</span>
+          </p>
           <section id="report-settings">
             <h3>Report settings</h3>
             <section id="teams">
@@ -2798,7 +2850,7 @@
                     </div>
                     <div class="team-meta">
                       <p id="team-left-kicker" class="team-kicker">Home</p>
-                      <label for="team-left-name">Name
+                      <label for="team-left-name">Team name
                         <input id="team-left-name" maxlength="40" autocomplete="off" placeholder="Home">
                       </label>
                       <ul id="team-left-colors" class="team-colors" hidden></ul>
@@ -2820,7 +2872,7 @@
                     </div>
                     <div class="team-meta">
                       <p id="team-right-kicker" class="team-kicker">Away</p>
-                      <label for="team-right-name">Name
+                      <label for="team-right-name">Team name
                         <input id="team-right-name" maxlength="40" autocomplete="off" placeholder="Away">
                       </label>
                       <ul id="team-right-colors" class="team-colors" hidden></ul>
@@ -2833,14 +2885,6 @@
                 <button id="teams-save" type="button" hidden>Save teams</button>
               </fieldset>
             </section>
-            <fieldset id="report-options">
-              <legend>Include</legend>
-              <label><input type="checkbox" name="section" value="tendencies" checked> Play tendency table</label>
-              <label><input type="checkbox" name="section" value="calls" checked> Run and pass</label>
-              <label><input type="checkbox" name="section" value="special" checked> Special teams</label>
-              <label><input type="checkbox" name="section" value="plays" checked> Each play</label>
-              <label><input type="checkbox" name="section" value="formations" checked> Formations</label>
-            </fieldset>
             <p class="exports">
               <button id="report-generate" type="button" disabled>Generate scouting report</button>
               <button id="report-reread" type="button" hidden>Read every play again</button>
@@ -2960,7 +3004,7 @@
     const reportNote = document.querySelector("#report-note");
     const reportGenerate = document.querySelector("#report-generate");
     const reportReread = document.querySelector("#report-reread");
-    const reportOptions = document.querySelector("#report-options");
+    const REPORT_SECTIONS = ["tendencies", "calls", "special", "plays", "formations"];
     const reportView = document.querySelector("#report-view");
     const reportLive = document.querySelector("#report-live");
     const reportLiveNote = document.querySelector("#report-live-note");
@@ -3135,7 +3179,7 @@
       let body;
       if (hasFile) body = new FormData(form);
       else body = new URLSearchParams(saved ? { saved } : { youtube: link });
-      status.textContent = runningPlace() === "cloud" ? "Starting on Cloudflare…" : "Starting…";
+      status.textContent = "Starting…";
       setAnalyzeBusy(true);
       try {
         const response = await fetch(endpoint("/analyze"), { method: "POST", body });
@@ -3165,9 +3209,7 @@
       button.disabled = busy;
       button.setAttribute("aria-busy", busy ? "true" : "false");
       spin.hidden = !busy;
-      label.textContent = busy
-        ? (runningPlace() === "cloud" ? "Starting on Cloudflare…" : "Starting…")
-        : "Analyze";
+      label.textContent = busy ? "Starting…" : "Scout this film";
     }
 
     const PLACE_KEY = "film-analysis-place";
@@ -3239,7 +3281,7 @@
         openStage(stageFromScreen(film.screen));
         return;
       }
-      document.title = "Film analysis";
+      document.title = "Opponent scouting";
       const playMatch = location.pathname.match(/^\/play\/([^/]+)$/);
       if (playMatch) {
         await showPlay(decodeURIComponent(playMatch[1]));
@@ -4224,7 +4266,7 @@
 
     async function showAnalyses() {
       const token = ++watch;
-      document.title = "Projects · Film analysis";
+      document.title = "Projects · Opponent scouting";
       useLibraryLayout(true);
       composer.hidden = true;
       historySection.hidden = false;
@@ -4466,7 +4508,7 @@
 
     async function showActivity() {
       const token = ++watch;
-      document.title = "Activity · Film analysis";
+      document.title = "Activity · Opponent scouting";
       useLibraryLayout(false);
       composer.hidden = true;
       historySection.hidden = true;
@@ -4845,9 +4887,8 @@
 
     function paintStartPlace() {
       const cloud = runningPlace() === "cloud";
-      startPlace.textContent = cloud
-        ? "This film will run on Cloudflare."
-        : "This film will run on this computer.";
+      startPlace.hidden = cloud;
+      startPlace.textContent = "This film will run on this computer.";
     }
 
     function paintRun(payload) {
@@ -4880,17 +4921,12 @@
     function paintFormations(on) {
       const box = document.querySelector("#formation-reads");
       if (box) box.checked = on;
-      if (box && box.dataset.synced === "1") return;
-      const choice = reportOptions.querySelector('input[value="formations"]');
-      if (choice) choice.checked = on;
       if (box) box.dataset.synced = "1";
     }
 
     async function saveFormations() {
       const box = document.querySelector("#formation-reads");
       const on = Boolean(box && box.checked);
-      const choice = reportOptions.querySelector('input[value="formations"]');
-      if (choice) choice.checked = on;
       if (box) box.dataset.synced = "1";
       let response;
       try {
@@ -5067,7 +5103,7 @@
 
     async function showSettings() {
       ++watch;
-      document.title = "Settings · Film analysis";
+      document.title = "Settings · Opponent scouting";
       useLibraryLayout(false);
       composer.hidden = true;
       historySection.hidden = true;
@@ -6427,7 +6463,7 @@
         paintMineChoice();
       }
       const teams = project.teams;
-      const pictured = Boolean(teams && teams.left_player && teams.right_player);
+      const pictured = Boolean(teams && (teams.left_player || teams.right_player));
       const building = teamsSection.dataset.loading === String(project.project);
       selectTeamButton.hidden = false;
       selectTeamButton.disabled = building;
@@ -6456,6 +6492,35 @@
       for (const button of teamsSection.querySelectorAll(".team-refresh")) {
         button.hidden = !open;
       }
+      if (open) markTeamCardPhotos();
+    }
+
+    function anyPlayerPhoto() {
+      const left = document.querySelector("#team-left-player");
+      const right = document.querySelector("#team-right-player");
+      return Boolean(left.getAttribute("src") || right.getAttribute("src"));
+    }
+
+    function teamCardsOpen() {
+      return playersReady()
+        || anyPlayerPhoto()
+        || teamsSection.dataset.asked === "1"
+        || Boolean(selectedTeamSide());
+    }
+
+    function markTeamCardPhotos() {
+      const finding = teamsSection.dataset.loading === String(results.dataset.project || "");
+      for (const side of ["left", "right"]) {
+        const img = document.querySelector(`#team-${side}-player`);
+        const card = teamsSection.querySelector(
+          `.team-row[role="radiogroup"] .team-card[data-side="${side}"]`,
+        );
+        if (!card || !img) continue;
+        const missing = !img.getAttribute("src");
+        card.classList.toggle("finding", finding && missing);
+        card.classList.toggle("awaiting", !finding && missing);
+      }
+      paintMineChoice();
     }
 
     function playersReady() {
@@ -6543,9 +6608,14 @@
         paintTeamColors(side, teams[`${side}_colors`]);
       }
       paintMineChoice();
-      teamsNote.textContent = teams.left_player && teams.right_player
-        ? "Each side has an id from the film. Name them for the report, then pick who you are scouting so offense and defense line up."
-        : "Finding one player from each team.";
+      if (!teams.left_player && !teams.right_player) {
+        teamsNote.textContent = "Finding one player from each team.";
+      } else if (!selectedTeamSide()) {
+        teamsNote.textContent = "Name each team, then tap the one you are scouting.";
+      } else {
+        teamsNote.textContent = "Each side has an id from the film. Name them for the report, then pick who you are scouting so offense and defense line up.";
+      }
+      markTeamCardPhotos();
     }
 
     function paintTeamColors(side, colors) {
@@ -6581,7 +6651,7 @@
         const kicker = document.querySelector(`#team-${side}-kicker`);
         kicker.dataset.id = card?.dataset.teamId || side;
         kicker.textContent = "";
-        button.textContent = selected ? "Scouting" : "Scout";
+        button.textContent = selected ? "Scouting this team" : "Scout this team";
         button.setAttribute(
           "aria-label",
           selected
@@ -6781,7 +6851,7 @@
 
     async function loadLineup(projectId, again = false, side = null) {
       const keepCards = again && (playersReady() || teamsNamed());
-      const showing = keepCards || teamsNamed() || (playersReady() && !again);
+      const showing = keepCards || teamsNamed() || teamCardsOpen() || (playersReady() && !again);
       teamsSection.dataset.loading = String(projectId);
       if (again) teamsSection.dataset.refreshing = "1";
       selectTeamButton.disabled = true;
@@ -6913,8 +6983,8 @@
           button.textContent = "New photo";
         }
         releaseTeamRefresh();
-        if (!playersReady()) showTeamChoices(false);
-        else if (studio.dataset.stage === "report") showTeamChoices(true);
+        if (teamCardsOpen()) showTeamChoices(true);
+        else showTeamChoices(false);
         if (studio.dataset.stage === "report") paintStageCopy("report");
         paintDock();
       }
@@ -6962,7 +7032,20 @@
         if (reportLinkStep) reportLinkStep.setAttribute("aria-disabled", "false");
         paintStageCopy("report");
         paintDock();
+        const pending = reportBox.dataset.pendingReport === "1";
+        const finding = reportGenerate.dataset.finding === "1";
         teamSave = saveTeams({ redraw: false, previousSide });
+        if (pending && !finding) {
+          teamSave.then(() => {
+            if (
+              reportBox.dataset.pendingReport === "1"
+              && selectedTeamSide()
+              && teamsError.hidden
+            ) {
+              enableReportDownload();
+            }
+          });
+        }
       });
     }
     for (const card of teamsSection.querySelectorAll('.team-row[role="radiogroup"] .team-card')) {
@@ -7078,8 +7161,7 @@
         paintReport(payload);
         paintChart(payload);
         if (hadReport) {
-          const sections = (reportBox.dataset.sections || "").split(",").filter(Boolean);
-          await loadFinishedReport(projectId, sections.length ? sections : reportSelection());
+          await loadFinishedReport(projectId, reportSelection());
         }
       } catch (error) {
         if (options.previousSide && options.previousSide !== (mine ? mine.dataset.side : "")) {
@@ -7546,9 +7628,8 @@
         showPlayUpdate(payload);
         const projectId = payload.project || results.dataset.project;
         if (projectId && reportBox.dataset.ready === String(projectId)) {
-          const sections = (reportBox.dataset.sections || "").split(",").filter(Boolean);
           try {
-            await loadFinishedReport(projectId, sections);
+            await loadFinishedReport(projectId, reportSelection());
           } catch {
             /* the next generate reads the plays that are still included */
           }
@@ -7668,20 +7749,7 @@
     }
 
     function beginTeams() {
-      const projectId = results.dataset.project;
-      if (!projectId) return;
-      if (teamsNamed() || playersReady()) {
-        showTeamChoices(true);
-        if (!playersReady() && teamsSection.dataset.loading !== String(projectId)) {
-          loadLineup(projectId);
-        }
-        return;
-      }
-      if (teamsSection.dataset.loading === String(projectId)) {
-        showTeamChoices(false);
-        return;
-      }
-      loadLineup(projectId);
+      if (teamCardsOpen()) showTeamChoices(true);
     }
 
     function sideName(side) {
@@ -7704,8 +7772,8 @@
           return;
         }
         chartNote.textContent = mine
-          ? "Choose what goes into the scouting report."
-          : "Name each side (Home / Away by default), pick who is scouted, then what to include.";
+          ? "Generate the scouting report. It includes every section."
+          : "Name each side (Home / Away by default), then pick who is scouted.";
         return;
       }
       if (stage === "review") {
@@ -7925,7 +7993,6 @@
       }
       const labeled = reportBox.dataset.labeled === "1";
       const saved = reportBox.dataset.saved === "1";
-      const picked = reportSelection();
       reportBox.hidden = studio.dataset.stage !== "report";
       const haveReport = saved
         && reportBox.dataset.ready === String(project.project)
@@ -7935,10 +8002,12 @@
       const missed = Number(reportBox.dataset.missed || 0);
       const kept = Number(reportBox.dataset.kept || 0);
       reportGenerate.hidden = false;
-      reportGenerate.disabled = !saved || busy || picked.length === 0;
+      const findingPlayers = reportGenerate.dataset.finding === "1"
+        || teamsSection.dataset.loading === String(project.project);
+      reportGenerate.disabled = busy || findingPlayers;
       reportReread.hidden = !(haveReport || kept || canResume);
       reportReread.disabled = busy;
-      if (!busy) {
+      if (!busy && !findingPlayers) {
         reportGenerate.textContent = canResume
           ? missed
             ? `Try ${missed} missed ${missed === 1 ? "play" : "plays"}`
@@ -7951,8 +8020,7 @@
       for (const button of teamsSection.querySelectorAll("button.mine")) {
         button.disabled = busy || live;
       }
-      const savedSections = reportBox.dataset.sections || "";
-      const query = savedSections ? `?sections=${encodeURIComponent(savedSections)}` : "";
+      const query = `?sections=${encodeURIComponent(reportSelection().join(","))}`;
       reportLink.href = `/api/projects/${project.project}/report.pdf${query}`;
       reportCsv.href = `/api/projects/${project.project}/report.csv${query}`;
       if (
@@ -7992,11 +8060,9 @@
           : "The report is below. Click a play to watch the clip and the tags beside it."
         : canResume
           ? leftoverNote()
-          : !labeled
-            ? "Name each side, then pick who is being scouted so offense and defense line up."
-            : picked.length
-              ? "Generate the scouting report. You can leave and come back while it reads."
-              : "Choose at least one part of the report.";
+            : !labeled
+            ? "Hit generate. We find one player from each team, then you name them and tap who you are scouting."
+            : "Generate the scouting report. You can leave and come back while it reads.";
     }
 
     async function resumeReportProgress(projectId) {
@@ -8007,24 +8073,16 @@
       reportBox.dataset.checking = "1";
       try {
         const sections = reportSelection();
-        const saved = reportBox.dataset.sections
-          ? reportBox.dataset.sections.split(",").filter(Boolean)
-          : sections;
-        const query = saved.length ? `?sections=${encodeURIComponent(saved.join(","))}` : "";
+        const query = `?sections=${encodeURIComponent(sections.join(","))}`;
         const response = await fetch(`/api/projects/${projectId}/report/analysis${query}`);
         if (!response.ok) return;
         const body = await response.json();
-        if (Array.isArray(body.sections) && body.sections.length && !reportBox.dataset.sections) {
-          reportBox.dataset.sections = body.sections.join(",");
-          for (const input of reportOptions.querySelectorAll("input")) {
-            input.checked = body.sections.includes(input.value);
-          }
-        }
+        if (!reportBox.dataset.sections) reportBox.dataset.sections = sections.join(",");
         const analysis = body.analysis || [];
         if (body.running) {
-          beginReportLive(projectId, saved.length ? saved : sections, false);
+          beginReportLive(projectId, sections, false);
           paintAnalysis(body);
-          watchReportFinish(projectId, saved.length ? saved : sections);
+          watchReportFinish(projectId, sections);
           return;
         }
         if (body.can_resume) {
@@ -8045,7 +8103,7 @@
         }
         delete reportBox.dataset.resume;
         if (analysis.length && body.done > 0 && body.done >= body.total && !reportOnPage()) {
-          await loadFinishedReport(projectId, saved.length ? saved : sections);
+          await loadFinishedReport(projectId, sections);
         }
       } catch {
         /* keep the idle report screen */
@@ -8086,11 +8144,46 @@
 
     async function enableReportDownload() {
       const projectId = results.dataset.project;
-      if (!projectId || reportBox.dataset.labeled !== "1" || reportGenerate.dataset.busy === "1") {
+      if (!projectId || reportGenerate.dataset.busy === "1" || reportGenerate.dataset.finding === "1") {
         return;
       }
       const sections = reportSelection();
       if (!sections.length) return;
+      if (!playersReady()) {
+        const alreadyPicked = Boolean(selectedTeamSide());
+        if (!alreadyPicked) reportBox.dataset.pendingReport = "1";
+        teamsSection.dataset.asked = "1";
+        reportGenerate.dataset.finding = "1";
+        reportGenerate.disabled = true;
+        reportGenerate.textContent = "Finding players…";
+        showTeamChoices(true);
+        document.querySelector("#scout-side")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        await loadLineup(projectId);
+        delete reportGenerate.dataset.finding;
+        if (results.dataset.project !== String(projectId)) return;
+        if (teamSave) {
+          try { await teamSave; } catch { /* saveTeams shows the error */ }
+        }
+        if (!selectedTeamSide()) {
+          if (teamsError.hidden) {
+            teamsNote.textContent = "Name each team, then tap the one you are scouting.";
+          }
+          showTeamChoices(true);
+          reportGenerate.disabled = false;
+          reportGenerate.textContent = "Generate scouting report";
+          document.querySelector("#scout-side")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          return;
+        }
+      } else if (!selectedTeamSide()) {
+        reportBox.dataset.pendingReport = "1";
+        teamsSection.dataset.asked = "1";
+        showTeamChoices(true);
+        teamsNote.textContent = "Name each team, then tap the one you are scouting.";
+        document.querySelector("#scout-side")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        return;
+      }
+      if (reportBox.dataset.labeled !== "1") return;
+      delete reportBox.dataset.pendingReport;
       const restart = reportGenerate.dataset.restart === "1";
       const plays = reportPlayList();
       delete reportGenerate.dataset.restart;
@@ -8336,17 +8429,7 @@
     }
 
     function reportSelection() {
-      return [...reportOptions.querySelectorAll("input:checked")].map((input) => input.value);
-    }
-
-    function reportSectionName(section) {
-      return {
-        calls: "run and pass",
-        special: "special teams",
-        tendencies: "the play tendency table",
-        plays: "each play",
-        formations: "offensive formations",
-      }[section] || section;
+      return REPORT_SECTIONS.slice();
     }
 
     async function readReportStream(body) {
@@ -8869,16 +8952,6 @@
       }
       grid.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-
-    reportOptions.addEventListener("change", () => {
-      if (!results.dataset.project) return;
-      paintReport({
-        status: "ready",
-        project: results.dataset.project,
-        plays: [{}],
-        teams: reportBox.dataset.side ? { mine: reportBox.dataset.side } : null,
-      });
-    });
 
     function refreshReport() {
       if (review.hidden || !results.dataset.project) return;

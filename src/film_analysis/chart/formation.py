@@ -13,7 +13,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from film_analysis.chart.formation_plot import FormationLayout, plot_formation
+from film_analysis.chart.formation_features import extract_features, features_to_dict
+from film_analysis.chart.formation_plot import FormationLayout, layout_payload, plot_formation
 from film_analysis.plays.boundaries import DEFAULT_MODEL
 from film_analysis.teams.uniforms import Uniform, uniform_line
 
@@ -77,6 +78,7 @@ class FormationRead:
     plot: bytes = b""
     frame: bytes = b""
     guessed: int = 0
+    layout: dict[str, object] | None = None
 
 
 def formation_prompt(
@@ -119,6 +121,8 @@ def read_formation(
     offense: Uniform,
     defense: Uniform,
     call: str = "",
+    *,
+    focus: str = "offense",
 ) -> FormationRead | None:
     """Name the formation after the call is known, using an 11-on-11 plot.
 
@@ -134,7 +138,13 @@ def read_formation(
     ]
     if not jpegs:
         return None
-    layout = plot_formation(jpegs, offense, defense)
+    layout = plot_formation(jpegs, offense, defense, focus=focus)
+    features = (
+        features_to_dict(extract_features(layout.offense, layout.defense))
+        if layout is not None
+        else {}
+    )
+    sketch = str(features.get("sketch") or "")
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         if layout is None:
@@ -144,15 +154,16 @@ def read_formation(
             plot=layout.plot,
             frame=layout.frame,
             guessed=layout.guessed,
+            layout=layout_payload(layout, features=features, focus=focus),
         )
     # The plot is kept for a person to check, but a plot made mostly of guesses
     # only misleads the read, so the model then sees the film frames alone.
     show_plot = layout is not None and layout.guessed <= _PLOT_GUESS_LIMIT
+    prompt = formation_prompt(offense, defense, play_call, plot=show_plot)
+    if sketch and sketch != "unknown":
+        prompt += f" Structural read from the plot: {sketch}."
     content: list[dict[str, object]] = [
-        {
-            "type": "text",
-            "text": formation_prompt(offense, defense, play_call, plot=show_plot),
-        },
+        {"type": "text", "text": prompt},
     ]
     for index, frame in enumerate(jpegs[:4], start=1):
         content.append({"type": "text", "text": f"Frame {index}"})
@@ -179,6 +190,7 @@ def read_formation(
             plot=layout.plot,
             frame=layout.frame,
             guessed=layout.guessed,
+            layout=layout_payload(layout, features=features, focus=focus),
         )
     texts = [
         block.text
@@ -187,6 +199,11 @@ def read_formation(
     ]
     named = parse_formation("\n".join(texts)) or ""
     usage = getattr(message, "usage", None)
+    payload = (
+        layout_payload(layout, features=features, ai_guess=named, focus=focus)
+        if layout is not None
+        else None
+    )
     return FormationRead(
         named,
         int(getattr(usage, "input_tokens", 0) or 0),
@@ -195,6 +212,7 @@ def read_formation(
         layout.plot if layout is not None else b"",
         layout.frame if layout is not None else b"",
         layout.guessed if layout is not None else 0,
+        payload,
     )
 
 

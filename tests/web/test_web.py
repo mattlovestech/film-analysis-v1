@@ -117,9 +117,11 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="saved"' in response.text
     assert "Downloaded film" in response.text
     assert 'id="new-analysis" href="/"' in response.text
+    assert '<h1><a href="/projects">Opponent scouting</a></h1>' in response.text
+    assert ">Scout an opponent<" in response.text
     assert 'href="/projects"' in response.text
     assert ">Projects<" in response.text
-    assert "Each film is cut into plays you can study on their own." in response.text
+    assert "Opponent games you've scouted." in response.text
     assert 'id="project-filters"' in response.text
     assert "Put back" in response.text
     assert 'id="refresh-analyses"' in response.text
@@ -131,7 +133,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "Charting a play comes later, after its clip is final." in response.text
     assert "keeps that map on the play page" in response.text
     assert "Read offensive formations" in response.text
-    assert 'value="formations" checked' in response.text
+    assert 'id="formation-reads" type="checkbox" checked' in response.text
     assert "Experimental, and last." not in response.text
     assert '<span class="experimental">Experimental</span>' not in response.text
     assert 'id="activity-loading"' in response.text
@@ -161,8 +163,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "Jobs run on this computer." in response.text
     assert "Requests go to Cloudflare." in response.text
     assert "This page stays here. Starting a film sends that job to Cloudflare." in response.text
-    assert "This film will run on Cloudflare." in response.text
-    assert "Starting on Cloudflare" in response.text
+    assert "Starting on Cloudflare" not in response.text
     assert 'id="analyze"' in response.text
     assert 'aria-busy="false"' in response.text
     assert "location.assign" not in response.text
@@ -194,10 +195,10 @@ def test_page_offers_a_video_upload() -> None:
     assert "Scouting report" in response.text
     assert 'id="report-generate"' in response.text
     assert "Generate scouting report" in response.text
-    assert 'id="report-options"' in response.text
-    assert "Play tendency table" in response.text
-    assert "Run and pass" in response.text
-    assert "Each play" in response.text
+    assert 'id="report-options"' not in response.text
+    assert "Play tendency table" not in response.text
+    assert "Choose at least one part of the report." not in response.text
+    assert 'const REPORT_SECTIONS = ["tendencies", "calls", "special", "plays", "formations"]' in response.text
     assert 'id="report-view"' in response.text
     assert 'id="report-analysis-table"' in response.text
     assert "Scouting analysis" in response.text
