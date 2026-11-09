@@ -142,6 +142,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "location.assign" not in response.text
     assert "Cloud · 1 worker" in response.text
     assert 'id="teams"' in response.text
+    assert "Select team" in response.text
     assert "This is my team" in response.text
     assert "A generated player for each school." in response.text
     assert 'id="report"' in response.text

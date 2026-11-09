@@ -65,6 +65,7 @@ from film_analysis.web.teams import (
     focus_player,
     lineup_moment,
     make_portrait,
+    portrait_uniform,
     play_frames,
     split_lineup,
     suggest_team_names,
@@ -137,6 +138,7 @@ class _TeamNames(BaseModel):
     left_name: str = ""
     right_name: str = ""
     mine: str | None = None
+    redraw: bool = True
 
     @field_validator("left_name", "right_name")
     @classmethod
@@ -454,7 +456,8 @@ def create_app(
             _store_lineup(catalog, saved, draw_lineup)
             _remember_team_names(catalog, saved)
         named = _named_sides(catalog, saved, body)
-        _store_portraits(catalog, project_id, named, draw_portrait)
+        if body.redraw or not _players_saved(catalog, project_id):
+            _store_portraits(catalog, project_id, named, draw_portrait)
         try:
             catalog.set_film_teams(project_id, named)
         except CatalogError as error:
@@ -1128,7 +1131,6 @@ def _watch_film(
             on_review=mark_review,
             on_counts=on_counts,
         )
-        start_team_analysis(catalog, project_id, lineup, portrait)
         _progress(catalog, project_id, "ready", length, length, None)
         _save_activity(catalog, project_id, "ready", running=False)
     except (Exception, SystemExit) as error:
@@ -1843,6 +1845,12 @@ def _named_sides(catalog: Catalog, project: ProjectDetail, body: _TeamNames) -> 
     return FilmTeams(left, right, body.mine, uniforms)
 
 
+def _players_saved(catalog: Catalog, project_id: int) -> bool:
+    return _still_bytes(catalog, project_id, "left-player") is not None and _still_bytes(
+        catalog, project_id, "right-player"
+    ) is not None
+
+
 def _still_bytes(catalog: Catalog, project_id: int, kind: str) -> bytes | None:
     try:
         path = catalog.team_image(project_id, kind)
@@ -1874,8 +1882,8 @@ def _store_portraits(
             )
         )
     wearing = (
-        Uniform(teams.left_name or pair[0].name, pair[0].jersey, pair[0].pants, pair[0].helmet),
-        Uniform(teams.right_name or pair[1].name, pair[1].jersey, pair[1].pants, pair[1].helmet),
+        portrait_uniform(pair[0], teams.left_name),
+        portrait_uniform(pair[1], teams.right_name),
     )
     try:
         for side, uniform in zip(("left", "right"), wearing, strict=True):

@@ -1275,7 +1275,7 @@
       box-shadow: inset 0 0 0 2px #111;
     }
     .team-card.other button.mine { color: var(--muted); }
-    #teams-save { margin-top: 0.85rem; }
+    #select-team, #teams-save { margin-top: 0.85rem; }
     #teams-error { color: #ff9f0a; }
     @media (max-width: 700px) {
       .team-row { grid-template-columns: 1fr; }
@@ -1431,7 +1431,7 @@
             <button type="button" data-target="plays-heading">Review plays<span>Optional</span></button>
           </li>
           <li data-step="teams">
-            <button type="button" data-target="teams">Tag teams<span></span></button>
+            <button type="button" data-target="teams">Select team<span></span></button>
           </li>
           <li data-step="report">
             <button type="button" data-target="report">Generate scouting report<span></span></button>
@@ -1454,9 +1454,10 @@
       </section>
       <section id="teams" hidden>
         <h2>Teams</h2>
-        <p id="teams-note" class="lead">A generated player for each school.</p>
-        <p id="mine-ask" class="mine-ask">Which generated player is your team?</p>
-        <div class="team-row" role="radiogroup" aria-labelledby="mine-ask">
+        <p id="teams-note" class="lead">Plays are finished. Select team to build the two players.</p>
+        <button id="select-team" type="button">Select team</button>
+        <p id="mine-ask" class="mine-ask" hidden>Which generated player is your team?</p>
+        <div class="team-row" role="radiogroup" aria-labelledby="mine-ask" hidden>
           <article class="team-card">
             <p id="team-left-kicker" class="team-kicker">First school</p>
             <img id="team-left-player" class="player" alt="Generated player for the first school" hidden>
@@ -1480,7 +1481,7 @@
         </div>
         <p id="teams-error" class="lead" hidden></p>
         <button id="teams-retry" class="retry" type="button" hidden>Generate the players again</button>
-        <button id="teams-save" type="button">Save teams</button>
+        <button id="teams-save" type="button" hidden>Save teams</button>
       </section>
       <div id="report" hidden>
         <h2>Scouting report</h2>
@@ -1522,6 +1523,8 @@
     const teamsNote = document.querySelector("#teams-note");
     const teamsError = document.querySelector("#teams-error");
     const teamsSave = document.querySelector("#teams-save");
+    const selectTeamButton = document.querySelector("#select-team");
+    const mineAsk = document.querySelector("#mine-ask");
     const teamsRetry = document.querySelector("#teams-retry");
     const reportBox = document.querySelector("#report");
     const reportNote = document.querySelector("#report-note");
@@ -3905,14 +3908,40 @@
         paintMineChoice();
       }
       const teams = project.teams;
-      if (teams && (teams.left_still || teams.right_still || teams.left_player || teams.right_player)) {
-        fillTeams(project.project, teams);
-      }
-      const tried = teamsSection.dataset.named === String(project.project);
       const pictured = Boolean(teams && teams.left_player && teams.right_player);
-      if (tried || (pictured && !placeholderTeams(teams))) return;
-      if (teamsSection.dataset.loading === String(project.project)) return;
-      loadLineup(project.project);
+      const building = teamsSection.dataset.loading === String(project.project);
+      selectTeamButton.hidden = false;
+      selectTeamButton.disabled = building;
+      selectTeamButton.textContent = building ? "Building players…" : "Select team";
+      if (pictured) {
+        fillTeams(project.project, teams);
+        showTeamChoices(true);
+        return;
+      }
+      if (!building) showTeamChoices(false);
+    }
+
+    function showTeamChoices(open) {
+      mineAsk.hidden = !open;
+      teamsSection.querySelector(".team-row").hidden = !open;
+      teamsSave.hidden = !open;
+    }
+
+    function playersReady() {
+      const left = document.querySelector("#team-left-player");
+      const right = document.querySelector("#team-right-player");
+      return Boolean(left.getAttribute("src") && right.getAttribute("src"));
+    }
+
+    function chooseTeam() {
+      const projectId = results.dataset.project;
+      if (!projectId || selectTeamButton.disabled) return;
+      if (playersReady()) {
+        showTeamChoices(true);
+        teamsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      loadLineup(projectId);
     }
 
     function fillTeams(projectId, teams) {
@@ -3987,7 +4016,9 @@
 
     async function loadLineup(projectId) {
       teamsSection.dataset.loading = String(projectId);
-      teamsNote.textContent = "Building a generated player for each school.";
+      selectTeamButton.disabled = true;
+      selectTeamButton.textContent = "Building players…";
+      teamsNote.textContent = "Reading the plays and building a player for each uniform.";
       teamsError.hidden = true;
       teamsRetry.hidden = true;
       try {
@@ -3999,6 +4030,7 @@
         if (results.dataset.project === String(projectId)) {
           fillTeams(projectId, payload.teams);
           teamsSection.dataset.named = String(projectId);
+          showTeamChoices(true);
         }
       } catch (error) {
         if (results.dataset.project !== String(projectId)) return;
@@ -4008,6 +4040,8 @@
         teamsRetry.hidden = false;
       } finally {
         if (teamsSection.dataset.loading === String(projectId)) delete teamsSection.dataset.loading;
+        selectTeamButton.disabled = false;
+        selectTeamButton.textContent = "Select team";
       }
     }
 
@@ -4017,11 +4051,32 @@
           other.setAttribute("aria-pressed", other === mine ? "true" : "false");
         }
         paintMineChoice();
+        const projectId = results.dataset.project;
+        if (!projectId) return;
+        if (reportBox.dataset.side && reportBox.dataset.side !== mine.dataset.side) {
+          delete reportBox.dataset.ready;
+          delete reportBox.dataset.saved;
+        }
+        reportBox.dataset.project = String(projectId);
+        reportBox.dataset.side = mine.dataset.side;
+        reportBox.dataset.labeled = "1";
+        reportBox.hidden = false;
+        const ready = reportBox.dataset.ready === String(projectId);
+        reportGenerate.hidden = ready;
+        reportLink.hidden = !ready;
+        reportCsv.hidden = !ready;
+        reportGenerate.disabled = true;
+        reportNote.textContent = ready
+          ? reportNote.textContent
+          : "Saving your team. The scouting report can be generated next.";
+        reportBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        saveTeams({ redraw: false });
       });
     }
     for (const name of teamsSection.querySelectorAll("input")) {
       name.addEventListener("input", () => paintMineChoice());
     }
+    selectTeamButton.addEventListener("click", () => chooseTeam());
     teamsRetry.addEventListener("click", () => {
       if (results.dataset.project) loadLineup(results.dataset.project);
     });
@@ -4034,6 +4089,7 @@
       const button = event.target.closest("button[data-target]");
       if (!button) return;
       if (button.dataset.target === "plays-heading") setPlaysOpen(true);
+      if (button.dataset.target === "teams") chooseTeam();
       if (button.dataset.target === "report") enableReportDownload();
       const target = document.getElementById(button.dataset.target);
       if (target && !target.hidden) target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -4047,14 +4103,15 @@
       }
     }
 
-    async function saveTeams() {
+    async function saveTeams(options = {}) {
       const projectId = results.dataset.project;
       const left = document.querySelector("#team-left-name").value.trim();
       const right = document.querySelector("#team-right-name").value.trim();
       const mine = teamsSection.querySelector('button.mine[aria-pressed="true"]');
+      const redraw = options.redraw !== false;
       teamsSave.disabled = true;
       teamsError.hidden = true;
-      teamsNote.textContent = "Building a generated player for each school.";
+      if (redraw) teamsNote.textContent = "Building a generated player for each school.";
       try {
         const response = await fetch(`/api/projects/${projectId}/teams`, {
           method: "POST",
@@ -4063,6 +4120,7 @@
             left_name: left,
             right_name: right,
             mine: mine ? mine.dataset.side : null,
+            redraw,
           }),
         });
         const payload = await readBody(response);
@@ -4076,6 +4134,7 @@
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
         teamsNote.textContent = "A generated player for each school.";
+        if (!redraw) reportNote.textContent = error.message || "Could not save that team.";
       } finally {
         teamsSave.disabled = false;
       }
@@ -4275,7 +4334,8 @@
       const reviewDone = reviewed === plays.length;
       if ("teams" in project) {
         const mine = project.teams && project.teams.mine;
-        chartProgress.dataset.teams = mine === "left" || mine === "right" ? "1" : "";
+        if (mine === "left" || mine === "right") chartProgress.dataset.teams = "1";
+        else if (!selectedTeamSide()) chartProgress.dataset.teams = "";
       }
       const teamsDone = chartProgress.dataset.teams === "1";
       const reportReady = teamsDone && reportBox.dataset.ready === String(project.project);
@@ -4318,27 +4378,48 @@
       else item.removeAttribute("aria-current");
     }
 
+    function selectedTeamSide() {
+      const chosen = teamsSection.querySelector('button.mine[aria-pressed="true"]');
+      return chosen ? chosen.dataset.side : "";
+    }
+
     function paintReport(project) {
       const plays = project.plays || [];
-      const show = project.status === "ready" && plays.length > 0;
-      reportBox.hidden = !show;
-      if (!show) return;
+      const filmReady = project.status === "ready" && plays.length > 0;
+      if (!filmReady) {
+        reportBox.hidden = true;
+        return;
+      }
       if (reportBox.dataset.project !== String(project.project)) {
         reportBox.dataset.project = String(project.project);
         delete reportBox.dataset.ready;
         delete reportBox.dataset.plays;
         delete reportBox.dataset.labeled;
+        delete reportBox.dataset.side;
       }
       if ("teams" in project) {
         const mine = project.teams && project.teams.mine;
-        reportBox.dataset.labeled = mine === "left" || mine === "right" ? "1" : "";
-        if (reportBox.dataset.labeled !== "1") delete reportBox.dataset.ready;
+        if (mine === "left" || mine === "right") {
+          if (reportBox.dataset.side && reportBox.dataset.side !== mine) {
+            delete reportBox.dataset.ready;
+          }
+          reportBox.dataset.side = mine;
+          reportBox.dataset.labeled = "1";
+          reportBox.dataset.saved = "1";
+        } else if (!selectedTeamSide()) {
+          reportBox.dataset.labeled = "";
+          delete reportBox.dataset.ready;
+          delete reportBox.dataset.side;
+          delete reportBox.dataset.saved;
+        }
       }
       const labeled = reportBox.dataset.labeled === "1";
-      const ready = labeled && reportBox.dataset.ready === String(project.project);
+      const saved = reportBox.dataset.saved === "1";
+      reportBox.hidden = !labeled;
+      const ready = saved && reportBox.dataset.ready === String(project.project);
       const busy = reportGenerate.dataset.busy === "1";
       reportGenerate.hidden = ready;
-      reportGenerate.disabled = !labeled || busy;
+      reportGenerate.disabled = !saved || busy;
       if (!busy) reportGenerate.textContent = "Generate scouting report";
       reportLink.hidden = !ready;
       reportCsv.hidden = !ready;

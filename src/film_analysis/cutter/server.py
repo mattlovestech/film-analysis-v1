@@ -26,7 +26,7 @@ from film_analysis.agents.scan import (
 )
 from film_analysis.agents.segments import FilmSpan
 from film_analysis.storage.catalog import Catalog, CatalogError, catalog_from_env
-from film_analysis.web.app import _job_error, _load_dotenv, _progress, start_team_analysis
+from film_analysis.web.app import _job_error, _load_dotenv, _progress
 
 app = FastAPI(title="film-cutter", docs_url=None, redoc_url=None, openapi_url=None)
 _lock = threading.Lock()
@@ -260,7 +260,6 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
         if review_ranges(spans):
             _mark(catalog, project_id, "checking", workers=slots.get())
         _review(catalog, body, token, spans, kept, published, play_number, slots, duration)
-        start_team_analysis(catalog, project_id)
         _progress(catalog, project_id, "ready", duration, duration, None)
         _mark(catalog, project_id, "ready", running=False)
     finally:
