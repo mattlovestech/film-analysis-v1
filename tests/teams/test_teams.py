@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from film_analysis.storage.catalog import FilmTeams, MemoryCatalog, PlayRecord
+from film_analysis.storage.catalog import FilmTeams, MemoryCatalog, PlayRecord, ReportAnalysis
 from film_analysis.teams.uniforms import (
     Uniform,
     colors_from_pixels,
@@ -224,7 +224,7 @@ def test_a_model_reply_becomes_two_uniforms() -> None:
 
 
 def test_a_uniform_keeps_hex_colors_and_style() -> None:
-    from film_analysis.teams.uniforms import parse_uniforms
+    from film_analysis.teams.uniforms import parse_uniforms, uniform_colors, uniform_line
 
     reply = (
         '{"left":{"name":"Pike County Pirates","jersey":"white","jersey_hex":"#f4f1ea",'
@@ -243,6 +243,13 @@ def test_a_uniform_keeps_hex_colors_and_style() -> None:
     assert left.pants_style == "solid"
     assert left.helmet_style == "solid shell"
     assert left.number == "black"
+    assert uniform_colors(left) == [
+        {"label": "Jersey", "hex": "#f4f1ea"},
+        {"label": "Pants", "hex": "#1a1a1a"},
+        {"label": "Helmet", "hex": "#f7f4ee"},
+        {"label": "Number", "hex": "#111111"},
+    ]
+    assert "number #111111" in uniform_line(left)
     assert right.helmet_style == "center stripe"
     assert "Pike" not in left.name
     assert left.jersey == "white"
@@ -725,6 +732,37 @@ def test_opening_a_film_keeps_a_player_at_512_by_768(tmp_path: Path) -> None:
     assert client.get(visit.json()["teams"]["left_player"]).content == current
 
 
+def test_team_build_reports_loading_telemetry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _ready_film(tmp_path)
+    left = _usable_player_bytes(11)
+    right = _usable_player_bytes(12)
+    _stub_team_cards(monkeypatch, left, right)
+    client = TestClient(
+        create_app(
+            store=store,
+            lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
+            portrait=lambda uniform, still=b"", other=None: (b"drawn", ".jpg"),
+        )
+    )
+
+    response = client.post("/api/projects/1/teams/stills")
+
+    assert response.status_code == 200
+    progress = response.json()["teams"]["progress"]
+    assert progress["step"] == "save"
+    assert progress["percent"] == 100
+    assert progress["running"] is False
+    assert progress["plays"] >= 1
+    assert isinstance(progress["elapsed_ms"], int)
+    assert progress["elapsed_ms"] >= 0
+    assert progress["sides"]["left"]["status"] in {"saved", "kept", "found", "ready"}
+    assert progress["sides"]["right"]["status"] in {"saved", "kept", "found", "ready"}
+    assert progress["events"]
+    assert any("Saved" in row["text"] or "ready" in row["text"].lower() for row in progress["events"])
+
+
 def test_teams_wait_until_plays_are_identified(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     store.set_progress(1, status="scanning", duration_seconds=30, scanned_seconds=4, error=None)
@@ -921,6 +959,62 @@ def test_reset_can_retry_only_the_failed_films(
     assert progress["failed"] == 0
     assert progress["done"] >= 1
     assert {row["status"] for row in progress["films"]} == {"ready"}
+
+
+def test_switching_the_scouted_team_swaps_offense_and_defense(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    kick = tmp_path / "kick.mp4"
+    kick.write_bytes(b"clip")
+    store.add_play(1, 2, 12.0, 18.0, kick, "special_teams")
+    store.set_play_unit(1, 1, "offense", mark_reviewed=False)
+    store.set_play_type(1, 1, "run", "scrimmage")
+    store.set_play_type(1, 2, "kickoff", "special_teams")
+    store.set_play_formation(1, 1, "trips")
+    store.set_film_teams(1, FilmTeams("North", "South", "left"))
+    store.set_report_analysis(
+        1, ReportAnalysis(1, "ready", call="run", side="offense", formation="trips")
+    )
+    store.set_report_analysis(1, ReportAnalysis(2, "ready", call="kickoff", side=""))
+    for kind in ("left", "right", "left-player", "right-player"):
+        store.save_team_image(1, kind, b"\xff\xd8\xff\xd9", ".jpg")
+    client = TestClient(create_app(store=store))
+
+    before = client.get("/api/projects/1/report")
+    assert before.status_code == 200
+    assert "South defense: 1 run (100%) and 0 passes (0%)." in before.json()["tendencies"]
+    assert "North special teams: 1 kickoff." in before.json()["tendencies"]
+
+    switched = client.post(
+        "/api/projects/1/teams",
+        json={"left_name": "North", "right_name": "South", "mine": "right", "redraw": False},
+    )
+    assert switched.status_code == 200
+    assert switched.json()["teams"]["mine"] == "right"
+    plays = {play["play_number"]: play for play in switched.json()["plays"]}
+    assert plays[1]["unit"] == "defense"
+    assert plays[1]["play_type"] == "run"
+    assert plays[1]["formation_key"] == "trips"
+    assert plays[2]["play_type"] == "kick_return"
+    notes = {note.play_number: note for note in store.list_report_analysis(1)}
+    assert notes[1].side == "defense"
+    assert notes[1].call == "run"
+    assert notes[1].formation == "trips"
+    assert notes[2].call == "kick_return"
+
+    report = client.get("/api/projects/1/report")
+    assert report.status_code == 200
+    text = report.json()["tendencies"]
+    assert "North offense: 1 run (100%) and 0 passes (0%)." in text
+    assert "South special teams: 1 kick return." in text
+
+    again = client.post(
+        "/api/projects/1/teams",
+        json={"left_name": "North", "right_name": "South", "mine": "right", "redraw": False},
+    )
+    assert again.status_code == 200
+    stayed = {play["play_number"]: play for play in again.json()["plays"]}
+    assert stayed[1]["unit"] == "defense"
+    assert stayed[2]["play_type"] == "kick_return"
 
 
 def _ready_film(tmp_path: Path) -> MemoryCatalog:

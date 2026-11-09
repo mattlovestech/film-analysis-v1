@@ -39,16 +39,31 @@ _ALIASES = {
 }
 _PROMPT = (
     "This snap is already charted as a {call} play. "
-    "These frames are the offense lined up before the snap. "
+    "The frames are in order, starting at the snap, so the first frames show "
+    "how the offense lined up. "
     "The offense wears {offense}. The defense wears {defense}. "
-    "The last image is a bird's-eye spatial plot of both teams with exactly "
-    "11 players on each side. Hollow circles with a ? are low-confidence "
-    "guesses where a player was not clearly seen. "
+    "{plot}"
     "Given that this is a {call}, name the formation the offense is in. "
-    "Choose one of: ace, i_form, shotgun, pistol, trips, bunch, empty, wing, goal_line. "
-    "This read is experimental. If the formation is not clear, use null. "
+    "Name the backfield first: "
+    "shotgun when the quarterback stands about five yards behind the center; "
+    "pistol when he is about three or four yards back with a running back directly "
+    "behind him; "
+    "i_form when he is under center with two backs stacked behind him; "
+    "ace when he is under center with one back behind him; "
+    "wing when a back or tight end lines up just outside the end of the line; "
+    "goal_line for a heavy set with extra linemen or tight ends near the goal line; "
+    "empty only when you can see that no running back stands beside or behind "
+    "the quarterback; a back next to a shotgun quarterback is still shotgun. "
+    "Use trips or bunch only when the receivers are clear and the backfield is not. "
+    "If you cannot see the offense lined up, use null. "
     'Reply with JSON only: {{"formation":"shotgun"}}'
 )
+_PLOT_NOTE = (
+    "The last image is a bird's-eye spatial plot of both teams with 11 players on "
+    "each side. Hollow circles with a ? are guesses where a player was not seen. "
+)
+# A plot that guessed more than this many of the 22 players is not shown to the model.
+_PLOT_GUESS_LIMIT = 6
 
 
 @dataclass(frozen=True)
@@ -64,7 +79,9 @@ class FormationRead:
     guessed: int = 0
 
 
-def formation_prompt(offense: Uniform, defense: Uniform, call: str = "") -> str:
+def formation_prompt(
+    offense: Uniform, defense: Uniform, call: str = "", *, plot: bool = True
+) -> str:
     """Ask for the offense's formation after the call is known."""
 
     play_call = (call or "").strip().lower() or "scrimmage"
@@ -72,6 +89,7 @@ def formation_prompt(offense: Uniform, defense: Uniform, call: str = "") -> str:
         call=play_call,
         offense=uniform_line(offense),
         defense=uniform_line(defense),
+        plot=_PLOT_NOTE if plot else "",
     )
 
 
@@ -112,9 +130,7 @@ def read_formation(
     if play_call not in {"run", "pass"}:
         return None
     jpegs = [
-        frame
-        for frame in frames
-        if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff")
+        frame for frame in frames if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff")
     ]
     if not jpegs:
         return None
@@ -129,18 +145,21 @@ def read_formation(
             frame=layout.frame,
             guessed=layout.guessed,
         )
+    # The plot is kept for a person to check, but a plot made mostly of guesses
+    # only misleads the read, so the model then sees the film frames alone.
+    show_plot = layout is not None and layout.guessed <= _PLOT_GUESS_LIMIT
     content: list[dict[str, object]] = [
-        {"type": "text", "text": formation_prompt(offense, defense, play_call)},
+        {
+            "type": "text",
+            "text": formation_prompt(offense, defense, play_call, plot=show_plot),
+        },
     ]
-    if layout is not None:
-        content.append({"type": "text", "text": "Film frame"})
-        content.append(_image_block(layout.frame))
+    for index, frame in enumerate(jpegs[:4], start=1):
+        content.append({"type": "text", "text": f"Frame {index}"})
+        content.append(_image_block(frame))
+    if show_plot and layout is not None:
         content.append({"type": "text", "text": "Spatial plot (11 on each side)"})
         content.append(_image_block(layout.plot))
-    else:
-        for index, frame in enumerate(jpegs[:4], start=1):
-            content.append({"type": "text", "text": f"Frame {index}"})
-            content.append(_image_block(frame))
     try:
         import anthropic
 
@@ -149,6 +168,7 @@ def read_formation(
         message = client.messages.create(
             model=model,
             max_tokens=400,
+            thinking={"type": "between_tools"},
             messages=[{"role": "user", "content": content}],
         )
     except Exception:

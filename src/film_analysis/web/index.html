@@ -405,6 +405,145 @@
     #projects .stat.needs strong,
     #projects .stat.needs span { color: var(--gold); }
     #projects .stat.failed span { color: #ff9b90; }
+    #projects-loading {
+      display: grid;
+      gap: 0.7rem;
+      margin-top: 0.55rem;
+    }
+    #projects-loading[hidden] { display: none; }
+    #projects-loading[data-mode="soft"] {
+      margin-top: 0.35rem;
+      margin-bottom: 0.15rem;
+    }
+    #projects-loading[data-mode="soft"] #projects-loading-grid { display: none; }
+    #projects-loading-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    #projects-loading-note[data-tone="working"] { color: var(--ink); }
+    #projects.is-refreshing {
+      opacity: 0.55;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    #projects-loading-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+      gap: 0.9rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    #projects-loading-grid .skeleton {
+      overflow: hidden;
+      border-radius: 14px;
+      background: var(--surface);
+    }
+    #projects-loading-grid .poster-bone {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: linear-gradient(90deg, #1c1c1e 0%, #2a2a2c 45%, #1c1c1e 100%);
+      background-size: 200% 100%;
+      animation: projects-sheen 1.2s ease-in-out infinite;
+    }
+    #projects-loading-grid .copy-bone {
+      display: grid;
+      gap: 0.45rem;
+      padding: 0.85rem;
+    }
+    #projects-loading-grid .bone-line {
+      display: block;
+      height: 0.75rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+    #projects-loading-grid .bone-line.title { width: 72%; height: 0.95rem; }
+    #projects-loading-grid .bone-line.meta { width: 44%; }
+    #projects-loading-grid .bone-line.detail { width: 88%; }
+    @keyframes projects-sheen {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+    #projects .telemetry {
+      margin: 0.35rem 0 0;
+      padding: 0.45rem 0.55rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 0.55rem;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
+    }
+    #projects .telemetry[hidden] { display: none; }
+    #projects .telemetry strong {
+      color: var(--ink);
+      font-weight: 650;
+    }
+    #refresh-analyses {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    #refresh-analyses .spin {
+      width: 0.75rem;
+      height: 0.75rem;
+      border: 2px solid rgba(255, 255, 255, 0.22);
+      border-top-color: var(--ink);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    #refresh-analyses .spin[hidden] { display: none; }
+    #film-loading-meter {
+      display: grid;
+      gap: 0.45rem;
+      margin-top: 0.85rem;
+    }
+    #film-loading-meter[hidden] { display: none; }
+    #film-loading-track {
+      height: 0.3rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+    #film-loading-track.moving::after {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 38%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+      animation: teams-sheen 1.15s ease-in-out infinite;
+    }
+    #film-loading-track { position: relative; }
+    #film-loading-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--gold);
+      transition: width 0.35s ease;
+    }
+    #film-loading-facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.35rem 0.75rem;
+      margin: 0;
+    }
+    #film-loading-facts div { display: grid; gap: 0.08rem; min-width: 0; }
+    #film-loading-facts dt {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #film-loading-facts dd {
+      margin: 0;
+      color: var(--ink);
+      font-size: 0.88rem;
+      font-variant-numeric: tabular-nums;
+    }
     .pie {
       width: 2.6rem;
       height: 2.6rem;
@@ -612,7 +751,7 @@
     #chart-progress ol {
       counter-reset: stage;
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.75rem;
       margin: 0 0 0.7rem;
       padding: 0;
@@ -1135,17 +1274,40 @@
       color: var(--ink);
     }
     #report .lead { margin: 0.45rem 0 1rem; max-width: 40rem; }
+    #report-settings {
+      display: grid;
+      gap: 1rem;
+      margin: 0 0 1.15rem;
+      padding: 0.95rem 1rem 1.05rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    #report-settings > h3 {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #report-settings #teams { margin: 0; }
+    #scout-side,
     #report-options {
       display: flex;
       flex-wrap: wrap;
       gap: 0.45rem;
-      margin: 0 0 1rem;
+      margin: 0;
       padding: 0;
       border: 0;
+      min-width: 0;
     }
+    #scout-side { display: grid; gap: 0.45rem; }
+    #scout-side legend,
     #report-options legend {
       width: 100%;
       margin: 0 0 0.15rem;
+      padding: 0;
       color: var(--muted);
       font-size: 0.75rem;
       font-weight: 650;
@@ -1167,6 +1329,7 @@
       color: #111;
     }
     #report-options input { accent-color: currentColor; }
+    #report-settings .exports { margin: 0.15rem 0 0; }
     #report-view { margin: 1.15rem 0 0.4rem; }
     #report-view h3 {
       margin: 1rem 0 0.3rem;
@@ -1227,6 +1390,64 @@
       color: var(--muted);
       font-size: 0.72rem;
       font-variant-numeric: tabular-nums;
+    }
+    #report-view .clip-grid a.open,
+    #report-analysis-table tr.open td { color: var(--gold); }
+    #report-analysis-table tbody tr { cursor: pointer; }
+    #report-analysis-table tr.play-review-row { cursor: default; }
+    #report-analysis-table tr.play-review-row,
+    .play-review-block { scroll-margin: 4.5rem; }
+    #report-analysis-table tr.play-review-row td {
+      padding: 0.35rem 0.7rem 0.85rem;
+    }
+    .play-review {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(11rem, 0.8fr);
+      gap: 0.85rem;
+      align-items: start;
+    }
+    .play-review video {
+      width: 100%;
+      max-height: 22rem;
+      background: #000;
+      border-radius: 0.45rem;
+    }
+    .play-review-tags {
+      display: grid;
+      gap: 0.7rem;
+      margin: 0.1rem 0 0;
+      align-content: start;
+    }
+    .play-review-tags div { display: grid; gap: 0.12rem; }
+    .play-review-tags dt {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .play-review-tags dd { margin: 0; font-weight: 650; }
+    .play-review-note { margin: 0.2rem 0; color: var(--muted); }
+    button.report-play {
+      display: block;
+      width: 100%;
+      margin: 0;
+      padding: 0.5rem 0;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-variant-numeric: tabular-nums;
+      text-align: left;
+      cursor: pointer;
+    }
+    button.report-play.open { color: var(--ink); }
+    .play-review-block { margin: 0.35rem 0 0.9rem; }
+    @media (max-width: 720px) {
+      .play-review { grid-template-columns: 1fr; }
+      .play-review video { max-height: 16rem; }
     }
     #report-view .report-row {
       color: var(--muted);
@@ -1329,6 +1550,28 @@
     #report-downloads { margin-top: 1rem; }
     #report-generate { border-radius: 999px; padding: 0.75rem 1.2rem; }
     #report-generate:disabled { cursor: not-allowed; }
+    #report-reread {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-weight: 650;
+      text-decoration: underline;
+      text-underline-offset: 0.14em;
+      cursor: pointer;
+    }
+    #report-reread:hover { color: var(--ink); }
+    #report-reread[hidden] { display: none; }
+    button.retry-play {
+      border: 0;
+      background: transparent;
+      color: var(--gold);
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+      padding: 0;
+    }
+    button.retry-play:hover { color: var(--ink); }
     #report-downloads a[hidden],
     #report-generate[hidden] { display: none; }
     #report-downloads a {
@@ -1713,9 +1956,7 @@
     #review #teams > h2,
     #review #report h2 { margin-top: 0; }
     #teams .lead { margin: 0.35rem 0 0.9rem; color: var(--ink); }
-    #teams-note,
-    #mine-ask,
-    #teams .team-uniform { display: none; }
+    #mine-ask { display: none; }
     .team-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1750,10 +1991,27 @@
       letter-spacing: 0.04em;
       text-transform: uppercase;
     }
-    .team-uniform {
+    .team-colors {
+      display: grid;
+      gap: 0.28rem;
       margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .team-colors li {
+      display: grid;
+      grid-template-columns: 0.7rem 4.4rem minmax(0, 1fr);
+      gap: 0.4rem;
+      align-items: center;
       color: var(--muted);
-      font-size: 0.85rem;
+      font-size: 0.75rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .team-colors .swatch {
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 2px;
+      border: 1px solid var(--line);
     }
     .team-card img {
       width: 100%;
@@ -1844,8 +2102,117 @@
     }
     .team-card.other { opacity: 0.62; }
     .team-card.other button.mine { color: var(--muted); }
+    #report #teams { margin: 0; }
+    #report #teams-note {
+      margin: 0;
+      max-width: 34rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.35;
+    }
+    #report #teams .team-row {
+      grid-template-columns: repeat(2, minmax(0, 11.5rem));
+      justify-content: start;
+      gap: 0.45rem;
+    }
+    #report #teams .team-card {
+      grid-template-columns: 2.35rem minmax(0, 1fr);
+      grid-template-areas:
+        "shot kicker"
+        "shot mine"
+        "shot name"
+        "shot colors"
+        "shot refresh";
+      column-gap: 0.4rem;
+      row-gap: 0.12rem;
+      align-items: center;
+      padding: 0.35rem 0.4rem;
+      border-radius: 10px;
+      background: #111;
+    }
+    #report #teams .team-card.chosen {
+      transform: none;
+      box-shadow: 0 0 0 1px var(--gold);
+    }
+    #report #teams .team-kicker {
+      grid-area: kicker;
+      font-size: 0.68rem;
+      letter-spacing: 0.02em;
+      text-transform: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #report #teams .team-shots {
+      grid-area: shot;
+      gap: 0;
+      justify-items: center;
+    }
+    #report #teams .team-card img,
+    #report #teams .team-card .team-shots img,
+    #report #teams .player-ghost {
+      width: 2.35rem;
+      height: 3.1rem;
+      aspect-ratio: auto;
+      margin: 0;
+      object-fit: contain;
+      border-radius: 5px;
+    }
+    #report #teams .team-colors {
+      grid-area: colors;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.15rem;
+    }
+    #report #teams .team-colors li { display: block; }
+    #report #teams .team-colors li span:not(.swatch) { display: none; }
+    #report #teams .team-colors .swatch {
+      display: inline-block;
+      width: 0.5rem;
+      height: 0.5rem;
+    }
+    #report #teams .team-card label {
+      grid-area: name;
+      font-size: 0;
+      gap: 0;
+      letter-spacing: 0;
+    }
+    #report #teams .team-card input {
+      padding: 0.18rem 0.3rem;
+      font-size: 0.72rem;
+      border-radius: 6px;
+    }
+    #report #teams .team-card button.mine {
+      grid-area: mine;
+      justify-self: start;
+      width: auto;
+      gap: 0.28rem;
+      padding: 0.18rem 0.45rem;
+      font-size: 0.7rem;
+    }
+    #report #teams .team-card button.mine::before {
+      width: 0.55rem;
+      height: 0.55rem;
+    }
+    #report #teams .team-card .team-refresh {
+      grid-area: refresh;
+      justify-self: start;
+      padding: 0;
+      font-size: 0.64rem;
+    }
+    #report #teams .team-actions { margin-top: 0.2rem; }
+    #report #teams-retry { padding: 0.32rem 0.55rem; font-size: 0.76rem; }
+    #report #teams-error { margin: 0; font-size: 0.82rem; }
+    #report #teams-building.team-row {
+      grid-template-columns: repeat(2, minmax(0, 11.5rem));
+    }
+    #report #teams-building .team-card {
+      grid-template-columns: 2.35rem minmax(0, 1fr);
+      grid-template-areas: "shot kicker";
+    }
+    #report #teams-building .player-ghost { grid-area: shot; }
     #select-team { display: none; }
-    #teams-save { display: inline-flex; margin: 0.35rem 0 1rem; }
+    #teams-save:not([hidden]) { display: inline-flex; margin: 0.35rem 0 1rem; }
     .team-actions {
       display: flex;
       flex-wrap: wrap;
@@ -1894,10 +2261,15 @@
       inset: 0;
       display: grid;
       place-items: center;
+      padding: 0.85rem;
+      text-align: center;
       background: rgba(8, 10, 14, 0.62);
       color: var(--ink);
       font-size: 0.85rem;
       font-weight: 650;
+    }
+    .team-card.refreshing[data-finding] .team-shots::after {
+      content: attr(data-finding);
     }
     #teams-error { color: #ff9f0a; }
     #teams-meter {
@@ -1942,6 +2314,59 @@
     }
     #teams-status[data-tone="error"] { color: #ff9f0a; }
     #teams-status[data-tone="working"] { color: var(--ink); }
+    #teams-telemetry {
+      display: grid;
+      gap: 0.55rem;
+      margin: 0.15rem 0 0;
+      padding: 0.7rem 0.8rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 0.75rem;
+      background: rgba(255, 255, 255, 0.03);
+    }
+    #teams-telemetry[hidden] { display: none; }
+    #teams-facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.45rem 0.85rem;
+      margin: 0;
+    }
+    #teams-facts div {
+      display: grid;
+      gap: 0.1rem;
+      min-width: 0;
+    }
+    #teams-facts dt {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #teams-facts dd {
+      margin: 0;
+      color: var(--ink);
+      font-size: 0.9rem;
+      font-variant-numeric: tabular-nums;
+    }
+    #teams-events {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.28rem;
+      max-height: 7.5rem;
+      overflow: auto;
+    }
+    #teams-events li {
+      display: grid;
+      grid-template-columns: 4.4rem 1fr;
+      gap: 0.55rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+    }
+    #teams-events .when { color: rgba(255, 255, 255, 0.45); }
+    #teams-events .text { color: var(--ink); }
     .team-reset-actions {
       display: flex;
       flex-wrap: wrap;
@@ -2097,11 +2522,18 @@
     <section id="history" hidden>
       <div class="section-head">
         <h2>Projects</h2>
-        <button id="refresh-analyses" class="retry" type="button">Refresh</button>
+        <button id="refresh-analyses" class="retry" type="button">
+          <span class="spin" hidden></span>
+          <span class="label">Refresh</span>
+        </button>
       </div>
       <div id="project-filters" role="group" aria-label="Show films" hidden></div>
       <p id="projects-lead" class="lead">Each film is cut into plays you can study on their own.</p>
       <p id="projects-summary" class="lead" hidden></p>
+      <div id="projects-loading" hidden role="status" aria-live="polite">
+        <p id="projects-loading-note">Loading your films…</p>
+        <ul id="projects-loading-grid" aria-hidden="true"></ul>
+      </div>
       <p id="empty" class="lead" hidden>No films yet. Use New analysis to add a game. Each play is cut out so you can study it on its own.</p>
       <p id="filter-empty" class="lead" hidden>No films in this view.</p>
       <ul id="projects"></ul>
@@ -2169,8 +2601,7 @@
         <li><strong>Read</strong><span>Each stretch is a play, junk, or not clear yet. On Cloudflare, more workers read at once.</span></li>
         <li><strong>Cut</strong><span>A play is clipped only after the film up to that point has settled, so the clips stay in order.</span></li>
         <li><strong>Check</strong><span>A stretch that is still unclear gets one more look. What remains waits for you to mark it.</span></li>
-        <li><strong>Who to scout</strong><span>You choose which team to scout. The next read is told that, so a white jersey that is defending is that team's defense and the other side is on offense.</span></li>
-        <li><strong>Chart</strong><span>That read names a scrimmage play as a run or a pass, and whether the opponent is on offense or defense. A special-teams play is the kick, punt, or return from your side.</span></li>
+        <li><strong>Scout report</strong><span>In report settings, pick the team being scouted. That only swaps who counts as offense and defense. The read names a scrimmage play as a run or a pass from that side. A special-teams play is the kick, punt, or return from that team.</span></li>
         <li><strong>Formation</strong><span>Experimental, and last. After run or pass is known, it plots 11 players on each side and names the formation from that plot.</span></li>
       </ol>
       <label class="formation-toggle" for="formation-reads">
@@ -2234,6 +2665,12 @@
       <div id="film-loading" hidden role="status" aria-live="polite">
         <div id="film-loading-poster" class="bone" hidden></div>
         <p id="film-loading-note">Opening this film</p>
+        <div id="film-loading-meter" hidden>
+          <div id="film-loading-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="film-loading-fill"></div>
+          </div>
+          <dl id="film-loading-facts"></dl>
+        </div>
         <div class="film-loading-steps" aria-hidden="true">
           <span class="bone"></span>
           <span class="bone"></span>
@@ -2252,12 +2689,6 @@
             <a href="/projects" data-screen="review">
               <span class="step-label">Review plays</span>
               <span class="step-state">Optional</span>
-            </a>
-          </li>
-          <li data-step="teams">
-            <a href="/projects" data-screen="select-teams">
-              <span class="step-label">Who to scout</span>
-              <span class="step-state"></span>
             </a>
           </li>
           <li data-step="report">
@@ -2288,98 +2719,108 @@
           <p id="reviews-lead" class="lead" hidden>These stretches were not clearly a play. Mark each one, or leave it for later.</p>
           <ul id="reviews"></ul>
         </div>
-        <section id="teams" hidden>
-          <h2 id="teams-heading">Which team do you want to scout?</h2>
-          <p id="teams-note" class="lead" hidden>Choose the team you want the report on.</p>
-          <div id="teams-meter" hidden>
-            <ol id="teams-steps" class="stages" aria-label="Team image steps">
-              <li data-step="read">Read film</li>
-              <li data-step="find">Find players</li>
-              <li data-step="save">Save cards</li>
-            </ol>
-            <div id="teams-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Team image progress">
-              <div id="teams-fill"></div>
-            </div>
-            <p id="teams-status"></p>
-          </div>
-          <button id="select-team" type="button">Choose who to scout</button>
-          <div id="teams-building" class="team-row" hidden>
-            <article class="team-card ghost" aria-hidden="true">
-              <p class="team-kicker">Home</p>
-              <div class="player-ghost"></div>
-            </article>
-            <article class="team-card ghost" aria-hidden="true">
-              <p class="team-kicker">Away</p>
-              <div class="player-ghost"></div>
-            </article>
-          </div>
-          <p id="mine-ask" class="mine-ask" hidden>Which team do you want to scout?</p>
-          <div class="team-row" role="radiogroup" aria-labelledby="teams-heading" hidden>
-            <article class="team-card" data-side="left">
-            <p id="team-left-kicker" class="team-kicker">Home</p>
-            <div class="team-shots">
-              <figure>
-                <img id="team-left-reference" alt="Reference sent for home" hidden>
-                <figcaption>Reference</figcaption>
-              </figure>
-              <figure>
-                <img id="team-left-player" class="player" alt="Player for home" hidden>
-                <figcaption>Player</figcaption>
-              </figure>
-            </div>
-              <p id="team-left-uniform" class="team-uniform" hidden></p>
-              <img id="team-left-still" alt="" hidden>
-              <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">Scout this team</button>
-              <button class="team-refresh" type="button" data-side="left" hidden>New photo</button>
-              <label for="team-left-name">Team name
-                <input id="team-left-name" maxlength="40" autocomplete="off">
-              </label>
-            </article>
-            <article class="team-card" data-side="right">
-            <p id="team-right-kicker" class="team-kicker">Away</p>
-            <div class="team-shots">
-              <figure>
-                <img id="team-right-reference" alt="Reference sent for away" hidden>
-                <figcaption>Reference</figcaption>
-              </figure>
-              <figure>
-                <img id="team-right-player" class="player" alt="Player for away" hidden>
-                <figcaption>Player</figcaption>
-              </figure>
-            </div>
-              <p id="team-right-uniform" class="team-uniform" hidden></p>
-              <img id="team-right-still" alt="" hidden>
-              <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">Scout this team</button>
-              <button class="team-refresh" type="button" data-side="right" hidden>New photo</button>
-              <label for="team-right-name">Team name
-                <input id="team-right-name" maxlength="40" autocomplete="off">
-              </label>
-            </article>
-          </div>
-          <div class="team-actions" hidden>
-            <button id="teams-retry" type="button">
-              <span class="spin" hidden></span>
-              <span class="label">Try different photos</span>
-            </button>
-          </div>
-          <p id="teams-error" class="lead" hidden></p>
-          <button id="teams-save" type="button" hidden>Save teams</button>
-        </section>
         <div id="report" hidden>
           <p class="stage-kicker">Scout report</p>
           <h2>Scouting report</h2>
           <p id="report-note" class="lead"></p>
-          <fieldset id="report-options">
-            <legend>Include</legend>
-            <label><input type="checkbox" name="section" value="tendencies" checked> Play tendency table</label>
-            <label><input type="checkbox" name="section" value="calls" checked> Run and pass</label>
-            <label><input type="checkbox" name="section" value="special" checked> Special teams</label>
-            <label><input type="checkbox" name="section" value="plays" checked> Each play</label>
-            <label><input type="checkbox" name="section" value="formations"> Formations <span class="experimental">Experimental</span></label>
-          </fieldset>
-          <p class="exports">
-            <button id="report-generate" type="button" disabled>Generate scouting report</button>
-          </p>
+          <section id="report-settings">
+            <h3>Report settings</h3>
+            <section id="teams">
+              <div id="teams-meter" hidden>
+                <ol id="teams-steps" class="stages" aria-label="Team image steps">
+                  <li data-step="read">Read film</li>
+                  <li data-step="find">Find players</li>
+                  <li data-step="save">Save cards</li>
+                </ol>
+                <div id="teams-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Team image progress">
+                  <div id="teams-fill"></div>
+                </div>
+                <p id="teams-status"></p>
+                <div id="teams-telemetry" hidden>
+                  <dl id="teams-facts"></dl>
+                  <ol id="teams-events" aria-label="Team build log"></ol>
+                </div>
+              </div>
+              <button id="select-team" type="button">Find both teams</button>
+              <div id="teams-building" class="team-row" hidden>
+                <article class="team-card ghost" aria-hidden="true">
+                  <p class="team-kicker">Home</p>
+                  <div class="player-ghost"></div>
+                </article>
+                <article class="team-card ghost" aria-hidden="true">
+                  <p class="team-kicker">Away</p>
+                  <div class="player-ghost"></div>
+                </article>
+              </div>
+              <p id="teams-error" class="lead" hidden></p>
+              <div class="team-actions" hidden>
+                <button id="teams-retry" type="button">
+                  <span class="spin" hidden></span>
+                  <span class="label">Try different photos</span>
+                </button>
+              </div>
+              <fieldset id="scout-side">
+                <legend id="teams-heading">Team being scouted</legend>
+                <p id="teams-note">This only swaps who counts as offense and defense in the report.</p>
+                <p id="mine-ask" class="mine-ask" hidden>Team being scouted</p>
+                <div class="team-row" role="radiogroup" aria-labelledby="teams-heading" hidden>
+                  <article class="team-card" data-side="left">
+                    <p id="team-left-kicker" class="team-kicker">Home</p>
+                    <div class="team-shots">
+                      <figure>
+                        <img id="team-left-reference" alt="Reference sent for home" hidden>
+                        <figcaption>Reference</figcaption>
+                      </figure>
+                      <figure>
+                        <img id="team-left-player" class="player" alt="Player for home" hidden>
+                        <figcaption>Player</figcaption>
+                      </figure>
+                    </div>
+                    <ul id="team-left-colors" class="team-colors" hidden></ul>
+                    <img id="team-left-still" alt="" hidden>
+                    <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">Scout</button>
+                    <button class="team-refresh" type="button" data-side="left" hidden>New photo</button>
+                    <label for="team-left-name">Team name
+                      <input id="team-left-name" maxlength="40" autocomplete="off">
+                    </label>
+                  </article>
+                  <article class="team-card" data-side="right">
+                    <p id="team-right-kicker" class="team-kicker">Away</p>
+                    <div class="team-shots">
+                      <figure>
+                        <img id="team-right-reference" alt="Reference sent for away" hidden>
+                        <figcaption>Reference</figcaption>
+                      </figure>
+                      <figure>
+                        <img id="team-right-player" class="player" alt="Player for away" hidden>
+                        <figcaption>Player</figcaption>
+                      </figure>
+                    </div>
+                    <ul id="team-right-colors" class="team-colors" hidden></ul>
+                    <img id="team-right-still" alt="" hidden>
+                    <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">Scout</button>
+                    <button class="team-refresh" type="button" data-side="right" hidden>New photo</button>
+                    <label for="team-right-name">Team name
+                      <input id="team-right-name" maxlength="40" autocomplete="off">
+                    </label>
+                  </article>
+                </div>
+                <button id="teams-save" type="button" hidden>Save teams</button>
+              </fieldset>
+            </section>
+            <fieldset id="report-options">
+              <legend>Include</legend>
+              <label><input type="checkbox" name="section" value="tendencies" checked> Play tendency table</label>
+              <label><input type="checkbox" name="section" value="calls" checked> Run and pass</label>
+              <label><input type="checkbox" name="section" value="special" checked> Special teams</label>
+              <label><input type="checkbox" name="section" value="plays" checked> Each play</label>
+              <label><input type="checkbox" name="section" value="formations"> Formations <span class="experimental">Experimental</span></label>
+            </fieldset>
+            <p class="exports">
+              <button id="report-generate" type="button" disabled>Generate scouting report</button>
+              <button id="report-reread" type="button" hidden>Read every play again</button>
+            </p>
+          </section>
           <section id="report-live" hidden>
             <h3>Scouting analysis</h3>
             <p id="report-live-note" class="lead"></p>
@@ -2474,7 +2915,11 @@
     const teamsTrack = document.querySelector("#teams-track");
     const teamsFill = document.querySelector("#teams-fill");
     const teamsStatus = document.querySelector("#teams-status");
+    const teamsTelemetry = document.querySelector("#teams-telemetry");
+    const teamsFacts = document.querySelector("#teams-facts");
+    const teamsEvents = document.querySelector("#teams-events");
     const TEAM_STEP_ORDER = ["read", "find", "save"];
+    let teamsTelemetryClock = 0;
     const teamResetButton = document.querySelector("#team-reset");
     const teamResetLabel = teamResetButton.querySelector(".label");
     const teamResetSpin = teamResetButton.querySelector(".spin");
@@ -2489,6 +2934,7 @@
     const reportBox = document.querySelector("#report");
     const reportNote = document.querySelector("#report-note");
     const reportGenerate = document.querySelector("#report-generate");
+    const reportReread = document.querySelector("#report-reread");
     const reportOptions = document.querySelector("#report-options");
     const reportView = document.querySelector("#report-view");
     const reportLive = document.querySelector("#report-live");
@@ -2548,11 +2994,22 @@
     const placeDetail = document.querySelector("#place-detail");
     const startPlace = document.querySelector("#start-place");
     const projectList = document.querySelector("#projects");
+    const projectsLoading = document.querySelector("#projects-loading");
+    const projectsLoadingNote = document.querySelector("#projects-loading-note");
+    const projectsLoadingGrid = document.querySelector("#projects-loading-grid");
+    const refreshAnalyses = document.querySelector("#refresh-analyses");
+    const refreshAnalysesSpin = refreshAnalyses.querySelector(".spin");
+    const refreshAnalysesLabel = refreshAnalyses.querySelector(".label");
     const projectName = document.querySelector("#project-name");
     let listedProjects = [];
+    let projectsLoadStarted = 0;
     const filmLoading = document.querySelector("#film-loading");
     const filmLoadingNote = document.querySelector("#film-loading-note");
     const filmLoadingPoster = document.querySelector("#film-loading-poster");
+    const filmLoadingMeter = document.querySelector("#film-loading-meter");
+    const filmLoadingTrack = document.querySelector("#film-loading-track");
+    const filmLoadingFill = document.querySelector("#film-loading-fill");
+    const filmLoadingFacts = document.querySelector("#film-loading-facts");
     const filmThumb = document.querySelector("#film-thumb");
     const filmMeta = document.querySelector("#film-meta");
     const filmSteps = document.querySelector("#film-steps");
@@ -2725,25 +3182,20 @@
     }
 
     function stageFromScreen(screen) {
-      if (screen === "select-teams") return "teams";
-      if (screen === "generate-report") return "report";
+      if (screen === "select-teams" || screen === "generate-report") return "report";
       if (screen === "review") return "review";
       return "";
     }
 
     function screenPath(id, stage) {
-      const screen = stage === "teams"
-        ? "select-teams"
-        : stage === "report"
-          ? "generate-report"
-          : "review";
+      const screen = stage === "report" || stage === "teams" ? "generate-report" : "review";
       return `/projects/${id}/${screen}`;
     }
 
     function titleForStage(stage) {
       const names = {
         review: "Review plays",
-        teams: "Who to scout",
+        teams: "Scouting report",
         report: "Scouting report",
       };
       const film = projectName.textContent.trim();
@@ -2910,11 +3362,11 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "skip";
-      button.textContent = "Choose who to scout";
+      button.textContent = "Scout report";
       button.addEventListener("click", () => {
         const film = play.film || playSection.dataset.film || "/projects";
         const id = (String(film).match(/\/projects\/(\d+)/) || [])[1];
-        acceptAndOpen(play.uid, id ? `/projects/${id}/select-teams` : film, button);
+        acceptAndOpen(play.uid, id ? `/projects/${id}/generate-report` : film, button);
       });
       return button;
     }
@@ -3668,11 +4120,19 @@
       return `${done} of ${total} reviewed`;
     }
 
-    function playLink(href, label) {
+    function playLink(href, label, stay) {
       const link = document.createElement("a");
       link.href = href || "#";
       link.textContent = label;
-      link.addEventListener("click", (event) => followLink(event, href));
+      link.addEventListener("click", (event) => {
+        if (stay && !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)) {
+          event.preventDefault();
+          event.stopPropagation();
+          stay();
+          return;
+        }
+        followLink(event, href);
+      });
       return link;
     }
 
@@ -3750,9 +4210,11 @@
       results.replaceChildren();
       delete results.dataset.project;
       markCurrent();
+      beginProjectsLoad(!listedProjects.length);
       try {
         await paintHistory(token);
       } catch (error) {
+        endProjectsLoad();
         status.className = "error";
         status.textContent = error.message === "Failed to fetch"
           ? "Couldn't reach the server. Run uv run film-analysis, then reload this page."
@@ -3760,22 +4222,78 @@
       }
     }
 
-    document.querySelector("#refresh-analyses").addEventListener("click", async () => {
-      const control = document.querySelector("#refresh-analyses");
-      control.disabled = true;
+    refreshAnalyses.addEventListener("click", async () => {
+      refreshAnalyses.disabled = true;
+      refreshAnalysesSpin.hidden = false;
+      refreshAnalysesLabel.textContent = "Refreshing…";
       status.className = "";
       status.textContent = "";
+      beginProjectsLoad(false);
       try {
         await paintHistory(watch);
       } catch (error) {
+        endProjectsLoad();
         status.className = "error";
         status.textContent = error.message === "Failed to fetch"
           ? "Couldn't reach the server. Run uv run film-analysis, then reload this page."
           : (error.message || "Couldn't refresh projects.");
       } finally {
-        control.disabled = false;
+        refreshAnalyses.disabled = false;
+        refreshAnalysesSpin.hidden = true;
+        refreshAnalysesLabel.textContent = "Refresh";
       }
     });
+
+    function projectSkeleton() {
+      const item = document.createElement("li");
+      item.className = "skeleton";
+      item.setAttribute("aria-hidden", "true");
+      const poster = document.createElement("span");
+      poster.className = "poster-bone";
+      const copy = document.createElement("span");
+      copy.className = "copy-bone";
+      for (const kind of ["title", "meta", "detail"]) {
+        const line = document.createElement("span");
+        line.className = `bone-line ${kind}`;
+        copy.append(line);
+      }
+      item.append(poster, copy);
+      return item;
+    }
+
+    function beginProjectsLoad(emptyShelf) {
+      projectsLoadStarted = Date.now();
+      document.querySelector("#empty").hidden = true;
+      document.querySelector("#filter-empty").hidden = true;
+      if (emptyShelf) {
+        projectList.hidden = true;
+        projectList.classList.remove("is-refreshing");
+        projectList.replaceChildren();
+        projectsLoading.dataset.mode = "full";
+        projectsLoadingGrid.replaceChildren();
+        for (let index = 0; index < 6; index += 1) projectsLoadingGrid.append(projectSkeleton());
+        projectsLoading.hidden = false;
+        projectsLoadingNote.textContent = "Loading your films…";
+        projectsLoadingNote.dataset.tone = "working";
+      } else {
+        projectsLoading.dataset.mode = "soft";
+        projectsLoadingGrid.replaceChildren();
+        projectsLoading.hidden = false;
+        projectsLoadingNote.textContent = "Refreshing projects…";
+        projectsLoadingNote.dataset.tone = "working";
+        projectList.classList.add("is-refreshing");
+      }
+    }
+
+    function endProjectsLoad() {
+      projectsLoading.hidden = true;
+      projectsLoadingGrid.replaceChildren();
+      delete projectsLoading.dataset.mode;
+      delete projectsLoadingNote.dataset.tone;
+      projectList.classList.remove("is-refreshing");
+      refreshAnalysesSpin.hidden = true;
+      refreshAnalysesLabel.textContent = "Refresh";
+    }
 
     function activitySkeleton() {
       const item = document.createElement("li");
@@ -3960,6 +4478,7 @@
         throw new Error(detail || "Couldn't refresh projects.");
       }
       listedProjects = projects;
+      endProjectsLoad();
       const empty = projects.length === 0;
       document.querySelector("#empty").hidden = !empty;
       projectList.hidden = empty;
@@ -3975,6 +4494,15 @@
         projects.forEach((project, index) => fillHistoryLink(links[index], project));
       }
       applyProjectFilter();
+      const working = projects.filter((project) => projectBucket(project) === "working").length;
+      if (working && projectsLoadStarted) {
+        const elapsed = Math.max(0, Date.now() - projectsLoadStarted);
+        paintProjectSummary(projects);
+        const summary = document.querySelector("#projects-summary");
+        if (summary && !summary.hidden) {
+          summary.textContent = `${summarizeProjects(shelfProjects(projects))} · Live · ${formatElapsed(elapsed)}`;
+        }
+      }
       const pending = projects.some((project) => (
         project.running
         || ((project.status === "downloading" || project.status === "scanning") && !project.error)
@@ -3982,7 +4510,7 @@
       if (pending) {
         window.setTimeout(() => {
           if (token === watch && !historySection.hidden) paintHistory(token).catch(() => {});
-        }, 3000);
+        }, 1500);
       }
     }
 
@@ -5060,7 +5588,10 @@
         return joinParts([read, retryPhrase(job), `${plays} so far`, workerPhrase()]);
       }
       if (job.phase === "charting") {
-        return joinParts(["Reading each play for the scouting report", plays, workerPhrase()]);
+        const total = Number(job.report_total) || 0;
+        const done = Number(job.report_done) || 0;
+        const reads = total ? `${done} of ${total} plays` : plays;
+        return joinParts(["Reading the scouting report", reads, workerPhrase()]);
       }
       const progress = activityProgress(job);
       if (!progress) {
@@ -5080,6 +5611,12 @@
     }
 
     function activityProgress(job) {
+      if (job.phase === "charting") {
+        const total = Number(job.report_total) || 0;
+        const done = Number(job.report_done) || 0;
+        if (!total) return "";
+        return `${Math.min(100, Math.round((100 * done) / total))}%`;
+      }
       if (job.phase === "scanning" || job.phase === "checking" || stoppedWhileReading(job)) {
         const percent = readPercent(job);
         return percent == null ? "" : `${percent}%`;
@@ -5315,6 +5852,9 @@
       const fault = document.createElement("p");
       fault.className = "fault";
       fault.hidden = true;
+      const telemetry = document.createElement("p");
+      telemetry.className = "telemetry";
+      telemetry.hidden = true;
       const track = document.createElement("span");
       track.className = "track";
       track.hidden = true;
@@ -5322,7 +5862,7 @@
       track.setAttribute("aria-valuemin", "0");
       track.setAttribute("aria-valuemax", "100");
       track.append(document.createElement("span"));
-      copy.append(title, when, next, fault, track);
+      copy.append(title, when, next, fault, telemetry, track);
       link.append(poster, copy);
       fillHistoryLink(link, project);
       item.append(link);
@@ -5377,6 +5917,7 @@
       const message = bucket === "failed" ? (project.error || "Could not read that film.") : "";
       fault.hidden = !message;
       fault.textContent = message;
+      paintProjectTelemetry(copy.querySelector(".telemetry"), project, bucket);
       const archive = ensureArchive(link);
       archive.textContent = project.archived ? "Put back" : "Archive";
       const retry = ensureRetry(link);
@@ -5436,6 +5977,13 @@
           ? "Connecting to the video"
           : "Plays show up after the download finishes";
       }
+      if (project.phase === "charting") {
+        const total = Number(project.report_total) || 0;
+        const done = Number(project.report_done) || 0;
+        return total
+          ? `Reading the scouting report · ${done} of ${total}`
+          : "Reading the scouting report";
+      }
       if (bucket === "working") {
         const retries = retryPhrase(project);
         if (reachedEnd(project.scanned, project.duration)) {
@@ -5458,6 +6006,16 @@
       const plays = Number(project.play_count) || 0;
       const reviews = Number(project.review_count) || 0;
       if (bucket === "failed") return { number: "", label: "Stopped", tone: "failed" };
+      if (bucket === "working" && project.phase === "charting") {
+        const total = Number(project.report_total) || 0;
+        const done = Number(project.report_done) || 0;
+        if (!total) return { number: "", label: "Scouting report", tone: "working" };
+        return {
+          number: `${Math.min(100, Math.round((100 * done) / total))}%`,
+          label: "of the report",
+          tone: "working",
+        };
+      }
       if (bucket === "working" && project.status === "downloading") {
         const percent = downloadPercent(project);
         if (percent == null) return { number: "", label: "Downloading", tone: "working" };
@@ -5473,6 +6031,51 @@
       return { number: String(plays), label: plays === 1 ? "play" : "plays", tone: "" };
     }
 
+    function paintProjectTelemetry(node, project, bucket) {
+      if (!node) return;
+      if (bucket !== "working") {
+        node.hidden = true;
+        node.textContent = "";
+        return;
+      }
+      const parts = [];
+      if (project.phase === "charting") {
+        const total = Number(project.report_total) || 0;
+        const done = Number(project.report_done) || 0;
+        parts.push(total ? `<strong>${done}/${total}</strong> plays charted` : "Scouting report");
+      } else if (project.status === "downloading") {
+        const percent = downloadPercent(project);
+        const got = Number(project.downloaded) || 0;
+        const total = Number(project.total_bytes) || 0;
+        if (percent != null) parts.push(`<strong>${percent}%</strong> downloaded`);
+        else parts.push("Connecting");
+        if (got || total) parts.push(`${formatBytes(got)}${total ? ` / ${formatBytes(total)}` : ""}`);
+      } else {
+        const scanned = Number(project.scanned) || 0;
+        const duration = Number(project.duration) || 0;
+        const plays = Number(project.play_count) || 0;
+        const processing = Number(project.processing);
+        if (Number.isFinite(processing) && processing > 0) {
+          parts.push(`<strong>${Math.round(processing)}%</strong> processed`);
+        }
+        if (duration) parts.push(`${clock(scanned)} / ${clock(duration)}`);
+        else if (scanned) parts.push(`Read ${clock(scanned)}`);
+        if (plays) parts.push(`${plays} play${plays === 1 ? "" : "s"} so far`);
+        const retries = retryPhrase(project);
+        if (retries) parts.push(retries);
+      }
+      node.hidden = !parts.length;
+      node.innerHTML = parts.join(" · ");
+    }
+
+    function formatBytes(value) {
+      const bytes = Math.max(0, Number(value) || 0);
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+
     function paintTrack(track, project, bucket) {
       if (!track) return;
       if (bucket !== "working") {
@@ -5480,14 +6083,22 @@
         return;
       }
       let percent = null;
-      if (project.status === "downloading") percent = downloadPercent(project);
+      if (project.phase === "charting") {
+        const total = Number(project.report_total) || 0;
+        const done = Number(project.report_done) || 0;
+        percent = total ? Math.min(100, Math.round((100 * done) / total)) : null;
+      } else if (project.status === "downloading") percent = downloadPercent(project);
       else percent = readPercent(project);
       track.hidden = false;
       track.classList.toggle("unknown", percent == null);
       track.firstElementChild.style.width = percent == null ? "" : `${percent}%`;
       if (percent == null) track.removeAttribute("aria-valuenow");
       else track.setAttribute("aria-valuenow", String(percent));
-      const name = project.status === "downloading" ? "Downloading the film" : "Finding plays";
+      const name = project.phase === "charting"
+        ? "Reading the scouting report"
+        : project.status === "downloading"
+          ? "Downloading the film"
+          : "Finding plays";
       track.setAttribute("aria-label", percent == null ? name : `${name}, ${percent}%`);
     }
 
@@ -5777,6 +6388,10 @@
           delete img.dataset.source;
           img.hidden = true;
         }
+        for (const list of teamsSection.querySelectorAll(".team-colors")) {
+          list.replaceChildren();
+          list.hidden = true;
+        }
         for (const input of teamsSection.querySelectorAll("input")) {
           input.value = "";
           delete input.dataset.saved;
@@ -5791,7 +6406,7 @@
       const building = teamsSection.dataset.loading === String(project.project);
       selectTeamButton.hidden = false;
       selectTeamButton.disabled = building;
-      selectTeamButton.textContent = building ? "Finding both teams…" : "Choose who to scout";
+      selectTeamButton.textContent = building ? "Finding both teams…" : "Find both teams";
       if (pictured) {
         fillTeams(project.project, teams);
         showTeamChoices(true);
@@ -5802,7 +6417,9 @@
 
     function showTeamChoices(open) {
       const building = !open && teamsSection.dataset.loading === String(results.dataset.project || "");
+      const scoutSide = document.querySelector("#scout-side");
       mineAsk.hidden = true;
+      if (scoutSide) scoutSide.hidden = !open;
       teamsSection.querySelector('.team-row[role="radiogroup"]').hidden = !open;
       teamsBuilding.hidden = !building;
       teamsSave.hidden = true;
@@ -5839,7 +6456,7 @@
     }
 
     function chooseTeam() {
-      openStage("teams");
+      openStage("report");
     }
 
     function fillTeams(projectId, teams) {
@@ -5879,14 +6496,31 @@
           "aria-pressed",
           teams.mine === side ? "true" : "false",
         );
-        const uniform = document.querySelector(`#team-${side}-uniform`);
-        uniform.textContent = "";
-        uniform.hidden = true;
+        paintTeamColors(side, teams[`${side}_colors`]);
       }
       paintMineChoice();
       teamsNote.textContent = teams.left_player && teams.right_player
-        ? "One player from each team. Pick which team to scout."
+        ? "This only swaps who counts as offense and defense in the report."
         : "Finding one player from each team.";
+    }
+
+    function paintTeamColors(side, colors) {
+      const list = document.querySelector(`#team-${side}-colors`);
+      const chips = Array.isArray(colors) ? colors.filter((chip) => chip && chip.hex) : [];
+      list.replaceChildren();
+      for (const chip of chips) {
+        const item = document.createElement("li");
+        const swatch = document.createElement("span");
+        swatch.className = "swatch";
+        swatch.style.background = chip.hex;
+        const name = document.createElement("span");
+        name.textContent = chip.label || "";
+        const code = document.createElement("span");
+        code.textContent = chip.hex;
+        item.append(swatch, name, code);
+        list.append(item);
+      }
+      list.hidden = chips.length === 0;
     }
 
     function paintMineChoice() {
@@ -5900,9 +6534,7 @@
         const name = document.querySelector(`#team-${button.dataset.side}-name`).value.trim();
         const who = name || (button.dataset.side === "left" ? "Home" : "Away");
         document.querySelector(`#team-${button.dataset.side}-kicker`).textContent = who;
-        if (!chosen) button.textContent = "Scout this team";
-        else if (selected) button.textContent = "Scouting";
-        else button.textContent = "Other team";
+        button.textContent = selected ? "Scouting" : "Scout";
         button.setAttribute(
           "aria-label",
           selected
@@ -5928,6 +6560,7 @@
       if (!teamsMeter) return;
       if (!progress) {
         teamsMeter.hidden = true;
+        stopTeamsTelemetryClock();
         return;
       }
       teamsMeter.hidden = false;
@@ -5949,6 +6582,109 @@
       teamsStatus.textContent = line;
       teamsStatus.dataset.tone = failed ? "error" : progress.running ? "working" : "";
       teamsTrack.setAttribute("aria-valuetext", line);
+      paintTeamsTelemetry(progress, failed);
+      paintTeamCardFinding(progress);
+      if (progress.running && !failed) startTeamsTelemetryClock(progress);
+      else stopTeamsTelemetryClock();
+    }
+
+    function paintTeamsTelemetry(progress, failed = false) {
+      if (!teamsTelemetry || !teamsFacts || !teamsEvents) return;
+      const running = Boolean(progress.running) && !failed;
+      const facts = [
+        ["Step", stepLabel(progress.step)],
+        ["Progress", `${Math.max(0, Math.min(100, Number(progress.percent) || 0))}%`],
+        ["Elapsed", formatElapsed(progress.elapsed_ms)],
+        ["Attempt", String(Number(progress.attempt) || 1)],
+        ["Frames", String(Number(progress.frames) || 0)],
+        ["Plays", String(Number(progress.plays) || 0)],
+      ];
+      const sides = progress.sides || {};
+      for (const side of ["left", "right"]) {
+        const row = sides[side] || {};
+        const name = side === "left"
+          ? (document.querySelector("#team-left-name")?.value || "Home")
+          : (document.querySelector("#team-right-name")?.value || "Away");
+        facts.push([name, row.label || row.status || (running ? "Working" : "—")]);
+      }
+      teamsFacts.replaceChildren();
+      for (const [term, value] of facts) {
+        const wrap = document.createElement("div");
+        const label = document.createElement("dt");
+        label.textContent = term;
+        const detail = document.createElement("dd");
+        detail.textContent = value;
+        wrap.append(label, detail);
+        teamsFacts.append(wrap);
+      }
+      const events = Array.isArray(progress.events) ? progress.events : [];
+      teamsEvents.replaceChildren();
+      for (const row of events.slice().reverse()) {
+        const item = document.createElement("li");
+        const when = document.createElement("span");
+        when.className = "when";
+        when.textContent = row.at || "";
+        const text = document.createElement("span");
+        text.className = "text";
+        text.textContent = row.text || "";
+        item.append(when, text);
+        teamsEvents.append(item);
+      }
+      teamsTelemetry.hidden = false;
+    }
+
+    function paintTeamCardFinding(progress) {
+      const sides = progress.sides || {};
+      for (const side of ["left", "right"]) {
+        const card = teamsSection.querySelector(`.team-card[data-side="${side}"]`);
+        if (!card) continue;
+        const row = sides[side] || {};
+        const label = row.label || "";
+        if (card.classList.contains("refreshing") && label) {
+          card.dataset.finding = label;
+        } else if (!progress.running) {
+          delete card.dataset.finding;
+        }
+      }
+    }
+
+    function stepLabel(step) {
+      return {
+        read: "Read film",
+        find: "Find players",
+        save: "Save cards",
+      }[step] || step || "Working";
+    }
+
+    function formatElapsed(ms) {
+      const total = Math.max(0, Math.floor(Number(ms) || 0) / 1000);
+      const minutes = Math.floor(total / 60);
+      const seconds = Math.floor(total % 60);
+      return minutes ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
+    }
+
+    function startTeamsTelemetryClock(progress) {
+      stopTeamsTelemetryClock();
+      const started = Number(progress.started_at) || (Date.now() / 1000);
+      teamsTelemetryClock = window.setInterval(() => {
+        if (!teamsMeter || teamsMeter.hidden) {
+          stopTeamsTelemetryClock();
+          return;
+        }
+        const elapsed = Math.max(0, Date.now() - started * 1000);
+        const elapsedCell = [...teamsFacts.querySelectorAll("div")].find((row) => (
+          row.querySelector("dt")?.textContent === "Elapsed"
+        ));
+        if (elapsedCell) {
+          const value = elapsedCell.querySelector("dd");
+          if (value) value.textContent = formatElapsed(elapsed);
+        }
+      }, 500);
+    }
+
+    function stopTeamsTelemetryClock() {
+      if (teamsTelemetryClock) window.clearInterval(teamsTelemetryClock);
+      teamsTelemetryClock = 0;
     }
 
     function hideTeamsProgress() {
@@ -5958,6 +6694,13 @@
       teamsFill.style.width = "0";
       teamsStatus.textContent = "";
       delete teamsStatus.dataset.tone;
+      if (teamsTelemetry) teamsTelemetry.hidden = true;
+      if (teamsFacts) teamsFacts.replaceChildren();
+      if (teamsEvents) teamsEvents.replaceChildren();
+      stopTeamsTelemetryClock();
+      for (const card of teamsSection.querySelectorAll(".team-card[data-finding]")) {
+        delete card.dataset.finding;
+      }
       for (const item of teamsSteps.querySelectorAll("li")) {
         item.classList.remove("done", "now", "stopped");
       }
@@ -5981,10 +6724,10 @@
         paintTeamsProgress(progress, failed);
         if (teams.left_player || teams.right_player) {
           fillTeams(projectId, teams);
-          if (studio.dataset.stage === "teams") showTeamChoices(true);
+          if (studio.dataset.stage === "report") showTeamChoices(true);
         }
         if (!building) return teams;
-        await new Promise((resolve) => window.setTimeout(resolve, 450));
+        await new Promise((resolve) => window.setTimeout(resolve, 280));
       }
       return null;
     }
@@ -5995,12 +6738,10 @@
       teamsSection.dataset.loading = String(projectId);
       if (again) teamsSection.dataset.refreshing = "1";
       selectTeamButton.disabled = true;
-      selectTeamButton.textContent = showing ? "Choose who to scout" : "Finding both teams…";
+      selectTeamButton.textContent = showing ? "Find both teams" : "Finding both teams…";
       teamsNote.textContent = again
         ? (side ? "Finding another player for that team." : "Finding another player from each team.")
-        : teamsNamed()
-          ? "Pick your team. Player photos fill in from the film."
-          : "Finding one player from each team.";
+        : "Finding one player from each team.";
       teamsError.hidden = true;
       teamsRetry.disabled = true;
       teamsRetrySpin.hidden = false;
@@ -6014,6 +6755,26 @@
             : "Looking for one player from each team.",
           attempt: Number(teamsSection.dataset.attempt || 0) + 1,
           running: true,
+          started_at: Date.now() / 1000,
+          elapsed_ms: 0,
+          frames: 0,
+          plays: results.querySelectorAll("li[data-play]").length || 0,
+          events: [{
+            at: new Date().toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            text: again
+              ? (side ? "Refreshing one team's player photo." : "Refreshing both player photos.")
+              : "Starting team-card build.",
+          }],
+          sides: {
+            left: {
+              status: !side || side === "left" ? "waiting" : "idle",
+              label: !side || side === "left" ? "Queued" : "Holding",
+            },
+            right: {
+              status: !side || side === "right" ? "waiting" : "idle",
+              label: !side || side === "right" ? "Queued" : "Holding",
+            },
+          },
         },
         false,
       );
@@ -6032,7 +6793,7 @@
       if (!showing) showTeamChoices(false);
       else showTeamChoices(true);
       paintDock();
-      if (studio.dataset.stage === "teams") paintStageCopy("teams");
+      if (studio.dataset.stage === "report") paintStageCopy("report");
       try {
         const params = new URLSearchParams();
         params.set("wait", "false");
@@ -6096,7 +6857,7 @@
         if (teamsSection.dataset.loading === String(projectId)) delete teamsSection.dataset.loading;
         delete teamsSection.dataset.refreshing;
         selectTeamButton.disabled = false;
-        selectTeamButton.textContent = "Choose who to scout";
+        selectTeamButton.textContent = "Find both teams";
         teamsRetry.disabled = false;
         teamsRetrySpin.hidden = true;
         if (teamsError.hidden) teamsRetryLabel.textContent = "Try different photos";
@@ -6106,8 +6867,8 @@
         }
         releaseTeamRefresh();
         if (!playersReady()) showTeamChoices(false);
-        else if (studio.dataset.stage === "teams") showTeamChoices(true);
-        if (studio.dataset.stage === "teams") paintStageCopy("teams");
+        else if (studio.dataset.stage === "report") showTeamChoices(true);
+        if (studio.dataset.stage === "report") paintStageCopy("report");
         paintDock();
       }
     }
@@ -6145,28 +6906,23 @@
         paintMineChoice();
         const projectId = results.dataset.project;
         if (!projectId) return;
-        if (reportBox.dataset.side && reportBox.dataset.side !== mine.dataset.side) {
-          delete reportBox.dataset.ready;
-          delete reportBox.dataset.saved;
-        }
+        const previousSide = reportBox.dataset.side || "";
         reportBox.dataset.project = String(projectId);
         reportBox.dataset.side = mine.dataset.side;
         reportBox.dataset.labeled = "1";
         chartProgress.dataset.teams = "1";
         const reportLinkStep = chartProgress.querySelector('[data-step="report"] a');
         if (reportLinkStep) reportLinkStep.setAttribute("aria-disabled", "false");
-        const teamsStep = chartProgress.querySelector('[data-step="teams"]');
-        if (teamsStep) teamsStep.dataset.complete = "1";
-        paintStageCopy("teams");
+        paintStageCopy("report");
         paintDock();
-        teamSave = saveTeams({ redraw: false });
+        teamSave = saveTeams({ redraw: false, previousSide });
       });
     }
     for (const card of teamsSection.querySelectorAll('.team-row[role="radiogroup"] .team-card')) {
       card.addEventListener("click", (event) => {
         if (event.target.closest("input, label, button")) return;
         const mine = card.querySelector("button.mine");
-        if (mine) mine.click();
+        if (mine && !mine.disabled) mine.click();
       });
     }
     for (const button of teamsSection.querySelectorAll(".team-refresh")) {
@@ -6180,10 +6936,7 @@
     for (const name of teamsSection.querySelectorAll("input")) {
       name.addEventListener("input", () => {
         paintMineChoice();
-        if (studio.dataset.stage === "teams") {
-          paintStageCopy("teams");
-          paintDock();
-        }
+        if (studio.dataset.stage === "report") paintStageCopy("report");
       });
       name.addEventListener("change", () => {
         if (name.value.trim() === (name.dataset.saved || "")) return;
@@ -6198,6 +6951,10 @@
     });
     teamsSave.addEventListener("click", () => saveTeams());
     reportGenerate.addEventListener("click", () => enableReportDownload());
+    reportReread.addEventListener("click", () => {
+      reportGenerate.dataset.restart = "1";
+      enableReportDownload();
+    });
     stageNext.addEventListener("click", () => {
       const action = stageNext.dataset.action;
       if (action === "breakdown") {
@@ -6263,12 +7020,30 @@
           throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not save those teams.");
         }
         fillTeams(projectId, payload.teams);
+        if (Array.isArray(payload.plays)) {
+          for (const play of payload.plays) syncPlayCard(play);
+        }
+        const hadReport = reportBox.dataset.ready === String(projectId);
         paintReport(payload);
         paintChart(payload);
+        if (hadReport) {
+          const sections = (reportBox.dataset.sections || "").split(",").filter(Boolean);
+          await loadFinishedReport(projectId, sections.length ? sections : reportSelection());
+        }
       } catch (error) {
+        if (options.previousSide && options.previousSide !== (mine ? mine.dataset.side : "")) {
+          for (const button of teamsSection.querySelectorAll("button.mine")) {
+            button.setAttribute(
+              "aria-pressed",
+              button.dataset.side === options.previousSide ? "true" : "false",
+            );
+          }
+          reportBox.dataset.side = options.previousSide;
+          paintMineChoice();
+        }
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
-        teamsNote.textContent = "One player from each team. Pick which team to scout.";
+        teamsNote.textContent = "This only swaps who counts as offense and defense in the report.";
         if (!redraw) reportNote.textContent = error.message || "Could not save that team.";
       } finally {
         teamsSave.disabled = false;
@@ -6310,13 +7085,101 @@
         filmThumb.hidden = true;
         filmLoadingPoster.hidden = false;
       }
-      filmLoadingNote.textContent = "Opening this film";
+      paintFilmLoadingTelemetry(known);
       markCurrent();
+    }
+
+    function paintFilmLoadingTelemetry(known) {
+      if (!filmLoadingMeter || !filmLoadingFacts || !filmLoadingTrack || !filmLoadingFill) {
+        filmLoadingNote.textContent = "Opening this film";
+        return;
+      }
+      if (!known) {
+        filmLoadingNote.textContent = "Opening this film";
+        filmLoadingMeter.hidden = true;
+        filmLoadingFacts.replaceChildren();
+        filmLoadingTrack.classList.remove("moving");
+        filmLoadingFill.style.width = "0";
+        return;
+      }
+      const bucket = projectBucket(known);
+      let percent = null;
+      let sentence = "Opening this film";
+      const facts = [
+        ["Status", bucketLabel[bucket] || known.status || "Opening"],
+        ["Plays", String(Number(known.play_count) || 0)],
+      ];
+      if (known.phase === "charting") {
+        const total = Number(known.report_total) || 0;
+        const done = Number(known.report_done) || 0;
+        percent = total ? Math.min(100, Math.round((100 * done) / total)) : null;
+        sentence = total
+          ? `Opening · report ${done} of ${total}`
+          : "Opening · reading the scouting report";
+        facts.push(["Report", total ? `${done} of ${total}` : "Starting"]);
+      } else if (known.status === "downloading") {
+        percent = downloadPercent(known);
+        sentence = percent == null
+          ? "Opening · still downloading"
+          : `Opening · download ${percent}%`;
+        facts.push([
+          "Download",
+          percent != null
+            ? `${percent}%`
+            : `${formatBytes(known.downloaded || 0)}`,
+        ]);
+      } else if (bucket === "working") {
+        const processing = Number(known.processing);
+        percent = Number.isFinite(processing) && processing > 0
+          ? Math.round(processing)
+          : readPercent(known);
+        sentence = percent == null
+          ? "Opening · finding plays"
+          : `Opening · ${percent}% read`;
+        facts.push([
+          "Read",
+          known.duration
+            ? `${clock(known.scanned || 0)} / ${clock(known.duration)}`
+            : clock(known.scanned || 0),
+        ]);
+      } else if (bucket === "failed") {
+        sentence = "Opening · last run stopped";
+        facts.push(["Phase", known.phase || known.status || "Stopped"]);
+      } else {
+        sentence = Number(known.play_count) > 0
+          ? "Opening · loading plays"
+          : "Opening this film";
+        facts.push(["Phase", known.phase || known.status || "Ready"]);
+      }
+      filmLoadingNote.textContent = sentence;
+      if (percent != null) facts.splice(1, 0, ["Progress", `${percent}%`]);
+      filmLoadingFacts.replaceChildren();
+      for (const [term, value] of facts) {
+        const wrap = document.createElement("div");
+        const label = document.createElement("dt");
+        label.textContent = term;
+        const detail = document.createElement("dd");
+        detail.textContent = value;
+        wrap.append(label, detail);
+        filmLoadingFacts.append(wrap);
+      }
+      filmLoadingMeter.hidden = false;
+      filmLoadingTrack.classList.toggle(
+        "moving",
+        percent == null && (bucket === "working" || bucket === "ready"),
+      );
+      filmLoadingFill.style.width = percent == null ? "0" : `${percent}%`;
+      filmLoadingTrack.setAttribute("aria-valuenow", String(percent == null ? 0 : percent));
+      filmLoadingTrack.setAttribute("aria-valuetext", sentence);
     }
 
     function hideFilmLoading() {
       review.classList.remove("is-loading");
       if (filmLoading) filmLoading.hidden = true;
+      if (filmLoadingMeter) filmLoadingMeter.hidden = true;
+      if (filmLoadingFacts) filmLoadingFacts.replaceChildren();
+      if (filmLoadingTrack) filmLoadingTrack.classList.remove("moving");
+      if (filmLoadingFill) filmLoadingFill.style.width = "0";
     }
 
     async function settlePlayers(token, id) {
@@ -6336,10 +7199,16 @@
         return;
       }
       teamsSection.dataset.refreshing = "1";
-      teamsNote.hidden = false;
-      teamsNote.textContent = progress && progress.detail
-        ? progress.detail
-        : "Updating the player photos.";
+      const scoutSide = document.querySelector("#scout-side");
+      if (!scoutSide || scoutSide.hidden || !playersReady()) {
+        teamsNote.hidden = false;
+        teamsNote.textContent = progress && progress.detail
+          ? progress.detail
+          : "Updating the player photos.";
+      } else {
+        teamsNote.hidden = false;
+        teamsNote.textContent = "This only swaps who counts as offense and defense in the report.";
+      }
       window.setTimeout(() => settlePlayers(token, id), 700);
     }
 
@@ -6420,7 +7289,8 @@
       paintReport(project);
       paintChart(project);
       const failed = hasError(project);
-      const running = !failed && (project.status === "downloading" || project.status === "scanning");
+      const scanning = !failed && (project.status === "downloading" || project.status === "scanning");
+      const charting = project.phase === "charting";
       const sentence = failed
         ? ""
         : progressText(project, plays.length, (project.reviews || []).length);
@@ -6428,8 +7298,9 @@
       status.textContent = "";
       outcome.textContent = sentence;
       outcome.hidden = !sentence;
-      outcome.classList.toggle("working", running);
-      if (running) window.setTimeout(() => follow(token, project.project), 1000);
+      outcome.classList.toggle("working", scanning || charting);
+      if (charting) resumeReportProgress(project.project);
+      if (scanning || charting) window.setTimeout(() => follow(token, project.project), 1000);
     }
 
     function holdOneVideo(event) {
@@ -6699,30 +7570,28 @@
       return `film-stage-${id}`;
     }
 
-    function clampStage(stage, teamsDone) {
-      if (stage === "report" && !teamsDone) return "teams";
-      if (stage === "review" || stage === "teams" || stage === "report") return stage;
+    function clampStage(stage) {
+      if (stage === "teams" || stage === "report") return "report";
+      if (stage === "review") return "review";
       return "review";
     }
 
     function resolveStage(project) {
-      const teamsDone = (project.teams && (project.teams.mine === "left" || project.teams.mine === "right"))
-        || chartProgress.dataset.teams === "1"
-        || Boolean(selectedTeamSide());
       const asked = stageFromScreen(filmLocation()?.screen || "");
-      if (asked && filmLocation()?.id === String(project.project)) return clampStage(asked, teamsDone);
+      if (asked && filmLocation()?.id === String(project.project)) return clampStage(asked);
       if (chartProgress.dataset.intent) {
-        const stage = clampStage(chartProgress.dataset.intent, teamsDone);
+        const stage = clampStage(chartProgress.dataset.intent);
         delete chartProgress.dataset.intent;
         return stage;
       }
       if (chartProgress.dataset.project === String(project.project) && chartProgress.dataset.stage) {
-        return clampStage(chartProgress.dataset.stage, teamsDone);
+        return clampStage(chartProgress.dataset.stage);
       }
       let stored = "";
       try { stored = sessionStorage.getItem(stageKey(project.project)) || ""; } catch { /* private mode */ }
-      if (stored) return clampStage(stored, teamsDone);
-      return teamsDone ? "report" : "review";
+      if (stored) return clampStage(stored);
+      const mine = project.teams && project.teams.mine;
+      return mine === "left" || mine === "right" ? "report" : "review";
     }
 
     function rememberStage(id, stage) {
@@ -6732,11 +7601,11 @@
     }
 
     function applyStage(stage) {
-      const live = stage !== "review" && stage !== "teams" && stage !== "report";
+      const live = stage !== "review" && stage !== "report";
       studio.dataset.stage = live ? "live" : stage;
       stageReview.hidden = !live && stage !== "review";
       if (!live) {
-        teamsSection.hidden = stage !== "teams";
+        teamsSection.hidden = stage !== "report";
         reportBox.hidden = stage !== "report";
         if (stage === "review") setPlaysOpen(true);
         if (stage !== "review") {
@@ -6744,7 +7613,7 @@
         }
       }
       stageDock.hidden = live || stage === "report";
-      if (stage === "teams" && !chartProgress.hidden) beginTeams();
+      if (stage === "report" && !chartProgress.hidden) beginTeams();
     }
 
     function beginTeams() {
@@ -6752,12 +7621,7 @@
       if (!projectId) return;
       if (teamsNamed() || playersReady()) {
         showTeamChoices(true);
-        if (!playersReady()) {
-          if (teamsSection.dataset.loading !== String(projectId)) loadLineup(projectId);
-          return;
-        }
-        if (!referencesReady() && teamsSection.dataset.references !== String(projectId)) {
-          teamsSection.dataset.references = String(projectId);
+        if (!playersReady() && teamsSection.dataset.loading !== String(projectId)) {
           loadLineup(projectId);
         }
         return;
@@ -6777,30 +7641,20 @@
 
     function paintStageCopy(stage) {
       const mine = selectedTeamSide();
-      const teamName = sideName(mine);
-      const opponent = sideName(mine === "left" ? "right" : mine === "right" ? "left" : "");
-      if (stage === "report") {
-        chartNote.textContent = reportOnPage()
-          ? "The scouting report is on this page. Generate again, or download it."
-          : opponent
-            ? `Choose what goes into the report on ${opponent}.`
-            : "Choose what goes into the scouting report.";
-        return;
-      }
-      if (stage === "teams") {
+      if (stage === "report" || stage === "teams") {
         if (teamsSection.dataset.refreshing === "1" || teamsSection.dataset.loading) {
-          chartNote.textContent = teamsStatus.textContent || "Finding different photos.";
+          chartNote.textContent = teamsStatus.textContent || "Finding both teams.";
           return;
         }
-        if (!playersReady()) {
-          chartNote.textContent = "The two uniforms in this film.";
+        if (reportOnPage()) {
+          chartNote.textContent = mine
+            ? "The scouting report is on this page. Generate again, or switch the scouted team to flip offense and defense."
+            : "In report settings, pick the team being scouted. That only flips offense and defense.";
           return;
         }
         chartNote.textContent = mine
-          ? (teamName
-            ? `Scouting ${teamName}. Try different photos if the shot is off.`
-            : "That team is set to scout. Try different photos if the shot is off.")
-          : "Which team do you want to scout? Or try different photos.";
+          ? "Choose what goes into the scouting report."
+          : "In report settings, pick the scouted team, then what to include.";
         return;
       }
       if (stage === "review") {
@@ -6810,82 +7664,43 @@
 
     function paintDock() {
       const stage = studio.dataset.stage;
-      if (stage !== "review" && stage !== "teams") {
+      if (stage !== "review") {
         stageDock.hidden = true;
         return;
       }
       stageDock.hidden = false;
-      if (stage === "review") {
-        const total = results.querySelectorAll(".play-card").length;
-        const reviewed = results.querySelectorAll('.play-card[data-reviewed="1"]').length;
-        const held = reviews.children.length;
-        const reviewLine = !total
-          ? "Review is optional."
-          : reviewed === total
-            ? (total === 1 ? "1 play reviewed." : `All ${total} plays reviewed.`)
-            : `${reviewed} of ${total} reviewed.`;
-        const heldLine = held === 0
-          ? ""
-          : held === 1
-            ? "1 stretch still needs a look."
-            : `${held} stretches still need a look.`;
-        stageStatus.textContent = [reviewLine, heldLine].filter(Boolean).join(" ");
-        const nextUid = nextBreakdownPlay();
-        const breakdownOpen = total > 0 && reviewed < total && nextUid;
-        stageNext.disabled = false;
-        if (breakdownOpen) {
-          stageNext.textContent = reviewed ? "Next clip" : "Start breakdown";
-          stageNext.dataset.action = "breakdown";
-          stageNext.dataset.uid = nextUid;
-        } else {
-          stageNext.textContent = "Choose who to scout";
-          stageNext.dataset.action = "teams";
-          delete stageNext.dataset.uid;
-        }
-        return;
-      }
-      const mine = selectedTeamSide();
-      const teamName = sideName(mine);
-      const building = teamsSection.dataset.loading === String(results.dataset.project || "");
-      if (!teamsNamed() && !playersReady()) {
-        stageStatus.textContent = building ? "Reading uniforms from the film." : "Both teams will appear here.";
-        stageNext.disabled = true;
-        stageNext.textContent = building ? "Finding both teams…" : "Continue";
-        stageNext.dataset.action = "teams";
-        return;
-      }
-      if (!mine) {
-        stageStatus.textContent = "Which team do you want to scout?";
-        stageNext.disabled = true;
-        stageNext.textContent = "Continue";
-        stageNext.dataset.action = "report";
-        return;
-      }
-      stageStatus.textContent = teamName ? `Scouting ${teamName}.` : "A team is set to scout.";
+      const total = results.querySelectorAll(".play-card").length;
+      const reviewed = results.querySelectorAll('.play-card[data-reviewed="1"]').length;
+      const held = reviews.children.length;
+      const reviewLine = !total
+        ? "Review is optional."
+        : reviewed === total
+          ? (total === 1 ? "1 play reviewed." : `All ${total} plays reviewed.`)
+          : `${reviewed} of ${total} reviewed.`;
+      const heldLine = held === 0
+        ? ""
+        : held === 1
+          ? "1 stretch still needs a look."
+          : `${held} stretches still need a look.`;
+      stageStatus.textContent = [reviewLine, heldLine].filter(Boolean).join(" ");
+      const nextUid = nextBreakdownPlay();
+      const breakdownOpen = total > 0 && reviewed < total && nextUid;
       stageNext.disabled = false;
-      stageNext.textContent = "Continue to scout report";
-      stageNext.dataset.action = "report";
+      if (breakdownOpen) {
+        stageNext.textContent = reviewed ? "Next clip" : "Start breakdown";
+        stageNext.dataset.action = "breakdown";
+        stageNext.dataset.uid = nextUid;
+      } else {
+        stageNext.textContent = "Scout report";
+        stageNext.dataset.action = "report";
+        delete stageNext.dataset.uid;
+      }
     }
 
     async function openStage(stage) {
       const projectId = results.dataset.project;
-      const teamsDone = chartProgress.dataset.teams === "1" || Boolean(selectedTeamSide());
-      const next = clampStage(stage, teamsDone);
-      if (next === "report") {
-        const saved = await flushTeamNames();
-        if (!saved) {
-          rememberStage(projectId, "teams");
-          const stay = screenPath(projectId, "teams");
-          if (location.pathname !== stay) history.replaceState({}, "", stay);
-          applyStage("teams");
-          titleForStage("teams");
-          retintSteps("teams");
-          paintStageLabels("teams");
-          paintStageCopy("teams");
-          paintDock();
-          return;
-        }
-      }
+      const next = clampStage(stage);
+      if (next === "report") await flushTeamNames();
       rememberStage(projectId, next);
       const path = screenPath(projectId, next);
       const here = stageFromScreen((filmLocation() || {}).screen || "");
@@ -6894,6 +7709,7 @@
         else history.pushState({}, "", path);
       }
       applyStage(next);
+      if (next === "report") resumeReportProgress(projectId);
       titleForStage(next);
       retintSteps(next);
       paintStageLabels(next);
@@ -6905,28 +7721,24 @@
     }
 
     function paintStageLabels(stage) {
-      const teamsDone = chartProgress.dataset.teams === "1";
       const reportReady = reportBox.dataset.ready === String(results.dataset.project || "");
-      const teamsState = chartProgress.querySelector('[data-step="teams"] .step-state');
       const reportState = chartProgress.querySelector('[data-step="report"] .step-state');
-      if (teamsState) teamsState.textContent = teamsDone ? "Done" : stage === "teams" ? "Now" : "Next";
       if (reportState) {
-        reportState.textContent = reportReady ? "Done" : teamsDone ? "Ready" : "";
+        reportState.textContent = reportReady ? "Done" : stage === "report" ? "Now" : "Next";
       }
     }
 
     function stageFill(stage) {
       if (stage === "report") {
-        return reportBox.dataset.ready === String(results.dataset.project || "") ? 100 : 78;
+        return reportBox.dataset.ready === String(results.dataset.project || "") ? 100 : 68;
       }
-      if (stage === "teams") return chartProgress.dataset.teams === "1" ? 66 : 50;
       const total = results.querySelectorAll(".play-card").length;
       const reviewed = results.querySelectorAll('.play-card[data-reviewed="1"]').length;
-      return total ? Math.max(6, Math.round((reviewed / total) * 30)) : 6;
+      return total ? Math.max(8, Math.round((reviewed / total) * 36)) : 8;
     }
 
     function retintSteps(stage) {
-      for (const name of ["review", "teams", "report"]) {
+      for (const name of ["review", "report"]) {
         const item = chartProgress.querySelector(`[data-step="${name}"]`);
         if (!item) continue;
         markChartStep(item, name === stage ? "now" : item.dataset.complete === "1" ? "done" : "");
@@ -6969,31 +7781,24 @@
         if (mine === "left" || mine === "right") chartProgress.dataset.teams = "1";
         else if (!selectedTeamSide()) chartProgress.dataset.teams = "";
       }
-      const teamsDone = chartProgress.dataset.teams === "1";
-      const reportReady = teamsDone && reportBox.dataset.ready === String(project.project);
+      const reportReady = reportBox.dataset.ready === String(project.project);
       const stage = resolveStage(project);
       rememberStage(project.project, stage);
       const path = screenPath(project.project, stage);
       if (location.pathname !== path) history.replaceState({}, "", path);
       titleForStage(stage);
       const reviewStep = chartProgress.querySelector('[data-step="review"]');
-      const teamsStep = chartProgress.querySelector('[data-step="teams"]');
       const reportStep = chartProgress.querySelector('[data-step="report"]');
       reviewStep.querySelector("a").href = screenPath(project.project, "review");
-      teamsStep.querySelector("a").href = screenPath(project.project, "teams");
       reportStep.querySelector("a").href = screenPath(project.project, "report");
       reviewStep.dataset.complete = reviewDone ? "1" : "";
-      teamsStep.dataset.complete = teamsDone ? "1" : "";
       reportStep.dataset.complete = reportReady ? "1" : "";
       markChartStep(reviewStep, stage === "review" ? "now" : reviewDone ? "done" : "");
-      markChartStep(teamsStep, stage === "teams" ? "now" : teamsDone ? "done" : "");
       markChartStep(reportStep, stage === "report" ? "now" : reportReady ? "done" : "");
-      reportStep.querySelector("a").setAttribute("aria-disabled", teamsDone ? "false" : "true");
+      reportStep.querySelector("a").setAttribute("aria-disabled", "false");
       const filled = stage === "report"
-        ? (reportReady ? 100 : 78)
-        : stage === "teams"
-          ? (teamsDone ? 66 : 50)
-          : Math.max(6, Math.round((reviewed / plays.length) * 30));
+        ? (reportReady ? 100 : 68)
+        : Math.max(8, Math.round((reviewed / plays.length) * 36));
       chartFill.style.width = `${filled}%`;
       chartTrack.setAttribute("aria-valuenow", String(filled));
       reviewStep.querySelector(".step-state").textContent = reviewDone
@@ -7001,8 +7806,11 @@
         : reviewed === 0
           ? "Optional"
           : `${reviewed} of ${plays.length}`;
-      teamsStep.querySelector(".step-state").textContent = teamsDone ? "Done" : stage === "teams" ? "Now" : "Next";
-      reportStep.querySelector(".step-state").textContent = reportReady ? "Done" : teamsDone ? "Ready" : "";
+      reportStep.querySelector(".step-state").textContent = reportReady
+        ? "Done"
+        : stage === "report"
+          ? "Now"
+          : "Next";
       applyStage(stage);
       if (stage === "report") resumeReportProgress(project.project);
       paintStageCopy(stage);
@@ -7011,9 +7819,7 @@
         : `${reviewed} of ${plays.length} plays reviewed. Reviewing is optional.`;
       const nextText = reportReady
         ? "The scouting report is on this page."
-        : teamsDone
-          ? "Generate the scouting report next."
-          : "Choose who to scout next.";
+        : "Generate the scouting report next.";
       chartTrack.setAttribute("aria-valuetext", `${reviewText} ${nextText}`);
       paintDock();
     }
@@ -7075,16 +7881,25 @@
         && Boolean(reportBox.dataset.sections);
       const busy = reportGenerate.dataset.busy === "1";
       const canResume = reportBox.dataset.resume === "1";
+      const missed = Number(reportBox.dataset.missed || 0);
+      const kept = Number(reportBox.dataset.kept || 0);
       reportGenerate.hidden = false;
       reportGenerate.disabled = !saved || busy || picked.length === 0;
+      reportReread.hidden = !(haveReport || kept || canResume);
+      reportReread.disabled = busy;
       if (!busy) {
         reportGenerate.textContent = canResume
-          ? "Continue reading"
+          ? missed
+            ? `Try ${missed} missed ${missed === 1 ? "play" : "plays"}`
+            : "Continue reading"
           : haveReport
-            ? "Generate again"
+            ? "Refresh report"
             : "Generate scouting report";
       }
       const live = reportBox.dataset.live === "1";
+      for (const button of teamsSection.querySelectorAll("button.mine")) {
+        button.disabled = busy || live;
+      }
       const savedSections = reportBox.dataset.sections || "";
       const query = savedSections ? `?sections=${encodeURIComponent(savedSections)}` : "";
       reportLink.href = `/api/projects/${project.project}/report.pdf${query}`;
@@ -7098,6 +7913,13 @@
         && reportBox.dataset.synced !== String(project.project)
       ) {
         resumeReportProgress(project.project);
+      }
+      if (canResume && !haveReport && !busy && !live) {
+        reportNote.textContent = leftoverNote();
+        reportDownloads.hidden = true;
+        reportView.hidden = true;
+        reportLive.hidden = false;
+        return;
       }
       if (busy || (live && !haveReport)) {
         reportDownloads.hidden = true;
@@ -7114,18 +7936,22 @@
       reportView.hidden = !haveReport;
       reportDownloads.hidden = !haveReport;
       reportNote.textContent = haveReport
-        ? "The report is below. Click a play number to open the clip and check the tag."
+        ? missed
+          ? leftoverNote()
+          : "The report is below. Click a play to watch the clip and the tags beside it."
         : canResume
-          ? "Reading stopped partway. Continue to finish the leftover plays."
+          ? leftoverNote()
           : !labeled
-            ? "Choose which team to scout, then choose what the report should include."
+            ? "Pick the team being scouted in report settings. That only flips offense and defense."
             : picked.length
               ? "Generate the scouting report. You can leave and come back while it reads."
               : "Choose at least one part of the report.";
     }
 
     async function resumeReportProgress(projectId) {
-      if (reportBox.dataset.checking === "1" || reportGenerate.dataset.busy === "1") return;
+      if (!projectId) return;
+      if (reportBox.dataset.live === "1" || reportBox.dataset.checking === "1") return;
+      if (reportGenerate.dataset.busy === "1") return;
       if (reportOnPage()) return;
       reportBox.dataset.checking = "1";
       try {
@@ -7151,13 +7977,19 @@
           return;
         }
         if (body.can_resume) {
+          rememberReportCounts(body);
           reportBox.dataset.resume = "1";
           reportLive.hidden = false;
-          reportView.hidden = true;
-          reportDownloads.hidden = true;
+          if (!reportView.childNodes.length) reportView.hidden = true;
+          reportDownloads.hidden = !reportView.childNodes.length || reportView.hidden;
           paintAnalysis({ ...body, running: false });
-          reportNote.textContent = "Reading stopped partway. Continue to finish the leftover plays.";
-          reportGenerate.textContent = "Continue reading";
+          reportNote.textContent = leftoverNote();
+          paintReport({
+            status: "ready",
+            project: projectId,
+            plays: [{}],
+            teams: reportBox.dataset.side ? { mine: reportBox.dataset.side } : null,
+          });
           return;
         }
         delete reportBox.dataset.resume;
@@ -7208,13 +8040,16 @@
       }
       const sections = reportSelection();
       if (!sections.length) return;
-      const restart = reportBox.dataset.resume !== "1";
+      const restart = reportGenerate.dataset.restart === "1";
+      const plays = reportPlayList();
+      delete reportGenerate.dataset.restart;
+      delete reportGenerate.dataset.plays;
       beginReportLive(projectId, sections, restart);
       try {
         const response = await fetch(`/api/projects/${projectId}/report/live`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sections, restart }),
+          body: JSON.stringify({ sections, restart, plays }),
         });
         if (response.status === 409) {
           watchReportFinish(projectId, sections);
@@ -7268,6 +8103,7 @@
               stopReportPoll();
               delete reportBox.dataset.live;
               delete reportGenerate.dataset.busy;
+              rememberReportCounts(body);
               reportBox.dataset.resume = "1";
               paintReport({
                 status: "ready",
@@ -7312,11 +8148,11 @@
       paintReportProgress(0, 0);
       reportLiveTrack.hidden = true;
       reportLive.hidden = false;
-      reportLiveNote.textContent = "Click a play number to open the clip and check the tag.";
+      reportLiveNote.textContent = "Click a play to watch the clip and the tags beside it.";
       renderReport(payload.blocks || []);
       reportView.hidden = false;
       reportDownloads.hidden = false;
-      reportNote.textContent = "The report is below. Click a play number to open the clip and check the tag.";
+      reportNote.textContent = "The report is below. Click a play to watch the clip and the tags beside it.";
       const query = sections.length ? `?sections=${encodeURIComponent(sections.join(","))}` : "";
       try {
         const analysis = await fetch(`/api/projects/${projectId}/report/analysis${query}`);
@@ -7326,13 +8162,19 @@
           const showFormation = sections.includes("formations")
             || rows.some((row) => row.formation);
           paintAnalysisTable(rows, showFormation);
+          rememberReportCounts(body);
+          if (Number(reportBox.dataset.missed || 0)) reportBox.dataset.resume = "1";
           if (body.snapshot && body.snapshot.tendency) paintLiveTendency(body.snapshot);
         }
       } catch {
         /* keep the written report */
       }
-      const fresh = await fetch(`/api/projects/${projectId}`);
-      if (fresh.ok) showReview(await fresh.json());
+      if (results.dataset.project === String(projectId)) {
+        const fresh = await fetch(`/api/projects/${projectId}`);
+        if (fresh.ok && results.dataset.project === String(projectId)) {
+          showReview(await fresh.json());
+        }
+      }
       else {
         paintReport({
           status: "ready",
@@ -7514,6 +8356,9 @@
     }
 
     function paintAnalysisTable(rows, showFormation) {
+      const openDetail = reportAnalysisTable.querySelector("tr.play-review-row");
+      const openUid = openDetail ? openDetail.dataset.uid : "";
+      if (openDetail) openDetail.remove();
       reportAnalysisTable.dataset.formation = showFormation ? "1" : "0";
       const body = reportAnalysisTable.querySelector("tbody");
       body.replaceChildren();
@@ -7527,7 +8372,7 @@
         const playName = playNumber ? `Play ${playNumber}` : String(row.play || "");
         const uid = row.uid || (projectId && playNumber ? `${projectId}-${playNumber}` : "");
         if (uid) {
-          const link = playLink(`/play/${uid}`, playName);
+          const link = playLink(`/play/${uid}`, playName, () => toggleTablePlay(line, uid));
           if (pending) link.classList.add("pending");
           playCell.append(link);
         } else {
@@ -7538,9 +8383,71 @@
         appendLiveCell(line, sideLabel(row.side), pending && !row.side);
         appendLiveCell(line, callLabel(row.call), pending && !row.call);
         appendLiveCell(line, row.formation || "", pending && showFormation && !row.formation);
-        appendLiveCell(line, statusLabel(status), status === "reading");
+        if (status === "missed" && playNumber) {
+          const cell = document.createElement("td");
+          const again = document.createElement("button");
+          again.type = "button";
+          again.className = "retry-play";
+          again.textContent = "Try again";
+          again.addEventListener("click", (event) => {
+            event.stopPropagation();
+            reportGenerate.dataset.plays = JSON.stringify([playNumber]);
+            enableReportDownload();
+          });
+          cell.append(again);
+          line.append(cell);
+        } else {
+          appendLiveCell(line, statusLabel(status), status === "reading");
+        }
+        if (uid) {
+          line.addEventListener("click", () => toggleTablePlay(line, uid));
+        }
         body.append(line);
       }
+      if (!openUid || !openDetail) return;
+      const line = [...body.children].find((row) => row.querySelector(`a[href="/play/${openUid}"]`));
+      if (!line) return;
+      line.after(openDetail);
+      line.classList.add("open");
+      line.setAttribute("aria-expanded", "true");
+    }
+
+    function reportPlayList() {
+      const raw = reportGenerate.dataset.plays || "";
+      if (!raw) return [];
+      try {
+        const plays = JSON.parse(raw);
+        return Array.isArray(plays) ? plays.map((number) => Number(number)).filter((number) => number > 0) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function rememberReportCounts(body) {
+      const rows = (body && body.analysis) || [];
+      const kept = body && body.kept != null
+        ? Number(body.kept)
+        : rows.filter((row) => row.status === "ready").length;
+      const missed = body && body.missed != null
+        ? Number(body.missed)
+        : rows.filter((row) => row.status === "missed").length;
+      reportBox.dataset.kept = String(kept || 0);
+      reportBox.dataset.missed = String(missed || 0);
+    }
+
+    function leftoverNote() {
+      const kept = Number(reportBox.dataset.kept || 0);
+      const missed = Number(reportBox.dataset.missed || 0);
+      const keptLine = kept
+        ? `${kept} ${kept === 1 ? "play is" : "plays are"} kept.`
+        : "";
+      if (missed) {
+        const retry = missed === 1 ? "1 play still needs a read." : `${missed} plays still need a read.`;
+        return [keptLine, retry, "Trying again keeps the finished plays."].filter(Boolean).join(" ");
+      }
+      return keptLine
+        ? `${keptLine} Continue to finish the rest. Finished plays stay.`
+        : "Reading stopped partway. Continue to finish the leftover plays. Finished plays stay.";
     }
 
     function filmSpan(row) {
@@ -7609,6 +8516,11 @@
           reportView.append(reportTable(block.text || ""));
           continue;
         }
+        if (block.kind === "grouped") {
+          const [scope, ...rows] = (block.text || "").split("\n");
+          reportView.append(reportTable(rows.join("\n"), scope));
+          continue;
+        }
         if (block.kind === "clips") {
           const grid = clipGrid(block.text || "", projectId);
           if (grid) reportView.append(grid);
@@ -7620,6 +8532,11 @@
           const grid = clipGridFromSentence(block.text || "", projectId);
           if (grid) {
             reportView.append(grid);
+            continue;
+          }
+          const playNumber = (block.text || "").match(/^Play (\d+)\b/);
+          if (playNumber && projectId) {
+            reportView.append(reportPlayRow(block.text || "", `${projectId}-${playNumber[1]}`));
             continue;
           }
           fillWithPlayLinks(node, block.text || "", projectId);
@@ -7649,7 +8566,7 @@
       if (last < text.length) node.append(text.slice(last));
     }
 
-    function reportTable(text) {
+    function reportTable(text, scope = "") {
       const table = document.createElement("table");
       const rows = text.split("\n").filter(Boolean);
       rows.forEach((line, index) => {
@@ -7665,8 +8582,9 @@
           row.classList.add("report-jump");
           row.tabIndex = 0;
           row.setAttribute("role", "link");
-          row.setAttribute("aria-label", `Show the ${call} plays`);
-          const open = () => openClipGrid(call);
+          const target = scope ? `${scope} · ${call}` : call;
+          row.setAttribute("aria-label", `Show the ${target} plays`);
+          const open = () => openClipGrid(target);
           row.addEventListener("click", open);
           row.addEventListener("keydown", (event) => {
             if (event.key !== "Enter" && event.key !== " ") return;
@@ -7705,7 +8623,11 @@
       for (const number of numbers) {
         const link = document.createElement("a");
         link.href = `/play/${projectId}-${number}`;
-        link.addEventListener("click", (event) => followLink(event, link.getAttribute("href")));
+        link.addEventListener("click", (event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+          event.preventDefault();
+          toggleClipPlay(section, link, `${projectId}-${number}`);
+        });
         const num = document.createElement("span");
         num.className = "num";
         num.textContent = number;
@@ -7727,6 +8649,165 @@
 
     function clipGridId(name) {
       return `report-grid-${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    }
+
+    function reportPlayRow(text, uid) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "report-play";
+      row.textContent = text;
+      row.setAttribute("aria-expanded", "false");
+      row.addEventListener("click", () => toggleBlockPlay(row, uid));
+      return row;
+    }
+
+    function closePlayReviews() {
+      for (const open of document.querySelectorAll(".play-review-row, .play-review-block")) {
+        open.querySelector("video")?.pause();
+        open.remove();
+      }
+      for (const row of document.querySelectorAll("tr.open, button.report-play.open, .clip-grid a.open")) {
+        row.classList.remove("open");
+        row.setAttribute("aria-expanded", "false");
+      }
+    }
+
+    function toggleTablePlay(line, uid) {
+      const next = line.nextElementSibling;
+      const same = next && next.classList.contains("play-review-row") && next.dataset.uid === uid;
+      closePlayReviews();
+      if (same) return;
+      const detail = document.createElement("tr");
+      detail.className = "play-review-row";
+      detail.dataset.uid = uid;
+      const cell = document.createElement("td");
+      cell.colSpan = line.children.length || 6;
+      cell.append(playReviewShell(uid));
+      detail.append(cell);
+      line.after(detail);
+      line.classList.add("open");
+      line.setAttribute("aria-expanded", "true");
+      revealPlayReview(detail);
+    }
+
+    function toggleBlockPlay(row, uid) {
+      const next = row.nextElementSibling;
+      const same = next && next.classList.contains("play-review-block") && next.dataset.uid === uid;
+      closePlayReviews();
+      if (same) return;
+      const host = document.createElement("div");
+      host.className = "play-review-block";
+      host.dataset.uid = uid;
+      host.append(playReviewShell(uid));
+      row.after(host);
+      row.classList.add("open");
+      row.setAttribute("aria-expanded", "true");
+      revealPlayReview(host);
+    }
+
+    function toggleClipPlay(section, link, uid) {
+      const existing = section.querySelector(".play-review-block");
+      const same = existing && existing.dataset.uid === uid;
+      closePlayReviews();
+      if (same) return;
+      const host = document.createElement("div");
+      host.className = "play-review-block";
+      host.dataset.uid = uid;
+      host.append(playReviewShell(uid));
+      section.append(host);
+      link.classList.add("open");
+      link.setAttribute("aria-expanded", "true");
+      revealPlayReview(host);
+    }
+
+    function clipSrc(uid) {
+      const match = String(uid || "").match(/^(\d+)-(\d+)$/);
+      return match ? `/projects/${match[1]}/plays/${match[2]}` : "";
+    }
+
+    function revealPlayReview(node) {
+      requestAnimationFrame(() => node.scrollIntoView({ block: "center" }));
+    }
+
+    function reviewVideo(src) {
+      const video = document.createElement("video");
+      video.controls = true;
+      video.playsInline = true;
+      video.muted = true;
+      video.autoplay = true;
+      video.preload = "auto";
+      if (src) video.src = src;
+      return video;
+    }
+
+    function playReviewShell(uid) {
+      const panel = document.createElement("div");
+      panel.className = "play-review";
+      const video = reviewVideo(clipSrc(uid));
+      panel.append(video);
+      video.play().catch(() => {});
+      loadPlayReview(panel, uid);
+      return panel;
+    }
+
+    async function loadPlayReview(panel, uid) {
+      try {
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`);
+        const play = await response.json().catch(() => ({}));
+        if (!panel.isConnected) return;
+        if (!response.ok) throw new Error(play.detail || "missing");
+        const video = panel.querySelector("video") || reviewVideo("");
+        const src = endpoint(play.video || "") || clipSrc(uid);
+        if (src && video.getAttribute("src") !== src) {
+          video.src = src;
+          video.play().catch(() => {});
+        }
+        panel.querySelector(".play-review-tags")?.remove();
+        panel.querySelector(".play-review-note")?.remove();
+        const tags = document.createElement("dl");
+        tags.className = "play-review-tags";
+        const call = detectedCall(play.play_type);
+        const side = sideLabel(play.unit);
+        const scouting = reportBox.dataset.side === "left" || reportBox.dataset.side === "right";
+        const rows = [
+          ["Call", call],
+          ["Formation", play.formation || ""],
+          [scouting ? "Opponent" : "Side", side],
+        ].filter(([, value]) => value);
+        if (!rows.length) {
+          const empty = document.createElement("p");
+          empty.className = "play-review-note";
+          empty.textContent = "No tags on this play yet.";
+          tags.append(empty);
+        } else {
+          for (const [term, value] of rows) {
+            const group = document.createElement("div");
+            const termNode = document.createElement("dt");
+            termNode.textContent = term;
+            const valueNode = document.createElement("dd");
+            valueNode.textContent = value;
+            group.append(termNode, valueNode);
+            tags.append(group);
+          }
+        }
+        panel.append(video, tags);
+        video.muted = true;
+        video.play().catch(() => {});
+      } catch {
+        if (!panel.isConnected) return;
+        panel.replaceChildren();
+        const note = document.createElement("p");
+        note.className = "play-review-note";
+        note.textContent = "Could not open that clip.";
+        panel.append(note);
+      }
+    }
+
+    function detectedCall(playType) {
+      if (!playType || playType === "scrimmage" || playType === "special_teams" || playType === "junk") {
+        return "";
+      }
+      return callLabel(playType);
     }
 
     function openClipGrid(name) {
@@ -7988,6 +9069,13 @@
 
     function progressText(project, count, held) {
       const plays = count === 1 ? "1 play" : `${count} plays`;
+      if (project.phase === "charting") {
+        const total = Number(project.report_total) || 0;
+        const done = Number(project.report_done) || 0;
+        if (!total) return "Reading the scouting report.";
+        const noun = total === 1 ? "play" : "plays";
+        return `Reading the scouting report. ${done} of ${total} ${noun}.`;
+      }
       if (project.status === "downloading") {
         return "Downloading the film. Plays show up once the download finishes.";
       }

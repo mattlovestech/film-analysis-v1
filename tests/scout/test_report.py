@@ -358,10 +358,7 @@ def test_formation_setting_runs_during_call_charting(tmp_path: Path) -> None:
     store.set_play_unit(1, 2, "defense")
     store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
     store.set_formation_reads(True)
-    plot = (
-        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-        b"\xff\xd9"
-    )
+    plot = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
 
     def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
         del frames, mine, other, kind
@@ -387,10 +384,7 @@ def test_a_person_can_override_the_formation(tmp_path: Path) -> None:
     store.set_play_type(1, 2, "pass", "scrimmage")
     store.set_play_unit(1, 2, "defense")
     store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
-    plot = (
-        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-        b"\xff\xd9"
-    )
+    plot = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
 
     def name(frames: list[bytes], mine: object, other: object, call: str = "") -> FormationRead:
         del frames, mine, other, call
@@ -417,7 +411,7 @@ def test_a_person_can_override_the_formation(tmp_path: Path) -> None:
     assert still.status_code == 200
 
 
-def test_formations_are_read_for_the_opponents_offense(tmp_path: Path) -> None:
+def test_formations_are_read_for_both_offenses(tmp_path: Path) -> None:
     from film_analysis.chart.call import ChartedPlay
     from film_analysis.chart.formation import FormationRead
 
@@ -425,10 +419,7 @@ def test_formations_are_read_for_the_opponents_offense(tmp_path: Path) -> None:
     store.set_play_unit(1, 2, "defense")
     store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
     seen: list[tuple[str, str]] = []
-    plot = (
-        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-        b"\xff\xd9"
-    )
+    plot = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
 
     def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
         del frames, mine, other, kind
@@ -443,13 +434,22 @@ def test_formations_are_read_for_the_opponents_offense(tmp_path: Path) -> None:
     created = client.post("/api/projects/1/report", json={"sections": ["formations"]})
 
     assert created.status_code == 200
-    assert seen == [("dark blue", "pass")]
-    text = "\n".join(block["text"] for block in created.json()["blocks"])
+    assert sorted(seen) == [("dark blue", "pass"), ("white", "run")]
+    blocks = created.json()["blocks"]
+    text = "\n".join(block["text"] for block in blocks)
     assert "Formations" in text
     assert "Away offense: 1 Shotgun." in text
     assert "This read is experimental." in text
+    headings = [block["text"] for block in blocks if block["kind"] == "heading"]
+    assert headings[-4:] == ["Away offense", "Away defense", "Home offense", "Home defense"]
+    assert "Away had the ball on 1 snap: 0 runs (0%) and 1 pass (100%)." in text
+    assert "Home defended 1 snap and faced 0 runs (0%) and 1 pass (100%) from Away." in text
+    grids = [block["text"] for block in blocks if block["kind"] == "clips"]
+    assert "Away offense · Shotgun\t2" in grids
+    assert "Home defense · Shotgun\t2" in grids
+    assert "Home offense · Shotgun\t1" in grids
     plays = store.get_project(1).plays
-    assert plays[0].formation is None
+    assert plays[0].formation == "shotgun"
     assert plays[0].unit == "offense"
     assert plays[1].formation == "shotgun"
     assert plays[1].unit == "defense"
@@ -503,7 +503,6 @@ def test_special_teams_do_not_block_the_report(tmp_path: Path) -> None:
 
 
 def test_report_progress_survives_leaving_the_stream(tmp_path: Path) -> None:
-    import json
     import threading
     import time
 
@@ -536,20 +535,31 @@ def test_report_progress_survives_leaving_the_stream(tmp_path: Path) -> None:
             json={"sections": ["tendencies"]},
         ) as response:
             assert response.status_code == 200
-            lines.extend(line for line in response.iter_lines() if line)
+            for line in response.iter_lines():
+                if line:
+                    lines.append(line)
+                    return
 
     worker = threading.Thread(target=follow)
     worker.start()
     assert started.wait(timeout=2)
+    worker.join(timeout=3)
+    assert lines
+    assert not worker.is_alive()
     mid = client.get("/api/projects/1/report/analysis?sections=tendencies")
     assert mid.status_code == 200
     body = mid.json()
     assert body["running"] is True
     assert body["total"] == 2
     assert body["done"] < 2
+    listed = client.get("/api/projects").json()
+    assert listed[0]["phase"] == "charting"
+    assert listed[0]["running"] is True
+    assert listed[0]["report_total"] == 2
+    detail = client.get("/api/projects/1").json()
+    assert detail["phase"] == "charting"
+    assert detail["report_total"] == 2
     gate.set()
-    worker.join(timeout=5)
-    assert any(json.loads(line).get("ready") is True for line in lines)
     for _ in range(50):
         done = client.get("/api/projects/1/report/analysis?sections=tendencies")
         if done.json()["running"] is False and done.json()["done"] == 2:
@@ -600,6 +610,53 @@ def test_unfinished_report_rows_can_be_retried(tmp_path: Path) -> None:
     assert client.get("/api/projects/1/report/analysis").json()["can_resume"] is False
 
 
+def test_a_missed_play_can_be_tried_again_without_losing_the_rest(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
+
+    store = _ready_film(tmp_path)
+    store.set_film_teams(1, FilmTeams("North", "South", "left"))
+    calls = {"n": 0}
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other, kind
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("read failed")
+        return ChartedPlay(
+            call="pass",
+            side="defense",
+            input_tokens=500,
+            output_tokens=50,
+            model="claude-sonnet-5-5",
+        )
+
+    client = TestClient(create_app(store=store, chart=chart, workers=1))
+    first = client.post("/api/projects/1/report/live", json={"sections": ["tendencies"]})
+
+    assert first.status_code == 200
+    stopped = client.get("/api/projects/1/report/analysis?sections=tendencies").json()
+    assert stopped["running"] is False
+    assert stopped["kept"] == 1
+    assert stopped["missed"] == 1
+    assert stopped["can_resume"] is True
+    assert {row["play"]: row["status"] for row in stopped["analysis"]} == {
+        1: "missed",
+        2: "ready",
+    }
+
+    again = client.post(
+        "/api/projects/1/report/live",
+        json={"sections": ["tendencies"], "plays": [1]},
+    )
+
+    assert again.status_code == 200
+    finished = client.get("/api/projects/1/report/analysis?sections=tendencies").json()
+    assert finished["kept"] == 2
+    assert finished["missed"] == 0
+    assert finished["can_resume"] is False
+    assert calls["n"] == 3
+
+
 def _ready_film(tmp_path: Path) -> MemoryCatalog:
     store = MemoryCatalog(tmp_path)
     project_id = store.create_project("Friday night", None)
@@ -616,3 +673,66 @@ def _ready_film(tmp_path: Path) -> MemoryCatalog:
     store.add_play(project_id, 2, 12.0, 19.0, clip, "scrimmage")
     store.set_play_type(project_id, 1, "run", "scrimmage")
     return store
+
+
+def test_each_team_groups_its_snaps_by_formation() -> None:
+    from film_analysis.scout.report import NOT_READ, scouting_pdf, team_breakdowns
+
+    def snap(number: int, unit: str, call: str, formation: str | None) -> PlayRecord:
+        start = number * 10.0
+        return PlayRecord(number, start, start + 6, "scrimmage", call, False, unit, formation)
+
+    plays = [
+        snap(1, "defense", "run", "i_form"),
+        snap(2, "defense", "run", "i_form"),
+        snap(3, "defense", "run", "i_form"),
+        snap(4, "defense", "pass", "shotgun"),
+        snap(5, "defense", "pass", None),
+        snap(6, "offense", "pass", "shotgun"),
+        snap(7, "offense", "run", None),
+        PlayRecord(8, 80.0, 85.0, "special_teams", "punt"),
+    ]
+    teams = FilmTeams("Pike County", "Lamar County", "left")
+
+    units = team_breakdowns(teams, plays)
+
+    assert [(unit.team, unit.unit) for unit in units] == [
+        ("Lamar County", "offense"),
+        ("Lamar County", "defense"),
+        ("Pike County", "offense"),
+        ("Pike County", "defense"),
+    ]
+    lamar = units[0]
+    assert lamar.snaps == 5
+    assert lamar.read == 4
+    assert [(group.formation, group.plays) for group in lamar.groups] == [
+        ("I-formation", (1, 2, 3)),
+        ("Shotgun", (4,)),
+        (NOT_READ, (5,)),
+    ]
+    assert units[1].groups == units[2].groups
+    blocks = scouting_blocks("Week 6", teams, plays, ["formations"])
+    text = "\n".join(text for _kind, text in blocks)
+    assert (
+        "Lamar County had the ball on 5 snaps: 3 runs (60%) and 2 passes (40%). "
+        "Most used: I-formation, 3 of 4 (75%), run 100% of the time." in text
+    )
+    assert "Formation read on 4 of 5 snaps. 1 still need a formation." in text
+    table = "Lamar County offense\nFormation\tPlays\tShare\tRun\tPass\nI-formation\t3\t75%\t3\t0"
+    assert table in text
+    assert "Lamar County offense · I-formation\t1\t2\t3" in text
+    assert "Pike County defense · I-formation\t1\t2\t3" in text
+    pdf = scouting_pdf("Week 6", teams, plays, ["formations"])
+    assert pdf.startswith(b"%PDF")
+    assert b"I-formation: Play 1, Play 2, Play 3" in pdf
+
+
+def test_a_team_with_no_snaps_says_so() -> None:
+    from film_analysis.scout.report import scouting_blocks
+
+    plays = [PlayRecord(1, 0.0, 5.0, "scrimmage", "run", False, "offense", "shotgun")]
+    blocks = scouting_blocks("Week 1", FilmTeams("Home", "Away", "left"), plays, ["formations"])
+    text = "\n".join(text for _kind, text in blocks)
+
+    assert "Away has no offensive snaps charted in this film." in text
+    assert "Home had the ball on 1 snap: 1 run (100%) and 0 passes (0%)." in text

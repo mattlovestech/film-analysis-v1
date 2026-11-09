@@ -19,15 +19,20 @@ SPECIAL_CALLS = frozenset(
 )
 
 _SCRIMMAGE_PROMPT = (
-    "These frames are one play, in order. "
-    "Your team wears {mine}. The opponent wears {other}. "
-    "Decide whether this is an offensive or defensive play for the opponent. "
-    "The opponent is on offense when the opponent has the ball. "
-    "The opponent is on defense when your team has the ball. "
-    "Say whether the offense ran or passed. "
-    "A run is a handoff or a keeper. A pass is a throw. "
+    "These frames are one scrimmage play, in order, from the snap to the whistle. "
+    "Team A is {mine_name}. Team A wears {mine}. "
+    "Team B is {other_name}. Team B wears {other}.{contrast} "
+    "First decide which team has the ball. "
+    "If a broadcast scorebug is visible, it usually marks the team with the ball "
+    "with a small bar, dot, or football beside that team's name or score; trust it. "
+    "Otherwise the offense is the team with the quarterback taking the snap and the "
+    "backs lined up behind its line, and the defense faces it across the ball. "
+    "After the snap the ball carrier or the receiver belongs to the offense. "
+    "Then say whether the offense ran or passed. "
+    "A run is a handoff, a pitch, or a quarterback keeper or scramble. "
+    "A pass is a throw, including a sack or an incompletion on a dropback. "
     "Do not explain. The whole reply is one JSON object. "
-    'Reply with JSON only: {{"call":"run","opponent":"offense"}}'
+    'Reply with JSON only: {{"offense":"A","call":"run"}}'
 )
 
 
@@ -56,10 +61,47 @@ _SPECIAL_PROMPT = (
 def chart_prompt(mine: Uniform, other: Uniform, kind: str = SCRIMMAGE) -> str:
     """Ask for a run or a pass, or for the special-teams play your team is on."""
 
-    template = _SPECIAL_PROMPT if kind == SPECIAL_TEAMS else _SCRIMMAGE_PROMPT
-    return apply_coach_notes(
-        template.format(mine=uniform_line(mine), other=uniform_line(other))
-    )
+    if kind == SPECIAL_TEAMS:
+        prompt = _SPECIAL_PROMPT.format(mine=uniform_line(mine), other=uniform_line(other))
+    else:
+        prompt = _SCRIMMAGE_PROMPT.format(
+            mine=uniform_line(mine),
+            other=uniform_line(other),
+            mine_name=_team_name(mine, "your team"),
+            other_name=_team_name(other, "the opponent"),
+            contrast=_contrast(mine, other),
+        )
+    return apply_coach_notes(prompt)
+
+
+def _team_name(uniform: Uniform, fallback: str) -> str:
+    name = (uniform.name or "").strip()
+    if not name or name.lower() in {"home", "away", "left", "right", "team a", "team b"}:
+        return fallback
+    return f"{name}, {fallback}"
+
+
+def _contrast(mine: Uniform, other: Uniform) -> str:
+    """Name the darker jersey when the color words alone may not tell them apart."""
+
+    mine_light = _lightness(mine.jersey_hex)
+    other_light = _lightness(other.jersey_hex)
+    if mine_light is None or other_light is None or abs(mine_light - other_light) < 0.15:
+        return ""
+    if mine_light < other_light:
+        return " Team A's jerseys are darker than Team B's."
+    return " Team B's jerseys are darker than Team A's."
+
+
+def _lightness(hex_code: str) -> float | None:
+    text = (hex_code or "").strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        red, green, blue = (int(text[index : index + 2], 16) / 255 for index in (0, 2, 4))
+    except ValueError:
+        return None
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
 
 
 def parse_play_call(reply: str, kind: str = SCRIMMAGE) -> str | None:
@@ -78,14 +120,19 @@ def parse_play_call(reply: str, kind: str = SCRIMMAGE) -> str | None:
 def parse_play_side(reply: str, kind: str = SCRIMMAGE) -> str | None:
     """Which side your team is on.
 
-    The model names the opponent's side. Opponent offense means your team is
-    on defense, and opponent defense means your team has the ball.
+    The model names the team with the ball: A is your team, B the opponent.
+    Older replies named the opponent's side instead, and those still parse.
     """
 
     if kind != SCRIMMAGE:
         return None
     payload = _json_object(reply)
     if payload is not None:
+        offense = str(payload.get("offense") or "").strip().lower()
+        if offense in {"a", "team a"}:
+            return "offense"
+        if offense in {"b", "team b"}:
+            return "defense"
         opponent = str(payload.get("opponent") or "").strip().lower()
         if opponent == "offense":
             return "defense"
@@ -110,7 +157,7 @@ def chart_play(
 ) -> ChartedPlay | None:
     """Look at a few frames and name the call for this kind of play."""
 
-    jpegs = [frame for frame in frames if frame.startswith(b"\xff\xd8\xff")][:4]
+    jpegs = [frame for frame in frames if frame.startswith(b"\xff\xd8\xff")][:6]
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not jpegs or not api_key:
         return None

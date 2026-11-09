@@ -215,31 +215,40 @@ def full_body_shot(
     other = _rgb(other_hex) if other_hex else None
     if target is None:
         return None
-    best: tuple[tuple[int, int, int, int], object] | None = None
-    fresh: tuple[tuple[int, int, int, int], object] | None = None
+    best: tuple[tuple[int, int, int, int, int, int], object] | None = None
+    fresh: tuple[tuple[int, int, int, int, int, int], object] | None = None
     for frame in frames:
         image = _bgr(frame)
         if image is None:
             continue
         frame_height, frame_width = image.shape[:2]
-        for box in _separate(_hog_people(image)):
-            if not _standing(box):
+        people = _separate(_hog_people(image))
+        for box in people:
+            if not _standing(box) or box.height < 140:
+                continue
+            if _crowd(box, people):
                 continue
             sample = _uniform_colors(image, box)
             if sample is None:
                 continue
             own = _distance(sample[0], target)
-            if own > 55 * 55 * 3:
+            if not _jersey_close(sample[0], target, own):
                 continue
             if other is not None and _distance(sample[0], other) <= own:
                 continue
-            if other is not None and _other_share(image, box, other) > 0.12:
-                continue
+            if other is not None:
+                # White pants/helmets and turf highlights look like a white jersey.
+                share_limit = 0.22 if _light_cloth(other) else 0.12
+                if _other_share(image, box, other) > share_limit:
+                    continue
             crop = _player_crop(image, box)
             if crop is None or not _usable_player_crop(crop):
                 continue
+            open_field = 0 if _open_field(crop) else 1
+            alone = 0 if _alone(crop) else 1
             clipped = 0 if _inside(box, frame_width, frame_height) else 1
-            rank = (own, clipped, -_sharpness(crop), -box.height)
+            # Open grass beside the body, then color fit, then size and sharpness.
+            rank = (open_field, alone, own, clipped, -box.height, -_sharpness(crop))
             if best is None or rank < best[0]:
                 best = (rank, crop)
             if not _matches_saved(crop, avoid) and (fresh is None or rank < fresh[0]):
@@ -248,6 +257,31 @@ def full_body_shot(
     if chosen is None:
         return None
     return _jpeg_edge(chosen[1], 960)
+
+
+def _jersey_close(
+    sample: tuple[int, int, int],
+    target: tuple[int, int, int],
+    distance: int,
+) -> bool:
+    """True when this cloth is the target jersey — gray must not match blue."""
+
+    span = max(target) - min(target)
+    bright = max(target) > 165 and span < 45
+    if bright:
+        sample_span = max(sample) - min(sample)
+        return distance <= 70 * 70 * 3 and max(sample) > 150 and sample_span < 55
+    # Broadcast crops dull team colors; still reject olive/mud and wrong-channel cloth.
+    if distance > 58 * 58 * 3:
+        return False
+    target_channel = max(range(3), key=lambda index: target[index])
+    sample_channel = max(range(3), key=lambda index: sample[index])
+    if (
+        sample_channel != target_channel
+        and sample[target_channel] < sample[sample_channel] - 12
+    ):
+        return False
+    return sample[target_channel] >= target[target_channel] - 55
 
 
 def lone_players(
@@ -260,8 +294,8 @@ def lone_players(
     skipped when another player of that jersey is in the frames.
     """
 
-    best: dict[str, tuple[tuple[int, int, int, int, int], object]] = {}
-    fresh: dict[str, tuple[tuple[int, int, int, int, int], object]] = {}
+    best: dict[str, tuple[tuple[int, int, int, int, int, int], object]] = {}
+    fresh: dict[str, tuple[tuple[int, int, int, int, int, int], object]] = {}
     for frame in frames:
         image = _bgr(frame)
         if image is None:
@@ -277,6 +311,7 @@ def lone_players(
             if kind is None:
                 continue
             score = (
+                1 if _open_field(crop) else 0,
                 1 if _alone(crop) else 0,
                 1 if box.height >= 220 else 0,
                 1 if box.height >= 140 else 0,
@@ -317,7 +352,7 @@ def _usable_player_crop(crop, *, require_alone: bool = False) -> bool:
     if _striped(crop):
         return False
     grass = _grass(crop)
-    if grass > 0.65 or grass < 0.08:
+    if grass > 0.65 or grass < 0.16:
         return False
     # Green above the helmet — rejects waist-up crops and sideline busts.
     top = crop[: max(1, int(height * 0.14)), :]
@@ -424,6 +459,18 @@ def _alone(crop) -> bool:
     left = _grass(torso[:, : max(1, int(width * 0.16))])
     right = _grass(torso[:, int(width * 0.84) :])
     return left >= 0.75 and right >= 0.75
+
+
+def _open_field(crop) -> bool:
+    """Grass on both sides of the torso — enough room that this is not a pile."""
+
+    height, width = crop.shape[:2]
+    if height < 90 or width < 28:
+        return False
+    torso = crop[int(height * 0.25) : int(height * 0.7), :]
+    left = _grass(torso[:, : max(1, int(width * 0.14))])
+    right = _grass(torso[:, int(width * 0.86) :])
+    return left >= 0.4 and right >= 0.4
 
 
 def _grass(region) -> float:
@@ -652,6 +699,8 @@ def _dark_bar_between(peaks: list[int], smooth, saturation) -> bool:
 def _jersey_kind(crop) -> str | None:
     """White cloth, or a solid color. Gray sideline clothes are neither."""
 
+    if _striped(crop):
+        return None
     sample = _jersey_sample(crop)
     if sample is None:
         return None
@@ -688,6 +737,29 @@ def _jersey_sample(crop) -> tuple[float, float, float] | None:
         sum(item[0] for item in kept) / count,
         sum(item[1] for item in kept) / count,
         count / band.reshape(-1, 3).shape[0],
+    )
+
+
+def _jersey_sample_rgb(crop) -> tuple[int, int, int] | None:
+    """Average jersey RGB from the torso band, grass skipped."""
+
+    height, width = crop.shape[:2]
+    band = crop[int(height * 0.22) : int(height * 0.52), int(width * 0.25) : int(width * 0.75)]
+    if band.size == 0:
+        return None
+    kept: list[tuple[int, int, int]] = []
+    for blue, green, red in band.reshape(-1, 3)[::2]:
+        red, green, blue = int(red), int(green), int(blue)
+        if _skip(red, green, blue):
+            continue
+        kept.append((red, green, blue))
+    if len(kept) < 8:
+        return None
+    count = len(kept)
+    return (
+        round(sum(red for red, _green, _blue in kept) / count),
+        round(sum(green for _red, green, _blue in kept) / count),
+        round(sum(blue for _red, _green, blue in kept) / count),
     )
 
 
@@ -786,7 +858,7 @@ def _expanded(image, x: int, y: int, width: int, height: int):
 def _standing(box: PlayerBox) -> bool:
     """A clear full-body player, not a distant speck in the wide shot."""
 
-    return box.height >= 160 and box.width >= 36 and box.height >= box.width * 1.8
+    return box.height >= 140 and box.width >= 32 and box.height >= box.width * 1.55
 
 
 def _inside(box: PlayerBox, frame_width: int, frame_height: int) -> bool:
@@ -813,6 +885,8 @@ def _other_share(image, box: PlayerBox, other: tuple[int, int, int]) -> float:
     crop = image[y : y + box_height, x : x + box_width]
     if crop.size == 0:
         return 1.0
+    # White uniforms need a tighter match so gray turf glare is not counted.
+    limit = 40 * 40 * 3 if _light_cloth(other) else 55 * 55 * 3
     other_pixels = 0
     cloth = 0
     for blue, green, red in crop.reshape(-1, 3)[::3]:
@@ -820,7 +894,7 @@ def _other_share(image, box: PlayerBox, other: tuple[int, int, int]) -> float:
         if _skip(red, green, blue):
             continue
         cloth += 1
-        if _distance((red, green, blue), other) < 55 * 55 * 3:
+        if _distance((red, green, blue), other) < limit:
             other_pixels += 1
     if cloth < 8:
         return 1.0

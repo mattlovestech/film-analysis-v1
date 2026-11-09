@@ -41,7 +41,7 @@ class PlayRead:
 
 
 REPORT_SECTIONS = frozenset({"calls", "special", "tendencies", "plays", "formations"})
-_DEFAULT_SECTIONS = frozenset({"calls", "special", "tendencies", "plays"})
+_DEFAULT_SECTIONS = frozenset({"calls", "special", "tendencies", "plays", "formations"})
 
 
 def report_sections(names: Sequence[str] | None) -> frozenset[str]:
@@ -177,9 +177,8 @@ def scouting_blocks(
         formed_name = opponent if owned else "Offense"
         blocks.append(("heading", "Formations"))
         blocks.append(("body", _formation_copy(formed_plays, formed_name)))
-        formed = [play for play in formed_plays if play.formation]
-        if formed:
-            blocks.extend(_play_lines(formed, teams))
+        for breakdown in team_breakdowns(teams, plays):
+            blocks.extend(_breakdown_blocks(breakdown))
     return blocks
 
 
@@ -207,9 +206,11 @@ def scouting_pdf(
             pdf.multi_cell(0, 7, safe, new_x="LMARGIN", new_y="NEXT")
         elif kind == "table":
             _pdf_table(pdf, text)
+        elif kind == "grouped":
+            _pdf_table(pdf, text.split("\n", 1)[1] if "\n" in text else "")
         elif kind == "clips":
             pdf.set_font("Helvetica", size=11)
-            pdf.multi_cell(0, 6, _clip_line(text), new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(0, 6, _clip_line(safe), new_x="LMARGIN", new_y="NEXT")
         else:
             pdf.set_font("Helvetica", size=11)
             pdf.multi_cell(0, 6, safe, new_x="LMARGIN", new_y="NEXT")
@@ -320,10 +321,16 @@ def _share(count: int, total: int) -> str:
 
 def _pdf_table(pdf: FPDF, text: str) -> None:
     rows = [line.split("\t") for line in text.splitlines() if line]
+    if not rows:
+        return
+    columns = max(len(row) for row in rows)
+    first = 54 if columns > 3 else 42
+    rest = min(42.0, (pdf.epw - first) / max(1, columns - 1))
     for index, row in enumerate(rows):
         pdf.set_font("Helvetica", "B" if index == 0 else "", 11)
-        for cell in row:
-            pdf.cell(42, 7, cell, border=1)
+        for position, cell in enumerate(row):
+            safe = cell.encode("latin-1", "replace").decode("latin-1")
+            pdf.cell(first if position == 0 else rest, 7, safe, border=1)
         pdf.ln(7)
 
 
@@ -368,13 +375,7 @@ def _reading(play: PlayRecord, chosen: frozenset[str]) -> list[str]:
             fields.append("side")
         if play.play_type not in {"run", "pass"}:
             fields.append("call")
-        open_side = play.unit not in {"offense", "defense"}
-        if (
-            "formations" in chosen
-            and not play.formation
-            and play.unit != "offense"
-            and (play.unit == "defense" or open_side)
-        ):
+        if "formations" in chosen and not play.formation:
             fields.append("formation")
         return fields
     specials = {
@@ -428,9 +429,13 @@ def tendency_lines(
     reads = play_reads(plays)
     yours, opponent, owned = _names(teams)
     lines: list[str] = []
-    groups = (("defense", "offense"), ("offense", "defense")) if owned else (
-        ("offense", "offense"),
-        ("defense", "defense"),
+    groups = (
+        (("defense", "offense"), ("offense", "defense"))
+        if owned
+        else (
+            ("offense", "offense"),
+            ("defense", "defense"),
+        )
     )
     for stored, spoken in groups:
         side = [play for play in reads if play.side == stored]
@@ -564,8 +569,7 @@ def _call_play_index(plays: Sequence[PlayRead]) -> list[tuple[str, str]]:
             groups[play.call] = []
         groups[play.call].append(play.number)
     return [
-        ("clips", "\t".join([name, *(str(number) for number in groups[name])]))
-        for name in order
+        ("clips", "\t".join([name, *(str(number) for number in groups[name])])) for name in order
     ]
 
 
@@ -579,9 +583,7 @@ def _clip_line(text: str) -> str:
     return f"{parts[0]}: {plays}" if plays else parts[0]
 
 
-def _play_lines(
-    plays: Sequence[PlayRead], teams: FilmTeams | None = None
-) -> list[tuple[str, str]]:
+def _play_lines(plays: Sequence[PlayRead], teams: FilmTeams | None = None) -> list[tuple[str, str]]:
     return [("row", _play_line(play, teams)) for play in plays]
 
 
@@ -598,12 +600,177 @@ def _play_line(play: PlayRead, teams: FilmTeams | None = None) -> str:
 def _formation_copy(plays: Sequence[PlayRead], team: str) -> str:
     named = [play for play in plays if play.formation]
     if not named:
-        return f"No formation was read for {team} offense. This read is experimental."
+        return f"No formation was read for {team} offense."
     counts: dict[str, int] = {}
     for play in named:
         counts[play.formation] = counts.get(play.formation, 0) + 1
-    pieces = [f"{count} {name}" for name, count in counts.items()]
-    return f"{team} offense: {', '.join(pieces)}. This read is experimental."
+    ranked = sorted(counts.items(), key=lambda item: -item[1])
+    pieces = [f"{count} {name}" for name, count in ranked]
+    return f"{team} offense: {', '.join(pieces)}."
+
+
+NOT_READ = "Formation not read"
+
+
+@dataclass(frozen=True)
+class FormationGroup:
+    """The snaps one offense ran from one formation."""
+
+    formation: str
+    plays: tuple[int, ...]
+    runs: int
+    passes: int
+
+
+@dataclass(frozen=True)
+class UnitBreakdown:
+    """One team on one side of the ball, grouped by the offense's formation.
+
+    On defense the formation is the one the other team's offense lined up in,
+    because the formation read names the offense's alignment.
+    """
+
+    team: str
+    unit: str
+    opponent: str
+    snaps: int
+    runs: int
+    passes: int
+    groups: tuple[FormationGroup, ...]
+
+    @property
+    def read(self) -> int:
+        return sum(len(group.plays) for group in self.groups if group.formation != NOT_READ)
+
+    @property
+    def scope(self) -> str:
+        return f"{self.team} {self.unit}"
+
+
+def team_breakdowns(
+    teams: FilmTeams | None,
+    plays: Sequence[PlayRecord],
+) -> list[UnitBreakdown]:
+    """Each team's offense and defense. The team you play next comes first."""
+
+    reads = play_reads(plays)
+    yours, opponent, owned = _names(teams)
+    if not owned and teams is not None:
+        yours, opponent = teams.left_name, teams.right_name
+    # A stored "offense" means the user's team (or the left team) had the ball.
+    with_ball = {
+        yours: [play for play in reads if play.side == "offense"],
+        opponent: [play for play in reads if play.side == "defense"],
+    }
+    order = (opponent, yours) if owned else (yours, opponent)
+    breakdowns: list[UnitBreakdown] = []
+    for team in order:
+        other = opponent if team == yours else yours
+        breakdowns.append(_unit_breakdown(team, "offense", other, with_ball[team]))
+        breakdowns.append(_unit_breakdown(team, "defense", other, with_ball[other]))
+    return breakdowns
+
+
+def _unit_breakdown(
+    team: str, unit: str, opponent: str, snaps: Sequence[PlayRead]
+) -> UnitBreakdown:
+    grouped: dict[str, list[PlayRead]] = {}
+    for play in snaps:
+        grouped.setdefault(play.formation or NOT_READ, []).append(play)
+    ranked = sorted(
+        grouped.items(),
+        key=lambda item: (item[0] == NOT_READ, -len(item[1]), item[1][0].number),
+    )
+    groups = tuple(
+        FormationGroup(
+            name,
+            tuple(play.number for play in members),
+            sum(1 for play in members if play.call_key == "run"),
+            sum(1 for play in members if play.call_key == "pass"),
+        )
+        for name, members in ranked
+    )
+    return UnitBreakdown(
+        team,
+        unit,
+        opponent,
+        len(snaps),
+        sum(1 for play in snaps if play.call_key == "run"),
+        sum(1 for play in snaps if play.call_key == "pass"),
+        groups,
+    )
+
+
+def _breakdown_blocks(breakdown: UnitBreakdown) -> list[tuple[str, str]]:
+    """Heading, summary, formation table, and one play grid per formation."""
+
+    blocks: list[tuple[str, str]] = [("heading", f"{breakdown.team} {breakdown.unit}")]
+    blocks.append(("body", _breakdown_copy(breakdown)))
+    if not breakdown.snaps:
+        return blocks
+    rows = ["Formation\tPlays\tShare\tRun\tPass"]
+    for group in breakdown.groups:
+        share = "" if group.formation == NOT_READ else _share(len(group.plays), breakdown.read)
+        rows.append(f"{group.formation}\t{len(group.plays)}\t{share}\t{group.runs}\t{group.passes}")
+    blocks.append(("grouped", "\n".join([breakdown.scope, *rows])))
+    for group in breakdown.groups:
+        name = f"{breakdown.scope} · {group.formation}"
+        blocks.append(("clips", "\t".join([name, *(str(number) for number in group.plays)])))
+    return blocks
+
+
+def _breakdown_copy(breakdown: UnitBreakdown) -> str:
+    team, opponent, snaps = breakdown.team, breakdown.opponent, breakdown.snaps
+    if not snaps:
+        side = "offensive" if breakdown.unit == "offense" else "defensive"
+        return f"{team} has no {side} snaps charted in this film."
+    snap_word = _noun(snaps, "snap", "snaps")
+    charted = breakdown.runs + breakdown.passes
+    runs = f"{_calls(breakdown.runs, 'run', 'runs')} ({_percent(breakdown.runs, charted or 1)})"
+    passes = (
+        f"{_calls(breakdown.passes, 'pass', 'passes')} ({_percent(breakdown.passes, charted or 1)})"
+    )
+    if breakdown.unit == "offense":
+        lead = f"{team} had the ball on {snaps} {snap_word}"
+        mix = f": {runs} and {passes}."
+    else:
+        lead = f"{team} defended {snaps} {snap_word}"
+        mix = f" and faced {runs} and {passes} from {opponent}."
+    if not charted:
+        mix = ". None are charted as a run or a pass."
+    read = breakdown.read
+    if not read:
+        formed = " No formation was read on these snaps yet."
+        return f"{lead}{mix}{formed}"
+    named = [group for group in breakdown.groups if group.formation != NOT_READ]
+    top = named[0]
+    whose = "" if breakdown.unit == "offense" else f"{opponent} lined up "
+    most = (
+        f"Most used: {top.formation}, {len(top.plays)} of {read} ({_percent(len(top.plays), read)})"
+    )
+    if breakdown.unit == "defense":
+        most = (
+            f"{whose}in {top.formation} most against them, {len(top.plays)} of {read} "
+            f"({_percent(len(top.plays), read)})"
+        )
+    lean = _formation_lean(top)
+    coverage = f" Formation read on {read} of {snaps} {snap_word}."
+    if read < snaps:
+        coverage += f" {snaps - read} still need a formation."
+    return f"{lead}{mix} {most}{lean}.{coverage}"
+
+
+def _formation_lean(group: FormationGroup) -> str:
+    """Say when a formation gives the call away."""
+
+    charted = group.runs + group.passes
+    if charted < 3:
+        return ""
+    if group.runs / charted >= 0.7:
+        return f", run {_percent(group.runs, charted)} of the time"
+    if group.passes / charted >= 0.7:
+        return f", pass {_percent(group.passes, charted)} of the time"
+    return ""
 
 
 def _call(play: PlayRecord) -> str:

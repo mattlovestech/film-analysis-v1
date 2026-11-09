@@ -15,7 +15,8 @@ def test_a_clear_formation_is_kept() -> None:
     assert "The offense wears" in prompt
     assert "The defense wears" in prompt
     assert "spatial plot" in prompt
-    assert "experimental" in prompt
+    assert "Name the backfield first" in prompt
+    assert "spatial plot" not in formation_prompt(_OFFENSE, _DEFENSE, call="run", plot=False)
     assert parse_formation('{"formation":"shotgun"}') == "shotgun"
     assert parse_formation('{"formation":"I formation"}') == "i_form"
     assert formation_label("shotgun") == "Shotgun"

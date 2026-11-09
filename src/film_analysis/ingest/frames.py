@@ -62,6 +62,54 @@ def extract_window(video_path: Path, start: float, seconds: float) -> list[tuple
         ]
 
 
+def sample_frames(
+    video_path: Path, seconds: float, count: int = 6, width: int = 768
+) -> list[bytes]:
+    """Return up to `count` JPEGs spread evenly over one play clip.
+
+    The first frame skips a fraction of a second, which is often a broadcast
+    dissolve. Short clips still give at least one frame.
+    """
+
+    _require_ffmpeg()
+    length = max(0.1, seconds)
+    lead = min(0.3, length / 4)
+    span = max(0.0, length - lead - 0.2)
+    count = max(1, count)
+    times = [lead + span * index / max(1, count - 1) for index in range(count)]
+    frames: list[bytes] = []
+    for moment in times:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                f"{moment:.3f}",
+                "-i",
+                str(video_path),
+                "-frames:v",
+                "1",
+                "-an",
+                "-vf",
+                f"scale={width}:-2",
+                "-q:v",
+                FRAME_QUALITY,
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "mjpeg",
+                "-",
+            ],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode == 0 and result.stdout.startswith(b"\xff\xd8\xff"):
+            frames.append(result.stdout)
+    return frames
+
+
 def extract_frames(video_path: Path) -> list[tuple[float, bytes]]:
     """Return one JPEG every two seconds, labeled with its offset from the start."""
 

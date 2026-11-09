@@ -224,9 +224,7 @@ def test_a_low_credit_balance_is_explained(tmp_path: Path) -> None:
             )
             self.api_message = "Your credit balance is too low to access the Anthropic API."
             self.error_code = None
-            self.body = {
-                "error": {"type": "invalid_request_error", "message": self.api_message}
-            }
+            self.body = {"error": {"type": "invalid_request_error", "message": self.api_message}}
 
     class _Broken:
         def create(self, **kwargs: object) -> SimpleNamespace:
@@ -293,3 +291,33 @@ def test_extract_frames_from_a_short_clip(tmp_path: Path) -> None:
 
     assert [timestamp for timestamp, _jpeg in frames[:2]] == [0.0, 2.0]
     assert frames[0][1].startswith(b"\xff\xd8")
+
+
+def test_sample_frames_spreads_over_a_play_and_handles_a_short_clip(tmp_path: Path) -> None:
+    from film_analysis.ingest.frames import sample_frames
+
+    def clip(name: str, seconds: float) -> Path:
+        video = tmp_path / name
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=black:s=320x180:d={seconds}",
+                "-pix_fmt",
+                "yuv420p",
+                str(video),
+            ],
+            check=True,
+        )
+        return video
+
+    frames = sample_frames(clip("play.mp4", 6), 6, 6)
+    assert len(frames) == 6
+    assert all(frame.startswith(b"\xff\xd8\xff") for frame in frames)
+    # One frame every two seconds gave nothing for a clip under two seconds.
+    assert len(sample_frames(clip("short.mp4", 0.9), 0.9, 6)) >= 1

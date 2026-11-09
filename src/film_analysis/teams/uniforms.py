@@ -287,7 +287,54 @@ def team_cards(
         spare = (colored, white)
     else:
         spare = (white, colored)
-    return left_shot or spare[0], right_shot or spare[1]
+    if left_shot is None:
+        left_shot = _spare_for_uniform(spare[0], left, right)
+    if right_shot is None:
+        right_shot = _spare_for_uniform(spare[1], right, left)
+    if left_shot is not None and left_shot == right_shot:
+        right_shot = None
+    return left_shot, right_shot
+
+
+def _spare_for_uniform(
+    shot: bytes | None,
+    uniform: Uniform,
+    other: Uniform | None,
+) -> bytes | None:
+    """Keep a white/color spare only when its cloth is closer to this jersey."""
+
+    if shot is None:
+        return None
+    target = _hex_color(uniform.jersey_hex) or _swatch(uniform.jersey)
+    target_rgb = _rgb_tuple(target)
+    if target_rgb is None:
+        return shot
+    sample = _shot_jersey(shot)
+    if sample is None:
+        return None
+    own = _rgb_distance(_hex(sample), target)
+    if other is not None:
+        other_hex = _hex_color(other.jersey_hex) or _swatch(other.jersey)
+        if _hex_color(other_hex) and _rgb_distance(_hex(sample), other_hex) <= own:
+            return None
+    limit = 70 * 70 * 3 if _lighter(uniform) else 62 * 62 * 3
+    return shot if own <= limit else None
+
+
+def _shot_jersey(shot: bytes) -> tuple[int, int, int] | None:
+    from film_analysis.teams.players import _bgr, _jersey_sample_rgb
+
+    image = _bgr(shot)
+    if image is None:
+        return None
+    return _jersey_sample_rgb(image)
+
+
+def _rgb_tuple(value: str) -> tuple[int, int, int] | None:
+    color = _hex_color(value)
+    if not color:
+        return None
+    return (int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
 
 
 def _lighter(uniform: Uniform) -> bool:
@@ -529,7 +576,27 @@ def uniform_line(uniform: Uniform) -> str:
     jersey = _labeled(uniform.jersey, uniform.jersey_hex)
     pants = _labeled(uniform.pants, uniform.pants_hex, uniform.pants_style)
     helmet = _labeled(uniform.helmet, uniform.helmet_hex, uniform.helmet_style)
-    return f"{jersey} jersey, {pants} pants, {helmet} helmet"
+    pieces = [f"{jersey} jersey", f"{pants} pants", f"{helmet} helmet"]
+    number = _hex_color(uniform.number_hex)
+    if number:
+        pieces.append(f"number {number}")
+    return ", ".join(pieces)
+
+
+def uniform_colors(uniform: Uniform) -> list[dict[str, str]]:
+    """Jersey, pants, helmet, and number colors read from the film."""
+
+    chips: list[dict[str, str]] = []
+    for label, value in (
+        ("Jersey", uniform.jersey_hex),
+        ("Pants", uniform.pants_hex),
+        ("Helmet", uniform.helmet_hex),
+        ("Number", uniform.number_hex),
+    ):
+        color = _hex_color(value)
+        if color:
+            chips.append({"label": label, "hex": color})
+    return chips
 
 
 def _labeled(color: str, hex_code: str = "", style: str = "") -> str:
@@ -1017,6 +1084,7 @@ def _ask_uniforms(
         message = client.messages.create(
             model=os.environ.get("FILM_ANALYSIS_MODEL", DEFAULT_MODEL),
             max_tokens=700,
+            thinking={"type": "between_tools"},
             messages=[{"role": "user", "content": content}],
         )
     except Exception:

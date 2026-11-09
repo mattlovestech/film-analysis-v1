@@ -99,7 +99,6 @@ def test_a_film_has_a_page_for_each_part() -> None:
         page = client.get(path)
         assert page.status_code == 200
         assert 'data-screen="review"' in page.text
-        assert 'data-screen="select-teams"' in page.text
         assert 'data-screen="generate-report"' in page.text
 
     missing = client.get("/projects/4/poster")
@@ -166,13 +165,13 @@ def test_page_offers_a_video_upload() -> None:
     assert "location.assign" not in response.text
     assert "Cloud · 1 worker" in response.text
     assert 'id="teams"' in response.text
-    assert "Choose who to scout" in response.text
+    assert "Team being scouted" in response.text
+    assert "Switching teams swaps who is on offense and who is on defense." in response.text
     assert "The right arrow opens the next play." in response.text
-    assert "Which team do you want to scout?" in response.text
     assert 'id="team-left-reference"' in response.text
     assert 'id="team-right-reference"' in response.text
     assert ">Reference</figcaption>" in response.text
-    assert "Scout this team" in response.text
+    assert ">Scout</button>" in response.text
     assert "Try different photos" in response.text
     assert 'id="teams-retry"' in response.text
     assert 'id="teams-meter"' in response.text
@@ -187,7 +186,7 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="team-reset-retry"' in response.text
     assert "Try failed films again" in response.text
     assert "Generate again" in response.text
-    assert 'id="teams-note" class="lead" hidden' in response.text
+    assert 'id="teams-note" class="lead"' in response.text
     assert 'id="report"' in response.text
     assert "Scouting report" in response.text
     assert 'id="report-generate"' in response.text
@@ -311,6 +310,9 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
             "total_bytes": None,
             "youtube": False,
             "running": False,
+            "phase": "",
+            "report_done": 0,
+            "report_total": 0,
             "error": None,
             "scanned": 4.0,
             "review_count": 0,

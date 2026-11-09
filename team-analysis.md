@@ -1,9 +1,6 @@
 ## Review the footage
-Determine a team a and team b by giving an llm  a bynch of images rom plays with player closeeups or just rndio plays in the most efficent way
-in football one team wears white color jersey which is typically the away team and another solid color jersey which is ususally home but, you should be aiming to identify the two types of colors of uniforms int he iamge
-determine team a and team b's uniform colors using hex colors
-determine helmet color and style, determine jereey color, number colors on jersey and pants color adn style
-give that to an ai to generate madden like images with 00 numbers on players
-make sure the generated images match the colors and style of uniforms of the reference images
-present both options to users
-allow user to select which ai genreated image is their team
+Find team A and team B from play frames — prefer player close-ups, otherwise a few live-action moments spread through the film.
+In football one team usually wears white (often away) and the other a solid color (often home); identify the two uniform looks in the image.
+Read jersey, pants, helmet, and number colors as hex from the film.
+Crop one clear photo of standing player(s) from each team from the footage. all players in each crop for team must only be that team so we can effectively tell the system which team we want to scout
+Present both film crops so the user can pick which team to scout, and offer “Try different photos” to pull another real shot.
