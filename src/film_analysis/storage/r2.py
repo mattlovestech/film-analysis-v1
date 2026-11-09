@@ -31,7 +31,39 @@ class R2Clips:
         return self._put(clip, f"projects/{project_id}/plays/{play_number}.mp4")
 
     def play_path(self, project_id: int, play_number: int) -> Path:
-        key = f"projects/{project_id}/plays/{play_number}.mp4"
+        return self._local(f"projects/{project_id}/plays/{play_number}.mp4")
+
+    def source_path(self, project_id: int) -> Path:
+        return self._local(f"projects/{project_id}/source.mp4")
+
+    def copy_source(self, source_id: int, project_id: int) -> str | None:
+        source_key = f"projects/{source_id}/source.mp4"
+        dest_key = f"projects/{project_id}/source.mp4"
+        try:
+            self._client.copy_object(
+                Bucket=self.bucket,
+                Key=dest_key,
+                CopySource={"Bucket": self.bucket, "Key": source_key},
+            )
+        except ClientError:
+            return None
+        cached = self.cache / source_key
+        if cached.is_file():
+            dest = self.cache / dest_key
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(cached, dest)
+        return dest_key
+
+    def source_url(self, project_id: int, expires: int = 10800) -> str:
+        """A temporary HTTPS link a labeler or cutter can stream from."""
+
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": f"projects/{project_id}/source.mp4"},
+            ExpiresIn=expires,
+        )
+
+    def _local(self, key: str) -> Path:
         dest = self.cache / key
         if dest.is_file():
             return dest
@@ -76,6 +108,21 @@ class R2Clips:
         cached.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, cached)
         return key
+
+
+def source_url(project_id: int) -> str:
+    """Presign the film for this project so a task can read a stretch of it."""
+
+    import os
+
+    endpoint = os.environ.get("CLOUDFLARE_S3_ENDPOINT", "")
+    access_key = os.environ.get("CLOUDFLARE_ACCESS_KEY_ID", "")
+    secret_key = os.environ.get("CLOUDFLARE_SECRET_ACCESS_KEY", "")
+    bucket = os.environ.get("R2_BUCKET", "")
+    if not (endpoint and access_key and secret_key and bucket):
+        raise CatalogError("Could not read that film.")
+    cache = Path(os.environ.get("FILM_ANALYSIS_DATA", "data"))
+    return R2Clips(endpoint, access_key, secret_key, bucket, cache).source_url(project_id)
 
 
 def _client(endpoint: str, access_key: str, secret_key: str) -> object:

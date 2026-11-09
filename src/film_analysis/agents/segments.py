@@ -32,17 +32,65 @@ class FilmSpan(BaseModel):
     end_seconds: float = Field(gt=0)
 
 
+SCRIMMAGE = "scrimmage"
+SPECIAL_TEAMS = "special_teams"
+JUNK = "junk"
+UNCERTAIN = "uncertain"
+PLAY_KINDS = frozenset({SCRIMMAGE, SPECIAL_TEAMS, "play"})
+
 _KINDS = {
-    "play": "play",
-    "huddle": "huddle",
-    "dead": "dead",
-    "dead ball": "dead",
-    "replay": "replay",
-    "crowd": "crowd",
-    "crowd shot": "crowd",
-    "graphic": "graphic",
-    "graphics": "graphic",
+    "play": SCRIMMAGE,
+    "scrimmage": SCRIMMAGE,
+    "offense": SCRIMMAGE,
+    "offence": SCRIMMAGE,
+    "offensive": SCRIMMAGE,
+    "defense": SCRIMMAGE,
+    "defence": SCRIMMAGE,
+    "defensive": SCRIMMAGE,
+    "special": SPECIAL_TEAMS,
+    "special_teams": SPECIAL_TEAMS,
+    "special teams": SPECIAL_TEAMS,
+    "kickoff": SPECIAL_TEAMS,
+    "kick": SPECIAL_TEAMS,
+    "punt": SPECIAL_TEAMS,
+    "field_goal": SPECIAL_TEAMS,
+    "field goal": SPECIAL_TEAMS,
+    "extra_point": SPECIAL_TEAMS,
+    "extra point": SPECIAL_TEAMS,
+    "pat": SPECIAL_TEAMS,
+    "junk": JUNK,
+    "huddle": JUNK,
+    "dead": JUNK,
+    "dead ball": JUNK,
+    "replay": JUNK,
+    "crowd": JUNK,
+    "crowd shot": JUNK,
+    "graphic": JUNK,
+    "graphics": JUNK,
+    "warmup": JUNK,
+    "warmups": JUNK,
+    "sideline": JUNK,
+    "commercial": JUNK,
+    "uncertain": UNCERTAIN,
+    "unsure": UNCERTAIN,
+    "review": UNCERTAIN,
+    "maybe": UNCERTAIN,
+    "unknown": UNCERTAIN,
 }
+
+
+def is_play_kind(kind: str) -> bool:
+    """True when the stretch is a live offensive, defensive, or special-teams play."""
+
+    return kind in PLAY_KINDS
+
+
+def play_family(kind: str) -> str:
+    """Group a play label as scrimmage or special teams."""
+
+    if kind == SPECIAL_TEAMS:
+        return SPECIAL_TEAMS
+    return SCRIMMAGE
 
 
 class _RawPlay(BaseModel):
@@ -89,7 +137,7 @@ def parse_film_spans(raw: str) -> tuple[FilmSpan, ...]:
     """Turn a model JSON payload into play and non-play spans."""
 
     try:
-        payload = json.loads(_strip_fences(raw))
+        payload = _load_json(raw)
     except json.JSONDecodeError as error:
         raise ValueError("film spans were not valid JSON") from error
     if isinstance(payload, list):
@@ -121,7 +169,8 @@ def parse_film_spans(raw: str) -> tuple[FilmSpan, ...]:
             raise ValueError("each span needs a start and end") from error
         if end_seconds <= start_seconds or start_seconds < 0:
             continue
-        kind = _KINDS.get(str(item.get("kind", "dead")).strip().lower(), "dead")
+        raw_kind = str(item.get("kind", UNCERTAIN)).strip().lower()
+        kind = _KINDS.get(raw_kind, UNCERTAIN)
         spans.append(FilmSpan(kind=kind, start_seconds=start_seconds, end_seconds=end_seconds))
     return tuple(spans)
 
@@ -130,7 +179,7 @@ def parse_play_segments(raw: str) -> tuple[PlaySegment, ...]:
     """Turn a model JSON payload into numbered, non-overlapping plays."""
 
     try:
-        payload = json.loads(_strip_fences(raw))
+        payload = _load_json(raw)
     except json.JSONDecodeError as error:
         raise ValueError("play timestamps were not valid JSON") from error
 
@@ -176,6 +225,63 @@ def _coerce_play(play: object) -> dict[str, float]:
     if start is None or end is None:
         raise ValueError("each play needs a start and end")
     return {"start_seconds": start, "end_seconds": end}
+
+
+_TRAILING_COMMA = re.compile(r",\s*([}\]])")
+
+
+def _load_json(raw: str) -> object:
+    """Read the JSON object or list from a model reply that also contains prose."""
+
+    text = _json_value(_without_fences(raw))
+    text = _TRAILING_COMMA.sub(r"\1", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        repaired = (
+            text.replace("\u201c", '"')
+            .replace("\u201d", '"')
+            .replace("\u2018", "'")
+            .replace("\u2019", "'")
+        )
+        return json.loads(repaired)
+
+
+def _without_fences(raw: str) -> str:
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", raw, re.IGNORECASE | re.DOTALL)
+    if fenced:
+        return fenced.group(1).strip()
+    return _strip_fences(raw)
+
+
+def _json_value(text: str) -> str:
+    start = next((index for index, char in enumerate(text) if char in "{["), None)
+    if start is None:
+        return text.strip()
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char in "{[":
+            stack.append(char)
+            continue
+        if char in "}]" and stack:
+            stack.pop()
+            if not stack:
+                return text[start : index + 1]
+    return text[start:].strip()
 
 
 def _strip_fences(raw: str) -> str:

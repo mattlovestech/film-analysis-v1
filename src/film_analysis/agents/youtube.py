@@ -154,9 +154,7 @@ def download_youtube(
     except Exception as error:
         text = str(error)
         if "not a bot" not in text.lower():
-            lines = [line.strip() for line in text.splitlines() if line.strip()]
-            reason = lines[-1] if lines else ""
-            raise VideoAnalysisError(reason or "Could not fetch that YouTube video.") from error
+            raise VideoAnalysisError(_download_reason(error)) from error
         for path in directory.glob("film.*"):
             path.unlink(missing_ok=True)
         _download_via_invidious(url, directory, progress)
@@ -168,6 +166,16 @@ def download_youtube(
     if merged.is_file():
         return merged
     return max(files, key=lambda path: path.stat().st_size)
+
+
+def _download_reason(error: Exception) -> str:
+    lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+    useful = [line for line in lines if not line.lower().startswith("warning:")]
+    chosen = (useful or lines)[-8:]
+    name = type(error).__name__
+    if not chosen:
+        return f"{name}: Could not fetch that YouTube video."
+    return f"{name}: " + "\n".join(chosen)
 
 
 def _hook(progress: _Progress | None) -> Callable[[dict[str, object]], None]:

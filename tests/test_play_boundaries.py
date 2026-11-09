@@ -47,6 +47,49 @@ def test_agent_sends_timestamped_frames(tmp_path: Path) -> None:
     assert "snap" in content[-1]["text"]
 
 
+def test_label_window_sorts_scrimmage_before_junk(tmp_path: Path) -> None:
+    del tmp_path
+    messages = _Messages(
+        '{"spans": ['
+        '{"kind": "scrimmage", "start_seconds": 1, "end_seconds": 3},'
+        '{"kind": "crowd", "start_seconds": 3, "end_seconds": 5}'
+        "]}"
+    )
+    agent = AnthropicPlayAgent(api_key="test-key", client=_Client(messages), frames=_frames)
+
+    spans = agent.label_window([(1.0, b"jpeg-a"), (5.0, b"jpeg-b")])
+
+    assert [span.kind for span in spans] == ["scrimmage", "junk"]
+    prompt = messages.calls[0]["messages"][0]["content"][-1]["text"]
+    assert "Offensive or defensive" in prompt
+    assert "special teams" in prompt
+    assert "uncertain" in prompt
+
+
+def test_review_window_looks_again_at_a_held_stretch() -> None:
+    messages = _Messages('{"spans": [{"kind": "punt", "start_seconds": 4, "end_seconds": 9}]}')
+    agent = AnthropicPlayAgent(api_key="test-key", client=_Client(messages), frames=_frames)
+
+    spans = agent.review_window([(4.0, b"jpeg-a"), (9.0, b"jpeg-b")])
+
+    assert [span.kind for span in spans] == ["special_teams"]
+    prompt = messages.calls[0]["messages"][0]["content"][-1]["text"]
+    assert "set this stretch" in prompt
+    assert "Still not sure" in prompt
+
+
+def test_a_reply_that_is_not_json_is_set_aside(tmp_path: Path) -> None:
+    del tmp_path
+    messages = _Messages("I could not decide. The frames were blurry.")
+    agent = AnthropicPlayAgent(api_key="test-key", client=_Client(messages), frames=_frames)
+
+    spans = agent.label_window([(30.0, b"jpeg-a"), (70.0, b"jpeg-b")])
+
+    assert [(span.kind, span.start_seconds, span.end_seconds) for span in spans] == [
+        ("uncertain", 30.0, 70.0)
+    ]
+
+
 def test_youtube_link_is_downloaded_then_charted(tmp_path: Path) -> None:
     seen: list[str] = []
 
@@ -70,10 +113,24 @@ def test_youtube_link_is_downloaded_then_charted(tmp_path: Path) -> None:
     assert seen == ["https://www.youtube.com/watch?v=5mHoasOclJs"]
 
 
-def test_api_error_includes_the_reason(tmp_path: Path) -> None:
+def test_a_low_credit_balance_is_explained(tmp_path: Path) -> None:
+    class _Billing(Exception):
+        def __init__(self) -> None:
+            super().__init__(
+                "Error code: 400 - {'type': 'error', 'error': {"
+                "'type': 'invalid_request_error', "
+                "'message': 'Your credit balance is too low to access the Anthropic API.'"
+                "}}"
+            )
+            self.api_message = "Your credit balance is too low to access the Anthropic API."
+            self.error_code = None
+            self.body = {
+                "error": {"type": "invalid_request_error", "message": self.api_message}
+            }
+
     class _Broken:
         def create(self, **kwargs: object) -> SimpleNamespace:
-            raise RuntimeError("credit balance is too low")
+            raise _Billing()
 
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"video")
@@ -83,8 +140,13 @@ def test_api_error_includes_the_reason(tmp_path: Path) -> None:
         frames=_frames,
     )
 
-    with pytest.raises(VideoAnalysisError, match="credit balance"):
+    with pytest.raises(
+        VideoAnalysisError,
+        match="The analysis account is out of credits.",
+    ) as caught:
         agent.segment(video)
+
+    assert "Error code" not in str(caught.value)
 
 
 def test_non_youtube_link_is_rejected_before_download() -> None:

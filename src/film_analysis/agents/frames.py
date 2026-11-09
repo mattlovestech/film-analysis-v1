@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from film_analysis.agents.errors import VideoAnalysisError
+from film_analysis.agents.errors import VideoAnalysisError, tool_failure
 
 _INTERVAL = 1.0
 
@@ -44,7 +44,13 @@ def extract_window(video_path: Path, start: float, seconds: float) -> list[tuple
             capture_output=True,
         )
         if result.returncode != 0:
-            raise VideoAnalysisError("Could not read frames from that video.")
+            raise VideoAnalysisError(
+                tool_failure(
+                    "Could not read frames from that video.",
+                    result.stderr,
+                    result.returncode,
+                )
+            )
         return [
             (start + index * _INTERVAL, frame.read_bytes())
             for index, frame in enumerate(sorted(Path(tmp).glob("frame_*.jpg")))
@@ -75,14 +81,22 @@ def extract_frames(video_path: Path) -> list[tuple[float, bytes]]:
             capture_output=True,
         )
         if result.returncode != 0:
-            raise VideoAnalysisError("Could not read frames from that video.")
+            raise VideoAnalysisError(
+                tool_failure(
+                    "Could not read frames from that video.",
+                    result.stderr,
+                    result.returncode,
+                )
+            )
 
         frames = [
             (index * _INTERVAL, frame.read_bytes())
             for index, frame in enumerate(sorted(Path(tmp).glob("frame_*.jpg")))
         ]
     if not frames:
-        raise VideoAnalysisError("Could not read frames from that video.")
+        raise VideoAnalysisError(
+            "Could not read frames from that video. ffmpeg produced no frames."
+        )
     return frames
 
 
@@ -103,7 +117,9 @@ def _duration(video_path: Path) -> float:
         text=True,
     )
     if result.returncode != 0:
-        raise VideoAnalysisError("Could not read that video.")
+        raise VideoAnalysisError(
+            tool_failure("Could not read that video.", result.stderr, result.returncode)
+        )
     try:
         return float(result.stdout.strip())
     except ValueError as error:

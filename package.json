@@ -1,0 +1,8 @@
+{
+  "name": "film-analysis",
+  "private": true,
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
+    "wrangler": "^4.158.0"
+  }
+}

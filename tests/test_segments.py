@@ -1,6 +1,6 @@
 import pytest
 
-from film_analysis.agents.segments import format_play, parse_play_segments
+from film_analysis.agents.segments import format_play, parse_film_spans, parse_play_segments
 
 
 def test_play_line_matches_the_clock_format() -> None:
@@ -39,6 +39,47 @@ def test_parse_skips_a_play_that_ends_where_it_starts() -> None:
     )
 
     assert [segment.label for segment in parse_play_segments(raw)] == ["Play 1: 0:01 - 0:02"]
+
+
+def test_parse_sorts_a_stretch_into_play_junk_or_unsure() -> None:
+    raw = """
+    {"spans": [
+      {"kind": "Offense", "start_seconds": 1, "end_seconds": 4},
+      {"kind": "punt", "start_seconds": 8, "end_seconds": 14},
+      {"kind": "crowd", "start_seconds": 4, "end_seconds": 8},
+      {"kind": "maybe", "start_seconds": 14, "end_seconds": 20},
+      {"kind": "warmup", "start_seconds": 20, "end_seconds": 20}
+    ]}
+    """
+
+    spans = parse_film_spans(raw)
+
+    assert [(span.kind, span.start_seconds, span.end_seconds) for span in spans] == [
+        ("scrimmage", 1, 4),
+        ("special_teams", 8, 14),
+        ("junk", 4, 8),
+        ("uncertain", 14, 20),
+    ]
+
+
+def test_parse_reads_spans_wrapped_in_prose() -> None:
+    raw = """
+    The second window is one offensive play, then junk.
+    ```json
+    {"spans": [
+      {"kind": "scrimmage", "start_seconds": 30, "end_seconds": 48,},
+      {"kind": "junk", "start_seconds": 48, "end_seconds": 70}
+    ]}
+    ```
+    That covers 0:30 to 1:10.
+    """
+
+    spans = parse_film_spans(raw)
+
+    assert [(span.kind, span.start_seconds, span.end_seconds) for span in spans] == [
+        ("scrimmage", 30, 48),
+        ("junk", 48, 70),
+    ]
 
 
 def test_parse_rejects_an_overlap() -> None:

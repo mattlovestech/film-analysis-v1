@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
+from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError, tool_failure
 from film_analysis.agents.segments import FilmSpan, PlaySegment
 from film_analysis.agents.youtube import FilmInfo
+from film_analysis.storage.catalog import MemoryCatalog
 from film_analysis.web.app import create_app
 
 
@@ -94,20 +95,54 @@ def test_page_offers_a_video_upload() -> None:
     assert 'type="file"' in response.text
     assert 'name="youtube"' in response.text
     assert "Drop a video here" in response.text
+    assert 'id="saved"' in response.text
+    assert "Downloaded film" in response.text
     assert 'id="new-analysis" href="/"' in response.text
-    assert "My analyses" in response.text
+    assert 'href="/projects"' in response.text
+    assert ">Projects<" in response.text
+    assert "Each film is cut into plays you can study on their own." in response.text
+    assert 'id="project-filters"' in response.text
+    assert 'id="refresh-analyses"' in response.text
     assert 'href="/activity"' in response.text
-    library = client.get("/analyses")
+    assert 'id="activity-loading"' in response.text
+    assert "Checking the server" in response.text
+    assert "Looking up films that are running or stopped." in response.text
+    assert 'id="activity-legend"' in response.text
+    assert 'id="film-steps"' in response.text
+    assert 'id="workers"' in response.text
+    assert 'id="place-local"' in response.text
+    assert 'id="place-cloud"' in response.text
+    assert "Where jobs run" in response.text
+    assert "More workers read a film faster." in response.text
+    library = client.get("/projects")
     assert library.status_code == 200
-    assert "My analyses" in library.text
+    assert ">Projects<" in library.text
+    assert client.get("/analyses").status_code == 200
     assert client.get("/activity").status_code == 200
-    assert client.get("/api/activity").json() == {"workers": 4, "jobs": []}
+    assert client.get("/api/activity").json() == {
+        "workers": 4,
+        "place": "local",
+        "cloud": False,
+        "jobs": [],
+    }
     assert "Couldn't reach the server" in response.text
-    assert "Downloading the film" in response.text
+    assert "Analysis complete" in response.text
+    assert "Finding plays" in response.text
+    assert "Checking the film" in response.text
     assert 'id="download-track"' in response.text
     assert 'id="download-pct"' in response.text
     assert "Retry download" in response.text
+    assert "Needs a look" in response.text
+    assert "Offense / defense" in response.text
+    assert "canRetryJob" in response.text
+    assert 'label: "Stopped"' in response.text
+    assert 'id="film-error"' in response.text
+    assert 'project.error || "Could not read that film."' in response.text
+    assert "The server stopped while this was running." in response.text
     assert 'createElement("video")' in response.text
+    assert "View play" in response.text
+    assert 'id="play-details"' in response.text
+    assert "/api/plays/" in response.text
 
 
 def test_upload_saves_the_analysis_and_its_play_clip() -> None:
@@ -134,10 +169,13 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
     assert body["status"] == "ready"
     assert body["plays"] == [
         {
+            "uid": "1-1",
             "play_number": 1,
             "label": "Play 1: 0:01 - 0:02",
             "start": 1.0,
             "end": 2.0,
+            "family": "scrimmage",
+            "play_type": None,
             "video": "/projects/1/plays/1",
         }
     ]
@@ -159,6 +197,10 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
             "total_bytes": None,
             "youtube": False,
             "running": False,
+            "error": None,
+            "scanned": 4.0,
+            "review_count": 0,
+            "duration": 4.0,
         }
     ]
 
@@ -317,6 +359,9 @@ def test_a_failed_download_can_be_retried() -> None:
     failed = _settle(client, project_id)
     assert failed["status"] == "failed"
     assert failed["running"] is False
+    error = str(failed["error"])
+    assert error.startswith("Stopped while downloading.\nVideoAnalysisError: network dropped")
+    assert "at film_analysis/" in error
 
     again = client.post(f"/api/projects/{project_id}/retry")
 
@@ -399,7 +444,381 @@ def test_activity_shows_the_download_the_server_is_running() -> None:
     assert body["workers"] == 4
     release.set()
     assert _settle(client, project_id)["status"] == "ready"
-    assert client.get("/api/activity").json()["jobs"] == []
+    finished = client.get("/api/activity").json()["jobs"]
+    assert len(finished) == 1
+    assert finished[0]["project"] == project_id
+    assert finished[0]["phase"] == "ready"
+    assert finished[0]["running"] is False
+    assert finished[0]["play_count"] == 1
+
+
+def test_jobs_can_run_locally_or_in_the_cloud(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FILM_INTERNAL_TOKEN", "secret")
+    store = MemoryCatalog(tmp_path)
+    headers = {"x-film-worker-url": "https://film.example"}
+    client = TestClient(
+        create_app(
+            agent=_Agent((PlaySegment(number=1, start_seconds=1, end_seconds=2),)),
+            store=store,
+            downloader=_saved_download,
+            cut=_copy_clip,
+            duration=_duration,
+            frames=_frames,
+            details=lambda url: None,
+        )
+    )
+
+    assert client.get("/api/activity", headers=headers).json()["place"] == "cloud"
+    assert client.get("/api/activity", headers=headers).json()["cloud"] is True
+    chosen = client.post("/api/settings", json={"place": "local"}, headers=headers)
+    assert chosen.json()["place"] == "local"
+    calls: list[tuple[object, ...]] = []
+
+    def remember(*args: object) -> None:
+        calls.append(args)
+
+    monkeypatch.setattr("film_analysis.web.app.start_remote", remember)
+    local = client.post(
+        "/analyze",
+        data={"youtube": "https://youtu.be/abcdefghijk"},
+        headers=headers,
+    )
+    assert local.status_code == 200
+    assert "x-film-start" not in local.headers
+    assert calls == []
+    assert _settle(client, local.json()["project"])["status"] == "ready"
+
+    client.post("/api/settings", json={"place": "cloud", "workers": 6}, headers=headers)
+    handed = client.post(
+        "/analyze",
+        data={"youtube": "https://youtu.be/abcdefghijk"},
+        headers={**headers, "x-film-delegate": "1"},
+    )
+    assert handed.status_code == 200
+    assert handed.headers["x-film-start"] == str(handed.json()["project"])
+    assert handed.headers["x-film-workers"] == "6"
+    assert calls == []
+    assert client.get(f"/api/projects/{handed.json()['project']}").json()["status"] == "downloading"
+
+    direct = client.post(
+        "/analyze",
+        files={"video": ("clip.mp4", b"fake-video", "video/mp4")},
+        headers=headers,
+    )
+    assert direct.status_code == 200
+    assert "x-film-start" not in direct.headers
+    assert calls == [("https://film.example", "secret", direct.json()["project"], None, 6)]
+
+
+def _saved_download(url: str, directory: Path) -> Path:
+    del url
+    path = directory / "film.mp4"
+    path.write_bytes(b"clip-bytes")
+    return path
+
+
+def test_worker_setting_is_saved_and_reported(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    client = TestClient(create_app(agent=_Agent(), store=store))
+
+    assert client.get("/api/activity").json()["workers"] == 4
+    saved = client.post("/api/settings", json={"workers": 8})
+    assert saved.status_code == 200
+    assert saved.json() == {"workers": 8, "place": "local", "cloud": False}
+    assert client.get("/api/activity").json()["workers"] == 8
+    assert store.worker_count() == 8
+    restarted = TestClient(create_app(agent=_Agent(), store=store))
+    assert restarted.get("/api/activity").json()["workers"] == 8
+    assert client.post("/api/settings", json={"workers": 0}).status_code == 422
+    assert client.post("/api/settings", json={"workers": 20}).status_code == 422
+    assert client.post("/api/settings", json={}).status_code == 422
+    assert client.post("/api/settings", json={"place": "lab"}).status_code == 422
+    blocked = client.post("/api/settings", json={"place": "cloud"})
+    assert blocked.status_code == 400
+    assert store.job_place() is None
+
+
+def test_activity_reads_the_saved_phase(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project_id = store.create_project(
+        "Pike County Football vs. Lamar County",
+        "https://www.youtube.com/watch?v=abcdefghijk",
+    )
+    store.set_progress(
+        project_id,
+        status="ready",
+        duration_seconds=120,
+        scanned_seconds=120,
+        error=None,
+    )
+    client = TestClient(create_app(agent=_Agent(), store=store))
+    finished = client.get("/api/activity").json()["jobs"]
+    assert len(finished) == 1
+    assert finished[0]["phase"] == "ready"
+    assert finished[0]["running"] is False
+
+    store.record_activity(project_id, "scanning", running=True)
+    jobs = client.get("/api/activity").json()["jobs"]
+
+    assert len(jobs) == 1
+    assert jobs[0]["project"] == project_id
+    assert jobs[0]["phase"] == "scanning"
+    assert jobs[0]["running"] is True
+    assert jobs[0]["updated"]
+
+
+def test_activity_lists_complete_stopped_and_running_newest_first(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    older = store.create_project("Older film", None)
+    store.set_progress(
+        older,
+        status="ready",
+        duration_seconds=10,
+        scanned_seconds=10,
+        error=None,
+    )
+    middle = store.create_project("Middle film", "https://youtu.be/abcdefghijk")
+    store.set_progress(
+        middle,
+        status="failed",
+        duration_seconds=10,
+        scanned_seconds=4,
+        error="Stopped while reading.",
+    )
+    newer = store.create_project("Newer film", None)
+    store.set_progress(
+        newer,
+        status="scanning",
+        duration_seconds=10,
+        scanned_seconds=2,
+        error=None,
+    )
+    client = TestClient(create_app(agent=_Agent(), store=store))
+    store.record_activity(older, "ready", running=False, updated_at="2026-11-01T00:00:00+00:00")
+    store.record_activity(middle, "stopped", running=False, updated_at="2026-11-02T00:00:00+00:00")
+    store.record_activity(newer, "scanning", running=True, updated_at="2026-11-03T00:00:00+00:00")
+    plain = store.create_project("Plain complete", None)
+    store.set_progress(
+        plain,
+        status="ready",
+        duration_seconds=8,
+        scanned_seconds=8,
+        error=None,
+    )
+
+    jobs = client.get("/api/activity").json()["jobs"]
+
+    assert [job["name"] for job in jobs] == [
+        "Plain complete",
+        "Newer film",
+        "Middle film",
+        "Older film",
+    ]
+    assert [job["phase"] for job in jobs] == ["ready", "scanning", "stopped", "ready"]
+    assert [job["running"] for job in jobs] == [False, True, False, False]
+    assert jobs[0]["updated"] > jobs[1]["updated"] > jobs[2]["updated"] > jobs[3]["updated"]
+
+
+def test_activity_times_each_step(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project_id = store.create_project(
+        "Pike County Football vs. Lamar County",
+        "https://www.youtube.com/watch?v=abcdefghijk",
+    )
+    store.record_activity(
+        project_id,
+        "downloading",
+        running=True,
+        updated_at="2026-11-09T05:00:00+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "downloading",
+        running=True,
+        updated_at="2026-11-09T05:00:40+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "saving",
+        running=True,
+        updated_at="2026-11-09T05:01:30+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "scanning",
+        running=True,
+        updated_at="2026-11-09T05:01:34+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "checking",
+        running=True,
+        updated_at="2026-11-09T05:10:00+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "ready",
+        running=False,
+        updated_at="2026-11-09T05:12:05+00:00",
+    )
+    client = TestClient(create_app(agent=_Agent(), store=store))
+
+    jobs = client.get("/api/activity").json()["jobs"]
+    job = next(item for item in jobs if item["project"] == project_id)
+    steps = {step["name"]: step for step in job["steps"]}
+
+    assert [step["name"] for step in job["steps"]] == [
+        "downloading",
+        "saving",
+        "scanning",
+        "checking",
+    ]
+    assert steps["downloading"]["seconds"] == 90
+    assert steps["downloading"]["running"] is False
+    assert steps["saving"]["seconds"] == 4
+    assert steps["scanning"]["seconds"] == 506
+    assert steps["checking"]["seconds"] == 125
+    assert steps["checking"]["running"] is False
+    film = client.get(f"/api/projects/{project_id}").json()
+    assert [step["name"] for step in film["steps"]] == [
+        "downloading",
+        "saving",
+        "scanning",
+        "checking",
+    ]
+
+
+def test_activity_shows_the_error_that_stopped_a_job(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    reading = store.create_project(
+        "Pike County Football vs. Lamar County",
+        "https://www.youtube.com/watch?v=abcdefghijk",
+    )
+    store.set_progress(
+        reading,
+        status="scanning",
+        duration_seconds=1000,
+        scanned_seconds=20,
+        error=None,
+    )
+    downloading = store.create_project(
+        "Pike County Football vs. Lamar County",
+        "https://www.youtube.com/watch?v=bbcdefghijk",
+    )
+    store.set_progress(
+        downloading,
+        status="downloading",
+        duration_seconds=None,
+        scanned_seconds=0,
+        error=None,
+    )
+    store.set_download(downloading, 50 * 1024 * 1024, 581 * 1024 * 1024)
+    blocked = store.create_project(
+        "https://www.youtube.com/watch?v=0VdS3kg5RHU",
+        "https://www.youtube.com/watch?v=0VdS3kg5RHU",
+    )
+    store.set_progress(
+        blocked,
+        status="failed",
+        duration_seconds=14305,
+        scanned_seconds=13300,
+        error="Sign in to confirm you're not a bot.",
+    )
+
+    def download(url: str, directory: Path) -> Path:
+        del url
+        path = directory / "film.mp4"
+        path.write_bytes(b"clip-bytes")
+        return path
+
+    client = TestClient(
+        create_app(
+            agent=_Agent((PlaySegment(number=1, start_seconds=1, end_seconds=2),)),
+            downloader=download,
+            cut=_copy_clip,
+            duration=_duration,
+            frames=_frames,
+            details=lambda url: None,
+            store=store,
+        )
+    )
+    jobs = {job["project"]: job for job in client.get("/api/activity").json()["jobs"]}
+
+    assert jobs[reading]["status"] == "scanning"
+    assert jobs[reading]["running"] is False
+    assert jobs[reading]["scanned"] == 20
+    assert jobs[reading]["youtube"] is True
+    assert jobs[reading]["error"] == "The server stopped while this was running."
+    assert jobs[downloading]["downloaded"] == 50 * 1024 * 1024
+    assert jobs[downloading]["error"] == "The server stopped while this was running."
+    assert jobs[blocked]["error"] == "Sign in to confirm you're not a bot."
+    assert jobs[blocked]["status"] == "failed"
+
+    again = client.post(f"/api/projects/{reading}/retry")
+
+    assert again.status_code == 200
+    assert again.json()["running"] is True
+    assert _settle(client, reading)["status"] == "ready"
+
+
+def test_retry_continues_a_scan_from_where_it_stopped(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project = store.create_project("Game film", "https://youtu.be/abcdefghijk")
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"film-bytes")
+    store.save_source(project, source)
+    clip = tmp_path / "play.mp4"
+    clip.write_bytes(b"play")
+    store.add_play(project, 1, 2, 8, clip)
+    store.set_progress(
+        project,
+        status="failed",
+        duration_seconds=100,
+        scanned_seconds=30,
+        error="The model timed out.",
+    )
+    seen: list[float] = []
+
+    def download(url: str, directory: Path) -> Path:
+        del url, directory
+        raise AssertionError("the scan should resume without downloading")
+
+    def frames(path: Path, start: float, seconds: float) -> list[tuple[float, bytes]]:
+        del path, seconds
+        seen.append(start)
+        return [(start, b"jpeg"), (start + 30, b"jpeg")]
+
+    client = TestClient(
+        create_app(
+            agent=_Agent(
+                (
+                    PlaySegment(number=1, start_seconds=32, end_seconds=40),
+                    PlaySegment(number=2, start_seconds=62, end_seconds=70),
+                )
+            ),
+            downloader=download,
+            cut=_copy_clip,
+            duration=lambda path: 100.0,
+            frames=frames,
+            details=lambda url: None,
+            store=store,
+        )
+    )
+
+    again = client.post(f"/api/projects/{project}/retry")
+
+    assert again.status_code == 200
+    done = _settle(client, project)
+    assert done["status"] == "ready"
+    assert sorted(seen) == [30.0, 60.0]
+    assert [(play["play_number"], play["start"], play["end"]) for play in done["plays"]] == [
+        (1, 2.0, 8.0),
+        (2, 32.0, 40.0),
+        (3, 62.0, 70.0),
+    ]
 
 
 def test_unknown_analysis_is_missing() -> None:
@@ -432,7 +851,7 @@ def test_file_and_youtube_link_together_are_rejected() -> None:
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Use a file or a YouTube link."
+    assert response.json()["detail"] == "Use a file, a YouTube link, or a downloaded film."
     assert agent.urls == []
     assert agent.paths == []
 
@@ -441,7 +860,53 @@ def test_missing_source_is_rejected() -> None:
     response = TestClient(create_app(agent=_Agent())).post("/analyze", data={"youtube": "  "})
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Upload a video or paste a YouTube link."
+    assert (
+        response.json()["detail"]
+        == "Upload a video, paste a YouTube link, or choose a downloaded film."
+    )
+
+
+def test_a_downloaded_film_can_be_analyzed_again(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    calls = {"n": 0}
+
+    def download(url: str, directory: Path) -> Path:
+        del url, directory
+        calls["n"] += 1
+        raise AssertionError("the saved film should not be downloaded again")
+
+    client = TestClient(
+        create_app(
+            agent=_Agent((PlaySegment(number=1, start_seconds=1, end_seconds=2),)),
+            downloader=download,
+            cut=_copy_clip,
+            duration=_duration,
+            frames=_frames,
+            details=lambda url: None,
+            store=store,
+        )
+    )
+    uploaded = client.post(
+        "/analyze",
+        files={"video": ("clip.mp4", b"fake-video", "video/mp4")},
+    )
+    assert _settle(client, uploaded.json()["project"])["status"] == "ready"
+    assert client.get("/api/downloads").json() == [{"project": 1, "name": "clip.mp4"}]
+
+    again = client.post("/analyze", data={"saved": "1"})
+
+    assert again.status_code == 200
+    body = _settle(client, again.json()["project"])
+    assert body["project"] == 2
+    assert body["status"] == "ready"
+    assert body["name"] == "clip.mp4"
+    assert [play["play_number"] for play in body["plays"]] == [1]
+    assert calls["n"] == 0
+    source = store.source_file(2)
+    assert source is not None
+    assert source.read_bytes() == b"fake-video"
+    missing = client.post("/analyze", data={"saved": "9"})
+    assert missing.status_code == 404
 
 
 def test_non_video_upload_is_rejected() -> None:
@@ -492,7 +957,10 @@ def test_missing_api_key_tells_the_caller_what_to_set() -> None:
     assert response.status_code == 200
     body = _settle(client, response.json()["project"])
     assert body["status"] == "failed"
-    assert body["error"] == "Set ANTHROPIC_API_KEY to analyze film."
+    error = str(body["error"])
+    assert "Stopped while reading 0:00–0:04 of 0:04." in error
+    assert "MissingApiKeyError: Set ANTHROPIC_API_KEY to analyze film." in error
+    assert "at film_analysis/" in error
 
 
 def test_playback_file_is_a_seekable_mp4(tmp_path: Path) -> None:
@@ -647,6 +1115,75 @@ def test_a_long_film_is_read_in_overlapping_windows() -> None:
     assert sorted(seen) == [0.0, 30.0, 60.0]
 
 
+def test_unsure_footage_is_held_for_a_person_to_mark() -> None:
+    class _Sorting(_Agent):
+        def __init__(self) -> None:
+            super().__init__()
+            self.seen: list[float] = []
+
+        def label_window(self, samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+            del samples
+            return (
+                FilmSpan(kind="scrimmage", start_seconds=20, end_seconds=24),
+                FilmSpan(kind="junk", start_seconds=24, end_seconds=30),
+                FilmSpan(kind="uncertain", start_seconds=1, end_seconds=6),
+                FilmSpan(kind="uncertain", start_seconds=8, end_seconds=12),
+                FilmSpan(kind="uncertain", start_seconds=32, end_seconds=38),
+            )
+
+        def review_window(self, samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+            start = samples[0][0]
+            self.seen.append(start)
+            if start < 2:
+                return (FilmSpan(kind="special_teams", start_seconds=1, end_seconds=6),)
+            if start < 10:
+                return (FilmSpan(kind="uncertain", start_seconds=8, end_seconds=12),)
+            return (FilmSpan(kind="uncertain", start_seconds=32, end_seconds=38),)
+
+    agent = _Sorting()
+
+    def duration(path: Path) -> float:
+        del path
+        return 40.0
+
+    client = TestClient(
+        create_app(agent=agent, cut=_copy_clip, duration=duration, frames=_frames)
+    )
+    response = client.post(
+        "/analyze",
+        files={"video": ("game.mp4", b"game-bytes", "video/mp4")},
+    )
+    project = response.json()["project"]
+    body = _settle(client, project)
+
+    assert sorted(agent.seen) == [1.0, 8.0, 32.0]
+    assert [(play["start"], play["family"]) for play in body["plays"]] == [
+        (1.0, "special_teams"),
+        (20.0, "scrimmage"),
+    ]
+    assert [(item["start"], item["end"]) for item in body["reviews"]] == [(8.0, 12.0), (32.0, 38.0)]
+    assert client.get(f"/projects/{project}/source").content == b"game-bytes"
+
+    kept = client.post(
+        f"/api/projects/{project}/reviews",
+        json={"start": 8, "end": 12, "decision": "scrimmage"},
+    )
+    assert kept.status_code == 200
+    discarded = client.post(
+        f"/api/projects/{project}/reviews",
+        json={"start": 32, "end": 38, "decision": "junk"},
+    )
+    assert discarded.status_code == 200
+    done = discarded.json()
+    assert [(play["start"], play["family"]) for play in done["plays"]] == [
+        (1.0, "special_teams"),
+        (8.0, "scrimmage"),
+        (20.0, "scrimmage"),
+    ]
+    assert done["reviews"] == []
+    assert client.get(f"/projects/{project}/plays/3").content == b"game-bytes"
+
+
 def test_model_failure_shows_on_the_project() -> None:
     client = TestClient(
         create_app(
@@ -664,4 +1201,130 @@ def test_model_failure_shows_on_the_project() -> None:
     assert response.status_code == 200
     body = _settle(client, response.json()["project"])
     assert body["status"] == "failed"
-    assert "could not read" in str(body["error"])
+    error = str(body["error"])
+    assert "Stopped while reading 0:00–0:04 of 0:04." in error
+    assert "VideoAnalysisError: The model could not read that video." in error
+    assert "at film_analysis/" in error
+
+
+def test_an_unexpected_failure_keeps_the_window_and_the_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TestClient(
+        create_app(
+            agent=_Raising(RuntimeError("decoder blew up")),
+            duration=_duration,
+            frames=_frames,
+        )
+    )
+
+    response = client.post(
+        "/analyze",
+        files={"video": ("clip.webm", b"fake-video", "video/webm")},
+    )
+
+    body = _settle(client, response.json()["project"])
+    assert body["status"] == "failed"
+    error = str(body["error"])
+    assert "Stopped while reading 0:00–0:04 of 0:04." in error
+    assert "RuntimeError: decoder blew up" in error
+    assert "at film_analysis/web/app.py:label:" in error
+    assert "film 1 failed while reading" in caplog.text
+    assert "decoder blew up" in caplog.text
+
+
+def test_play_page_shows_one_play_and_its_neighbors(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project = store.create_project("Pike County vs Lamar", None)
+    store.describe_film(
+        project,
+        name="Pike County vs Lamar",
+        channel="K13 Media",
+        duration_seconds=120,
+    )
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    first.write_bytes(b"first-play")
+    second.write_bytes(b"second-play")
+    store.add_play(project, 1, 12, 18, first, "scrimmage")
+    store.add_play(project, 2, 40, 46, second, "special_teams")
+    client = TestClient(create_app(agent=_Agent(), store=store))
+
+    page = client.get("/play/1-2")
+    assert page.status_code == 200
+    assert 'id="play-details"' in page.text
+
+    detail = client.get("/api/plays/1-2")
+    assert detail.status_code == 200
+    assert detail.json() == {
+        "uid": "1-2",
+        "play_number": 2,
+        "label": "Play 2: 0:40 - 0:46",
+        "start": 40.0,
+        "end": 46.0,
+        "family": "special_teams",
+        "play_type": None,
+        "video": "/projects/1/plays/2",
+        "project": 1,
+        "name": "Pike County vs Lamar",
+        "channel": "K13 Media",
+        "position": 2,
+        "count": 2,
+        "film": "/projects/1",
+        "previous": "1-1",
+        "next": None,
+    }
+    assert client.get("/projects/1/plays/2").content == b"second-play"
+    assert client.get("/api/plays/1-9").status_code == 404
+    assert client.get("/api/plays/nope").status_code == 404
+    assert client.get("/api/plays/01-1").status_code == 404
+
+
+def test_a_play_can_be_relabeled_or_dropped(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project = store.create_project("Pike County vs Lamar", None)
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"clip")
+    store.add_play(project, 1, 12, 18, clip, "scrimmage")
+    store.add_play(project, 2, 40, 46, clip, "special_teams")
+    client = TestClient(create_app(agent=_Agent(), store=store))
+
+    page = client.get("/play/1-1")
+    assert "Two-point" in page.text
+    assert "Field goal" in page.text
+    assert "Not a play" in page.text
+
+    punt = client.post("/api/plays/1-1", json={"play_type": "punt"})
+    assert punt.status_code == 200
+    assert punt.json()["play_type"] == "punt"
+    assert punt.json()["family"] == "special_teams"
+
+    coarse = client.post("/api/plays/1-2", json={"play_type": "scrimmage"})
+    assert coarse.status_code == 200
+    assert coarse.json()["play_type"] is None
+    assert coarse.json()["family"] == "scrimmage"
+
+    assert client.post("/api/plays/1-2", json={"play_type": "lateral"}).status_code == 422
+    assert client.post("/api/plays/9-1", json={"play_type": "run"}).status_code == 404
+
+    dropped = client.post("/api/plays/1-1", json={"play_type": "junk"})
+    assert dropped.status_code == 200
+    assert dropped.json() == {"removed": True, "project": 1, "film": "/projects/1"}
+    assert client.get("/api/plays/1-1").status_code == 404
+    remaining = client.get("/api/projects/1").json()["plays"]
+    assert [play["uid"] for play in remaining] == ["1-2"]
+    assert remaining[0]["family"] == "scrimmage"
+
+
+def test_a_tool_failure_keeps_the_programs_own_error() -> None:
+    message = tool_failure(
+        "Could not read frames from that video.",
+        b"ffmpeg version\nInvalid data found when processing input\n",
+        1,
+    )
+
+    assert message == (
+        "Could not read frames from that video.\n"
+        "ffmpeg version\n"
+        "Invalid data found when processing input"
+    )

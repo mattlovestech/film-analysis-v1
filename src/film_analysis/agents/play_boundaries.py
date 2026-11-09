@@ -1,6 +1,7 @@
 """Agent that watches film frames and marks each play."""
 
 import base64
+import logging
 import os
 import tempfile
 from collections.abc import Callable
@@ -10,6 +11,7 @@ from typing import Protocol, runtime_checkable
 from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
 from film_analysis.agents.frames import extract_frames
 from film_analysis.agents.segments import (
+    UNCERTAIN,
     FilmSpan,
     PlaySegment,
     parse_film_spans,
@@ -30,20 +32,46 @@ Use the frame times. List plays in order. Do not overlap them. Include every sna
 """.strip()
 
 SPAN_PROMPT = """
-You chart American football film.
+You sort American football film before anyone charts it.
 Each image is labeled with its time in seconds from the start of the video.
 This window runs from {start:.1f}s to {end:.1f}s. Label every moment in that range.
 
-A play starts at the snap, kickoff, or punt and ends when the ball is dead.
-Anything else is not a play. Use kind huddle, dead, replay, crowd, or graphic.
+Decide in this order, and do not skip ahead:
+1. Offensive or defensive play. Both teams are lined up across the line of scrimmage,
+the ball is snapped, and the play runs until the ball is dead. Use kind scrimmage.
+A huddle, a walk to the line, or a celebration is not a play.
+2. If it is not that, special teams. A kickoff, punt, field goal, extra point,
+or the return that follows. Use kind special_teams.
+3. If it is not that, it is junk. Dead ball, replays, crowd, graphics, warmups,
+sideline, commercials, and anything that is not a live play. Use kind junk.
+4. If you are not sure it is a live play, use kind uncertain. Set it aside.
+A wrong play is worse than leaving the stretch for later.
 
 Return JSON with this shape and nothing else:
-{{"spans": [{{"kind": "play", "start_seconds": 0.0, "end_seconds": 0.0}}]}}
+{{"spans": [{{"kind": "scrimmage", "start_seconds": 0.0, "end_seconds": 0.0}}]}}
 
 Use the frame times. Cover the window from its first time to its last. Do not overlap spans.
 """.strip()
 
+REVIEW_PROMPT = """
+You set this stretch of American football film aside because it was not clearly a play.
+Each image is labeled with its time in seconds from the start of the video.
+The stretch runs from {start:.1f}s to {end:.1f}s. Look once more, in this order:
+1. Offensive or defensive play, from the snap until the ball is dead. Use kind scrimmage.
+2. Special teams: kickoff, punt, field goal, extra point, or return. Use kind special_teams.
+3. Junk: not a live play. Use kind junk.
+4. Still not sure. Use kind uncertain.
+
+Only mark a play when the frames show one. Leaving it uncertain is fine.
+
+Return JSON with this shape and nothing else:
+{{"spans": [{{"kind": "uncertain", "start_seconds": 0.0, "end_seconds": 0.0}}]}}
+
+Use the frame times. Cover the stretch. Do not overlap spans.
+""".strip()
+
 DEFAULT_MODEL = "claude-sonnet-5-5"
+_LOG = logging.getLogger("film_analysis")
 _WINDOW = 40
 
 FrameSampler = Callable[[Path], list[tuple[float, bytes]]]
@@ -57,7 +85,10 @@ class PlayBoundaryAgent(Protocol):
     name: str
 
     def label_window(self, samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
-        """Label one stretch of film as plays and stretches that are not plays."""
+        """Label one stretch as a scrimmage play, special teams, junk, or unsure."""
+
+    def review_window(self, samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+        """Look again at a stretch that was set aside."""
 
     def segment(self, video_path: Path) -> tuple[PlaySegment, ...]:
         """Return plays in an uploaded file, in kickoff-to-whistle order."""
@@ -110,19 +141,27 @@ class AnthropicPlayAgent:
         return _merge(groups)
 
     def label_window(self, samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
-        """Label one short stretch as plays and everything that is not a play."""
+        """Label one short stretch as a scrimmage play, special teams, junk, or unsure."""
 
+        return self._label(samples, SPAN_PROMPT)
+
+    def review_window(self, samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+        """Look again at a stretch that was set aside on the first pass."""
+
+        return self._label(samples, REVIEW_PROMPT)
+
+    def _label(self, samples: list[tuple[float, bytes]], template: str) -> tuple[FilmSpan, ...]:
         if not samples:
             return ()
         start = samples[0][0]
         end = samples[-1][0]
-        prompt = SPAN_PROMPT.format(start=start, end=end)
         try:
-            return parse_film_spans(self._ask(samples, prompt))
+            return parse_film_spans(self._ask(samples, template.format(start=start, end=end)))
         except ValueError as error:
-            raise VideoAnalysisError(
-                f"The model returned film spans that could not be read. {error}"
-            ) from error
+            _LOG.warning("could not read spans for %.1f–%.1f: %s", start, end, error)
+            if end <= start:
+                return ()
+            return (FilmSpan(kind=UNCERTAIN, start_seconds=start, end_seconds=end),)
 
     def segment_youtube(self, url: str) -> tuple[PlaySegment, ...]:
         try:
@@ -209,13 +248,40 @@ def _merge(groups: list[tuple[PlaySegment, ...]]) -> tuple[PlaySegment, ...]:
     )
 
 
+_CREDIT = "This film couldn't be read. The analysis account is out of credits."
+
+
 def _model_failure(error: Exception) -> str:
-    detail = " ".join(str(error).split())
+    detail = _api_message(error)
+    code = getattr(error, "error_code", None)
+    status = getattr(error, "status_code", None)
+    tags = [type(error).__name__]
+    if isinstance(code, str) and code:
+        tags.append(code)
+    if isinstance(status, int):
+        tags.append(f"HTTP {status}")
+    where = ", ".join(tags)
+    if code == "billing_frozen" or "credit balance" in detail.lower():
+        return f"{_CREDIT} ({where})"
     if not detail:
-        return "The model could not read that video."
-    if len(detail) > 180:
-        detail = detail[:177] + "..."
-    return f"The model could not read that video. {detail}"
+        return f"The model could not read that video. ({where})"
+    if len(detail) > 800:
+        detail = detail[:797] + "..."
+    return f"The model could not read that video. ({where}) {detail}"
+
+
+def _api_message(error: Exception) -> str:
+    api_message = getattr(error, "api_message", None)
+    if isinstance(api_message, str) and api_message.strip():
+        return " ".join(api_message.split())
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        nested = body.get("error")
+        if isinstance(nested, dict):
+            text = nested.get("message")
+            if isinstance(text, str) and text.strip():
+                return " ".join(text.split())
+    return " ".join(str(error).split())
 
 
 def _anthropic_client(api_key: str) -> object:

@@ -38,6 +38,13 @@ class _Bucket:
         for item in Delete["Objects"]:
             self.objects.pop(item["Key"], None)
 
+    def copy_object(self, Bucket: str, Key: str, CopySource: dict) -> None:
+        del Bucket
+        body = self.objects.get(CopySource["Key"])
+        if body is None:
+            raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "CopyObject")
+        self.objects[Key] = body
+
 
 def _clips(tmp_path: Path, bucket: _Bucket) -> R2Clips:
     return R2Clips(
@@ -65,6 +72,20 @@ def test_play_clip_round_trips_through_the_bucket(tmp_path: Path) -> None:
     clips.remove(4)
     assert bucket.objects == {}
     assert clips.play_path(4, 2).is_file() is False
+
+
+def test_a_saved_film_can_be_copied_without_downloading_it(tmp_path: Path) -> None:
+    bucket = _Bucket()
+    clips = _clips(tmp_path, bucket)
+    source = tmp_path / "film.mp4"
+    source.write_bytes(b"film-bytes")
+
+    clips.save_source(1, source)
+    (tmp_path / "projects" / "1" / "source.mp4").unlink()
+
+    assert clips.copy_source(1, 2) == "projects/2/source.mp4"
+    assert bucket.objects["projects/2/source.mp4"] == b"film-bytes"
+    assert clips.copy_source(9, 3) is None
 
 
 def test_upload_failure_names_the_bucket_error(tmp_path: Path) -> None:

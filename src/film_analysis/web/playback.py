@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from film_analysis.agents.errors import VideoAnalysisError
+from film_analysis.agents.errors import VideoAnalysisError, tool_failure
 
 
 def prepare_playback(source: Path) -> Path:
@@ -31,7 +31,13 @@ def prepare_playback(source: Path) -> Path:
 
     result = subprocess.run(command, check=False, capture_output=True)
     if result.returncode != 0 or not dest.is_file():
-        raise VideoAnalysisError("Could not prepare that video for playback.")
+        raise VideoAnalysisError(
+            tool_failure(
+                "Could not prepare that video for playback.",
+                result.stderr,
+                result.returncode,
+            )
+        )
     return dest
 
 
@@ -72,7 +78,13 @@ def cut_clip(source: Path, start: float, end: float, dest: Path) -> None:
     command += ["-movflags", "+faststart", str(dest)]
     result = subprocess.run(command, check=False, capture_output=True)
     if result.returncode != 0 or not dest.is_file():
-        raise VideoAnalysisError("Could not split that play out of the film.")
+        raise VideoAnalysisError(
+            tool_failure(
+                "Could not split that play out of the film.",
+                result.stderr,
+                result.returncode,
+            )
+        )
 
 
 def _codecs(source: Path) -> tuple[str, str]:

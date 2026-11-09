@@ -16,6 +16,8 @@ dependencies = [
 
 [project.scripts]
 film-analysis = "film_analysis.web.app:main"
+film-cutter = "film_analysis.cutter.server:main"
+film-task = "film_analysis.tasks.server:main"
 
 [build-system]
 requires = ["hatchling"]

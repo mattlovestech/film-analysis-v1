@@ -1,21 +1,32 @@
 """Serve the upload page and run the play-boundary agent."""
 
+import contextlib
 import inspect
+import logging
 import os
 import shutil
 import tempfile
 import threading
 import time
+import traceback
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
 from film_analysis.agents.frames import extract_window, video_duration
 from film_analysis.agents.play_boundaries import PlayBoundaryAgent, agent_from_env
-from film_analysis.agents.scan import scan_film
+from film_analysis.agents.scan import (
+    MAX_WORKERS,
+    FilmWindowError,
+    WorkerLimit,
+    clamp_workers,
+    scan_film,
+)
 from film_analysis.agents.segments import FilmSpan, format_play
 from film_analysis.agents.youtube import (
     FilmInfo,
@@ -24,26 +35,103 @@ from film_analysis.agents.youtube import (
     thumbnail_url,
     youtube_details,
 )
+from film_analysis.domain.models import PlayType
 from film_analysis.storage.catalog import (
+    ActivityStep,
     Catalog,
     CatalogError,
     MemoryCatalog,
+    PlayRecord,
     ProjectDetail,
+    SpanRecord,
     catalog_from_env,
 )
+from film_analysis.web.cloud import cloud_target, start_remote
 from film_analysis.web.playback import cut_clip
 
-_PAGE = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
+_PAGE = Path(__file__).with_name("index.html")
 _DEFAULT_MAX_BYTES = 500 * 1024 * 1024
 _ALLOWED_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 _VIDEO = File(None)
 _YOUTUBE = Form("")
+_SAVED = Form("")
 _Downloader = Callable[[str, Path], Path]
 _Preparer = Callable[[Path], Path]
 _Cutter = Callable[[Path, float, float, Path], None]
 _Duration = Callable[[Path], float]
 _Frames = Callable[[Path, float, float], list[tuple[float, bytes]]]
 _Details = Callable[[str], FilmInfo | None]
+
+
+class _ReviewDecision(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    decision: str
+
+    @field_validator("decision")
+    @classmethod
+    def _known_decision(cls, value: str) -> str:
+        if value not in {"scrimmage", "special_teams", "junk"}:
+            raise ValueError("decision must be scrimmage, special_teams, or junk")
+        return value
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> "_ReviewDecision":
+        if self.end <= self.start:
+            raise ValueError("end must be after start")
+        return self
+
+
+_SPECIAL_PLAY_TYPES = {
+    PlayType.PUNT.value,
+    PlayType.KICKOFF.value,
+    PlayType.FIELD_GOAL.value,
+    PlayType.EXTRA_POINT.value,
+}
+_PLAY_LABELS = {item.value for item in PlayType} | {"scrimmage", "special_teams", "junk"}
+
+
+class _WorkerSetting(BaseModel):
+    workers: int | None = Field(default=None, ge=1, le=MAX_WORKERS)
+    place: str | None = None
+
+    @field_validator("place")
+    @classmethod
+    def _known_place(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in {"local", "cloud"}:
+            raise ValueError("place must be local or cloud")
+        return value
+
+    @model_validator(mode="after")
+    def _has_change(self) -> "_WorkerSetting":
+        if self.workers is None and self.place is None:
+            raise ValueError("Choose where jobs run, or how many workers.")
+        return self
+
+
+class _PlayLabel(BaseModel):
+    play_type: str
+
+    @field_validator("play_type")
+    @classmethod
+    def _known_type(cls, value: str) -> str:
+        if value not in _PLAY_LABELS:
+            raise ValueError("play type must be a known play")
+        return value
+
+
+def _stored_play_label(play_type: str) -> tuple[str, str | None]:
+    """Return the family and the specific type stored for a user's choice."""
+
+    if play_type in {"scrimmage", "special_teams"}:
+        return play_type, None
+    if play_type in _SPECIAL_PLAY_TYPES:
+        return "special_teams", play_type
+    return "scrimmage", play_type
+
+
 _MIME_SUFFIX = {
     "video/mp4": ".mp4",
     "video/quicktime": ".mov",
@@ -84,8 +172,17 @@ def create_app(
     else:
         storage = None
         catalog = store
+    _stop_orphans(catalog)
+    slots = WorkerLimit(pool)
+    if workers is None:
+        with contextlib.suppress(CatalogError):
+            slots.set(catalog.worker_count())
     app = FastAPI(title="film-analysis", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.storage = storage
+
+    @app.get("/ping")
+    def ping() -> dict[str, bool]:
+        return {"ok": True}
 
     @app.get("/")
     def home() -> HTMLResponse:
@@ -95,6 +192,10 @@ def create_app(
     def analyses_page() -> HTMLResponse:
         return _page()
 
+    @app.get("/projects")
+    def projects_page() -> HTMLResponse:
+        return _page()
+
     @app.get("/activity")
     def activity_page() -> HTMLResponse:
         return _page()
@@ -102,6 +203,11 @@ def create_app(
     @app.get("/projects/{project_id}")
     def project_page(project_id: int) -> HTMLResponse:
         del project_id
+        return _page()
+
+    @app.get("/play/{uid}")
+    def play_page(uid: str) -> HTMLResponse:
+        del uid
         return _page()
 
     @app.get("/api/projects")
@@ -122,33 +228,82 @@ def create_app(
                 "created": item.created_at,
                 "youtube": item.youtube_url is not None,
                 "running": _running(running, running_lock, item.project),
+                "error": item.error,
+                "scanned": item.scanned_seconds,
+                "review_count": item.review_count,
+                "duration": item.duration_seconds,
             }
             for item in saved
         ]
 
     @app.get("/api/activity")
-    def activity_feed() -> dict[str, object]:
+    def activity_feed(request: Request) -> dict[str, object]:
         try:
-            saved = catalog.list_projects()
+            saved = catalog.list_activity()
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        try:
+            projects = catalog.list_projects()
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
         with running_lock:
-            phases = dict(activity)
             active = set(running)
-        jobs: list[dict[str, object]] = []
+        seen = {item.project for item in saved}
+        dated: list[tuple[str, dict[str, object]]] = []
         for item in saved:
-            working = item.project in active
-            if not working and item.status not in {"downloading", "scanning"}:
-                continue
             try:
                 detail = catalog.get_project(item.project)
             except CatalogError as error:
                 raise HTTPException(status_code=502, detail=str(error)) from error
             if detail is None:
                 continue
-            phase = phases.get(item.project, "starting") if working else "stopped"
-            jobs.append(_activity_job(detail, phase=phase, running=working))
-        return {"workers": pool, "jobs": jobs}
+            phase, working = _activity_state(item.phase, item.running, item.project in active)
+            dated.append(
+                (
+                    item.updated_at,
+                    _activity_job(
+                        detail,
+                        phase=phase,
+                        running=working,
+                        updated=item.updated_at,
+                        steps=item.steps,
+                    ),
+                )
+            )
+        for summary in projects:
+            if summary.project in seen or summary.status != "ready":
+                continue
+            try:
+                detail = catalog.get_project(summary.project)
+            except CatalogError as error:
+                raise HTTPException(status_code=502, detail=str(error)) from error
+            if detail is None or detail.status != "ready":
+                continue
+            stamp = summary.created_at or ""
+            dated.append(
+                (stamp, _activity_job(detail, phase="ready", running=False, updated=stamp))
+            )
+        dated.sort(key=lambda pair: pair[0], reverse=True)
+        available = cloud_target(request.headers.get("x-film-worker-url")) is not None
+        return {**_run_payload(catalog, slots, available), "jobs": [job for _, job in dated]}
+
+    @app.post("/api/settings")
+    def update_settings(body: _WorkerSetting, request: Request) -> dict[str, object]:
+        available = cloud_target(request.headers.get("x-film-worker-url")) is not None
+        if body.place == "cloud" and not available:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloud workers are not set up on this server.",
+            )
+        try:
+            if body.workers is not None:
+                catalog.set_worker_count(body.workers)
+                slots.set(body.workers)
+            if body.place is not None:
+                catalog.set_job_place(body.place)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        return _run_payload(catalog, slots, available)
 
     @app.get("/api/projects/{project_id}")
     def project(project_id: int) -> dict[str, object]:
@@ -158,39 +313,58 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(error)) from error
         if saved is None:
             raise HTTPException(status_code=404, detail="That analysis is no longer available.")
-        return _project_payload(saved, running=_running(running, running_lock, project_id))
+        return _project_payload(
+            saved,
+            running=_running(running, running_lock, project_id),
+            steps=_saved_steps(catalog, project_id),
+        )
 
     @app.post("/api/projects/{project_id}/retry")
-    def retry(project_id: int) -> dict[str, object]:
+    def retry(project_id: int, request: Request) -> dict[str, object]:
         try:
             saved = catalog.get_project(project_id)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
         if saved is None:
             raise HTTPException(status_code=404, detail="That analysis is no longer available.")
-        if not saved.youtube_url:
+        if not saved.youtube_url and catalog.source_file(project_id) is None:
             raise HTTPException(status_code=400, detail="Upload that film again to retry it.")
-        if saved.status not in {"downloading", "failed"}:
-            raise HTTPException(status_code=400, detail="That download has already finished.")
-        if not _claim(running, running_lock, project_id):
+        if saved.status not in {"downloading", "scanning", "failed"}:
+            raise HTTPException(status_code=400, detail="That film has already finished.")
+        cloud = _cloud_choice(request, catalog)
+        if cloud is None and not _claim(running, running_lock, project_id):
             raise HTTPException(status_code=409, detail="That download is already running.")
         try:
             chosen = agent if agent is not None else agent_from_env()
         except MissingApiKeyError as error:
-            _release(running, running_lock, project_id)
+            if cloud is None:
+                _release(running, running_lock, project_id)
             raise HTTPException(status_code=503, detail=str(error)) from error
+        resume_scan = _can_resume_scan(catalog, project_id, probe)
         try:
-            catalog.set_progress(
-                project_id,
-                status="downloading",
-                duration_seconds=None,
-                scanned_seconds=0.0,
-                error=None,
-            )
-            catalog.set_download(project_id, 0, None)
+            if resume_scan:
+                catalog.set_progress(
+                    project_id,
+                    status="scanning",
+                    duration_seconds=saved.duration_seconds,
+                    scanned_seconds=saved.scanned_seconds,
+                    error=None,
+                )
+            else:
+                catalog.set_progress(
+                    project_id,
+                    status="downloading",
+                    duration_seconds=None,
+                    scanned_seconds=0.0,
+                    error=None,
+                )
+                catalog.set_download(project_id, 0, None)
         except CatalogError as error:
-            _release(running, running_lock, project_id)
+            if cloud is None:
+                _release(running, running_lock, project_id)
             raise HTTPException(status_code=502, detail=str(error)) from error
+        if cloud is not None:
+            return _dispatch_cloud(request, catalog, project_id, saved.youtube_url, cloud, slots)
         _start_film(
             running,
             activity,
@@ -203,14 +377,119 @@ def create_app(
             probe=probe,
             sample=sample,
             workers=pool,
+            limit=slots,
             youtube=saved.youtube_url,
             upload_path=None,
             details=lookup,
+            resume_scan=resume_scan,
+            resume_at=saved.scanned_seconds if resume_scan else 0.0,
         )
         detail = catalog.get_project(project_id)
         if detail is None:
             raise HTTPException(status_code=502, detail="Could not save that analysis.")
         return _project_payload(detail, running=True)
+
+    @app.get("/projects/{project_id}/source")
+    def source(project_id: int) -> FileResponse:
+        path = catalog.source_file(project_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="That film is no longer available.")
+        return FileResponse(path, media_type="video/mp4", content_disposition_type="inline")
+
+    @app.post("/api/projects/{project_id}/reviews")
+    def resolve_review(project_id: int, decision: _ReviewDecision) -> dict[str, object]:
+        try:
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None:
+            raise HTTPException(status_code=404, detail="That analysis is no longer available.")
+        span = _matching_review(saved.spans, decision.start, decision.end)
+        if span is None:
+            raise HTTPException(status_code=404, detail="That stretch was already marked.")
+        if decision.decision != "junk":
+            film = catalog.source_file(project_id)
+            if film is None:
+                raise HTTPException(status_code=400, detail="That film is no longer available.")
+            number = 1 + max((play.play_number for play in saved.plays), default=0)
+            folder = Path(tempfile.mkdtemp(prefix="film-review-"))
+            dest = folder / "clip.mp4"
+            try:
+                split(film, span.start_seconds, span.end_seconds, dest)
+                catalog.add_play(
+                    project_id,
+                    number,
+                    span.start_seconds,
+                    span.end_seconds,
+                    dest,
+                    decision.decision,
+                )
+            except (VideoAnalysisError, CatalogError) as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            finally:
+                shutil.rmtree(folder, ignore_errors=True)
+        try:
+            catalog.drop_span(project_id, span.start_seconds, span.end_seconds)
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None:
+            raise HTTPException(status_code=502, detail="Could not save that analysis.")
+        return _project_payload(
+            saved,
+            running=_running(running, running_lock, project_id),
+            steps=_saved_steps(catalog, project_id),
+        )
+
+    @app.get("/api/plays/{uid}")
+    def play_detail(uid: str) -> dict[str, object]:
+        parsed = _parse_play_uid(uid)
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        project_id, play_number = parsed
+        try:
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        payload = _play_payload(saved, play_number)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        return payload
+
+    @app.post("/api/plays/{uid}")
+    def relabel_play(uid: str, choice: _PlayLabel) -> dict[str, object]:
+        parsed = _parse_play_uid(uid)
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        project_id, play_number = parsed
+        try:
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None or not any(play.play_number == play_number for play in saved.plays):
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        try:
+            if choice.play_type == "junk":
+                catalog.drop_play(project_id, play_number)
+                return {
+                    "removed": True,
+                    "project": project_id,
+                    "film": f"/projects/{project_id}",
+                }
+            family, play_type = _stored_play_label(choice.play_type)
+            catalog.set_play_type(project_id, play_number, play_type, family)
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            status = 404 if str(error) == "That play is no longer available." else 502
+            raise HTTPException(status_code=status, detail=str(error)) from error
+        if saved is None:
+            raise HTTPException(status_code=502, detail="Could not save that play.")
+        payload = _play_payload(saved, play_number)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        return payload
 
     @app.get("/projects/{project_id}/plays/{play_number}")
     def play(project_id: int, play_number: int) -> FileResponse:
@@ -219,19 +498,52 @@ def create_app(
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         return FileResponse(path, media_type="video/mp4", content_disposition_type="inline")
 
+    @app.get("/api/downloads")
+    def downloads() -> list[dict[str, object]]:
+        try:
+            saved = catalog.list_saved_films()
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        return [{"project": item.project, "name": item.name} for item in saved]
+
     @app.post("/analyze")
     async def analyze(
+        request: Request,
         video: UploadFile | None = _VIDEO,
         youtube: str = _YOUTUBE,
+        saved: str = _SAVED,
     ) -> dict[str, object]:
         has_file = _has_upload(video)
         link = youtube.strip()
-        if has_file and link:
-            raise HTTPException(status_code=400, detail="Use a file or a YouTube link.")
-        if not has_file and not link:
+        saved_id = _saved_id(saved)
+        sources = sum((has_file, bool(link), saved_id is not None))
+        if sources > 1:
             raise HTTPException(
                 status_code=400,
-                detail="Upload a video or paste a YouTube link.",
+                detail="Use a file, a YouTube link, or a downloaded film.",
+            )
+        if sources == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Upload a video, paste a YouTube link, or choose a downloaded film.",
+            )
+        if saved_id is not None:
+            return _analyze_saved(
+                catalog,
+                saved_id,
+                agent=agent,
+                fetch=fetch,
+                split=split,
+                probe=probe,
+                sample=sample,
+                workers=pool,
+                limit=slots,
+                running=running,
+                activity=activity,
+                running_lock=running_lock,
+                details=lookup,
+                cloud=_cloud_choice(request, catalog),
+                request=request,
             )
         canonical = _youtube_url(link) if link else None
         upload_path: Path | None = None
@@ -256,6 +568,20 @@ def create_app(
                 upload_path.unlink(missing_ok=True)
             raise HTTPException(status_code=502, detail=str(error)) from error
 
+        cloud = _cloud_choice(request, catalog)
+        if cloud is not None:
+            try:
+                try:
+                    if upload_path is not None:
+                        catalog.save_source(project_id, upload_path)
+                except CatalogError as error:
+                    _progress(catalog, project_id, "failed", None, 0.0, str(error))
+                    raise HTTPException(status_code=502, detail=str(error)) from error
+            finally:
+                if upload_path is not None:
+                    upload_path.unlink(missing_ok=True)
+            return _dispatch_cloud(request, catalog, project_id, canonical, cloud, slots)
+
         _claim(running, running_lock, project_id)
         _start_film(
             running,
@@ -269,6 +595,7 @@ def create_app(
             probe=probe,
             sample=sample,
             workers=pool,
+            limit=slots,
             youtube=canonical,
             upload_path=upload_path,
             details=lookup,
@@ -293,7 +620,7 @@ def main() -> None:
 
 
 def _page() -> HTMLResponse:
-    return HTMLResponse(_PAGE, headers={"Cache-Control": "no-store"})
+    return HTMLResponse(_PAGE.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
 
 
 def _claim(running: set[int], lock: threading.Lock, project_id: int) -> bool:
@@ -314,9 +641,23 @@ def _running(running: set[int], lock: threading.Lock, project_id: int) -> bool:
         return project_id in running
 
 
-def _note(activity: dict[int, str], lock: threading.Lock, project_id: int, phase: str) -> None:
+def _note(
+    activity: dict[int, str],
+    lock: threading.Lock,
+    catalog: Catalog,
+    project_id: int,
+    phase: str,
+) -> None:
     with lock:
         activity[project_id] = phase
+    _save_activity(catalog, project_id, phase, running=True)
+
+
+def _save_activity(catalog: Catalog, project_id: int, phase: str, *, running: bool) -> None:
+    try:
+        catalog.record_activity(project_id, phase, running=running)
+    except CatalogError:
+        return
 
 
 def _clear(activity: dict[int, str], lock: threading.Lock, project_id: int) -> None:
@@ -331,7 +672,8 @@ def _start_film(
     **kwargs: object,
 ) -> None:
     project_id = int(kwargs["project_id"])
-    _note(activity, lock, project_id, "starting")
+    catalog: Catalog = kwargs["catalog"]  # type: ignore[assignment]
+    _note(activity, lock, catalog, project_id, "starting")
 
     def run() -> None:
         try:
@@ -357,30 +699,68 @@ def _watch_film(
     youtube: str | None,
     upload_path: Path | None,
     details: _Details,
+    resume_scan: bool = False,
+    resume_at: float = 0.0,
+    limit: WorkerLimit | None = None,
 ) -> None:
     path: Path | None = upload_path
     owned: Path | None = None
     length: float | None = None
-    scanned = 0.0
+    scanned = resume_at
+    phase = "reading" if resume_scan else "downloading"
     try:
-        _progress(catalog, project_id, "downloading", None, 0.0, None)
-        if youtube is not None:
-            try:
-                info = details(youtube)
-            except Exception:
-                info = None
-            _remember_film(catalog, project_id, info)
-            _note(activity, lock, project_id, "downloading")
-            owned = Path(tempfile.mkdtemp(prefix="film-download-"))
-            path = _fetch(fetch, youtube, owned, _download_reporter(catalog, project_id))
-        if path is None:
-            raise VideoAnalysisError("Could not read that film.")
-        _note(activity, lock, project_id, "saving")
-        catalog.save_source(project_id, path)
-        length = probe(path)
+        if resume_scan:
+            path = catalog.source_file(project_id)
+            if path is not None:
+                try:
+                    length = probe(path)
+                except VideoAnalysisError:
+                    path = None
+            if path is None or length is None or length <= 0:
+                if youtube is None and upload_path is None:
+                    raise VideoAnalysisError("That film is no longer available.")
+                resume_scan = False
+                resume_at = 0.0
+                scanned = 0.0
+                phase = "downloading"
+        if not resume_scan:
+            path = upload_path
+            phase = "downloading"
+            _progress(catalog, project_id, "downloading", None, 0.0, None)
+            scanned = 0.0
+            if youtube is not None:
+                try:
+                    info = details(youtube)
+                except Exception:
+                    info = None
+                _remember_film(catalog, project_id, info)
+                _note(activity, lock, catalog, project_id, "downloading")
+                owned = Path(tempfile.mkdtemp(prefix="film-download-"))
+                path = _fetch(fetch, youtube, owned, _download_reporter(catalog, project_id))
+            if path is None:
+                raise VideoAnalysisError("Could not read that film.")
+            phase = "saving"
+            _note(activity, lock, catalog, project_id, "saving")
+            catalog.save_source(project_id, path)
+            length = probe(path)
+            resume_at = 0.0
+            phase = "reading"
 
-        def publish_play(number: int, start: float, end: float, clip: Path) -> None:
-            catalog.add_play(project_id, number, start, end, clip)
+        saved = catalog.get_project(project_id)
+        already = [
+            (play.start_seconds, play.end_seconds) for play in (saved.plays if saved else ())
+        ]
+        plays = saved.plays if saved else ()
+        next_number = 1 + max((play.play_number for play in plays), default=0)
+
+        def publish_play(
+            number: int,
+            start: float,
+            end: float,
+            clip: Path,
+            family: str,
+        ) -> None:
+            catalog.add_play(project_id, number, start, end, clip, family)
 
         def publish_span(kind: str, start: float, end: float) -> None:
             catalog.add_span(project_id, kind, start, end)
@@ -393,8 +773,15 @@ def _watch_film(
         def label(samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
             return agent.label_window(samples)
 
-        _note(activity, lock, project_id, "scanning")
-        _progress(catalog, project_id, "scanning", length, 0.0, None)
+        review = getattr(agent, "review_window", None)
+
+        phase = "reading"
+        _note(activity, lock, catalog, project_id, "scanning")
+        _progress(catalog, project_id, "scanning", length, resume_at, None)
+
+        def mark_review() -> None:
+            _note(activity, lock, catalog, project_id, "checking")
+
         scan_film(
             path,
             length,
@@ -405,15 +792,43 @@ def _watch_film(
             publish_span,
             progress,
             workers=workers,
+            limit=limit,
+            review=review,
+            resume_at=resume_at,
+            next_number=next_number,
+            already=already,
+            on_review=mark_review,
         )
         _progress(catalog, project_id, "ready", length, length, None)
+        _save_activity(catalog, project_id, "ready", running=False)
     except (Exception, SystemExit) as error:
-        _progress(catalog, project_id, "failed", length, scanned, _job_error(error))
+        _log_failure(project_id, phase, scanned, length, error)
+        _progress(
+            catalog,
+            project_id,
+            "failed",
+            length,
+            scanned,
+            _job_error(error, phase=phase, scanned=scanned, duration=length),
+        )
+        _save_activity(catalog, project_id, "stopped", running=False)
     finally:
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)
         if owned is not None:
             shutil.rmtree(owned, ignore_errors=True)
+
+
+def _can_resume_scan(catalog: Catalog, project_id: int, probe: _Duration) -> bool:
+    """The download finished when the film file is already stored and readable."""
+
+    path = catalog.source_file(project_id)
+    if path is None:
+        return False
+    try:
+        return probe(path) > 0
+    except VideoAnalysisError:
+        return False
 
 
 def _download_reporter(catalog: Catalog, project_id: int) -> Callable[[int, int | None], None]:
@@ -491,20 +906,296 @@ def _progress(
         return
 
 
-def _job_error(error: Exception) -> str:
-    if isinstance(error, SystemExit):
-        text = "Could not fetch that YouTube video."
-    elif isinstance(error, (VideoAnalysisError, MissingApiKeyError, CatalogError)):
-        text = str(error)
-    else:
-        text = "Could not read that film."
-    text = " ".join(text.split())
-    if len(text) > 180:
-        text = text[:177] + "..."
+_INTERRUPTED = "The server stopped while this was running."
+
+
+def _cloud_choice(request: Request, catalog: Catalog) -> tuple[str, str] | None:
+    """The worker target when this film should run in the cloud."""
+
+    target = cloud_target(request.headers.get("x-film-worker-url"))
+    if _job_place(catalog, target is not None) != "cloud":
+        return None
+    if target is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cloud workers are not set up on this server.",
+        )
+    return target
+
+
+def _job_place(catalog: Catalog, cloud_available: bool) -> str:
+    """Where the next job runs. Cloud is the default only when it is set up."""
+
+    try:
+        saved = catalog.job_place()
+    except CatalogError:
+        saved = None
+    if saved in {"local", "cloud"}:
+        return saved
+    return "cloud" if cloud_available else "local"
+
+
+def _run_payload(catalog: Catalog, slots: WorkerLimit, cloud_available: bool) -> dict[str, object]:
+    try:
+        workers = catalog.worker_count()
+    except CatalogError:
+        workers = slots.get()
+    return {
+        "workers": workers,
+        "place": _job_place(catalog, cloud_available),
+        "cloud": cloud_available,
+    }
+
+
+def _chosen_workers(catalog: Catalog, slots: WorkerLimit) -> int:
+    try:
+        return clamp_workers(catalog.worker_count())
+    except CatalogError:
+        return slots.get()
+
+
+def _dispatch_cloud(
+    request: Request,
+    catalog: Catalog,
+    project_id: int,
+    youtube: str | None,
+    cloud: tuple[str, str],
+    slots: WorkerLimit,
+) -> JSONResponse | dict[str, object]:
+    """Start the cutter. Behind the public worker, the worker does the call."""
+
+    workers = _chosen_workers(catalog, slots)
+    if request.headers.get("x-film-delegate") == "1":
+        return _delegate(catalog, project_id, youtube, workers)
+    worker, token = cloud
+    try:
+        start_remote(worker, token, project_id, youtube, workers)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    _save_activity(catalog, project_id, "starting", running=True)
+    detail = catalog.get_project(project_id)
+    if detail is None:
+        raise HTTPException(status_code=502, detail="Could not save that analysis.")
+    return _project_payload(detail, running=True)
+
+
+def _delegate(catalog: Catalog, project_id: int, youtube: str | None, workers: int) -> JSONResponse:
+    """Tell the Worker to start the cutter. The website does not call it itself."""
+
+    _save_activity(catalog, project_id, "starting", running=True)
+    detail = catalog.get_project(project_id)
+    if detail is None:
+        raise HTTPException(status_code=502, detail="Could not save that analysis.")
+    return JSONResponse(
+        _project_payload(detail, running=True),
+        headers={
+            "x-film-start": str(project_id),
+            "x-film-youtube": youtube or "",
+            "x-film-workers": str(workers),
+        },
+    )
+
+
+def _stop_orphans(catalog: Catalog) -> None:
+    """A restart leaves in-progress films with no error. Record why they stopped.
+
+    In the cloud the cutter keeps running after this process sleeps, so those
+    films are still going.
+    """
+
+    if os.environ.get("FILM_INTERNAL_TOKEN"):
+        return
+    try:
+        saved = catalog.list_projects()
+    except CatalogError:
+        return
+    for item in saved:
+        if item.status not in {"downloading", "scanning"}:
+            continue
+        try:
+            detail = catalog.get_project(item.project)
+        except CatalogError:
+            continue
+        if detail is None:
+            continue
+        try:
+            catalog.set_progress(
+                item.project,
+                status=detail.status,
+                duration_seconds=detail.duration_seconds,
+                scanned_seconds=detail.scanned_seconds,
+                error=detail.error or _INTERRUPTED,
+            )
+        except CatalogError:
+            continue
+    _remember_stopped_activity(catalog, saved)
+
+
+def _remember_stopped_activity(catalog: Catalog, saved: list[object]) -> None:
+    """Copy in-progress films onto the activity table and close ones this process left behind."""
+
+    try:
+        current = {row.project: row for row in catalog.list_activity()}
+    except CatalogError:
+        return
+    for row in current.values():
+        if not row.running:
+            continue
+        try:
+            catalog.record_activity(row.project, "stopped", running=False)
+        except CatalogError:
+            continue
+        current[row.project] = row
+    for item in saved:
+        project = getattr(item, "project", None)
+        status = getattr(item, "status", None)
+        if not isinstance(project, int) or project in current:
+            continue
+        if status not in {"downloading", "scanning", "failed"}:
+            continue
+        phase = "failed" if status == "failed" else "stopped"
+        try:
+            catalog.record_activity(project, phase, running=False)
+        except CatalogError:
+            continue
+
+
+_LOG = logging.getLogger("film_analysis")
+_ERROR_LIMIT = 2000
+
+
+def _log_failure(
+    project_id: int,
+    phase: str,
+    scanned: float,
+    duration: float | None,
+    error: BaseException,
+) -> None:
+    length = "unknown" if duration is None else f"{duration:.1f}s"
+    _LOG.exception(
+        "film %s failed while %s (scanned %.1fs of %s): %s",
+        project_id,
+        phase,
+        scanned,
+        length,
+        error,
+    )
+
+
+def _job_error(
+    error: BaseException,
+    *,
+    phase: str,
+    scanned: float,
+    duration: float | None,
+) -> str:
+    lines = [_failure_place(error, phase, scanned, duration), *_report_lines(error)]
+    text = "\n".join(line for line in lines if line)
+    if len(text) > _ERROR_LIMIT:
+        text = text[: _ERROR_LIMIT - 3] + "..."
     return text or "Could not read that film."
 
 
-def _activity_job(project: ProjectDetail, *, phase: str, running: bool) -> dict[str, object]:
+def _report_lines(error: BaseException) -> list[str]:
+    lines: list[str] = []
+    for index, item in enumerate(_cause_chain(error)):
+        prefix = "" if index == 0 else "caused by "
+        lines.append(prefix + _error_detail(item))
+        lines.extend(f"at {frame}" for frame in _app_frames(item))
+    return lines
+
+
+def _cause_chain(error: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while isinstance(current, BaseException) and id(current) not in seen:
+        seen.add(id(current))
+        if not isinstance(current, FilmWindowError):
+            chain.append(current)
+        cause = current.__cause__
+        current = cause if isinstance(cause, BaseException) else None
+    return chain
+
+
+def _app_frames(error: BaseException) -> list[str]:
+    if error.__traceback__ is None:
+        return []
+    frames: list[str] = []
+    for frame in traceback.extract_tb(error.__traceback__):
+        path = frame.filename.replace("\\", "/")
+        marker = "film_analysis/"
+        if marker not in path:
+            continue
+        short = path[path.rfind(marker):]
+        frames.append(f"{short}:{frame.name}:{frame.lineno}")
+    return frames[-4:]
+
+
+def _failure_place(
+    error: BaseException,
+    phase: str,
+    scanned: float,
+    duration: float | None,
+) -> str:
+    if isinstance(error, FilmWindowError):
+        span = f"Stopped while reading {_clock(error.start)}–{_clock(error.end)}"
+        if duration is not None and duration > 0:
+            return f"{span} of {_clock(duration)}."
+        return f"{span}."
+    if phase == "saving":
+        return "Stopped while saving the film."
+    if phase == "reading":
+        if duration is not None and duration > 0:
+            return f"Stopped while reading at {_clock(scanned)} of {_clock(duration)}."
+        return f"Stopped while reading at {_clock(scanned)}."
+    return "Stopped while downloading."
+
+
+def _error_detail(error: BaseException) -> str:
+    if isinstance(error, SystemExit):
+        code = error.code
+        extra = f" exit {code}" if code not in (None, 0, "") else ""
+        return f"SystemExit:{extra} Could not fetch that YouTube video."
+    text = str(error).strip()
+    name = type(error).__name__
+    if not text:
+        return name
+    if text.startswith(f"{name}:"):
+        return text
+    return f"{name}: {text}"
+
+
+def _clock(seconds: float) -> str:
+    whole = max(0, round(seconds))
+    hours, rest = divmod(whole, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+_LIVE_PHASES = frozenset({"starting", "downloading", "saving", "scanning", "checking"})
+
+
+def _activity_state(phase: str, running: bool, active: bool) -> tuple[str, bool]:
+    """Keep a finished film complete. A live phase that is no longer running has stopped."""
+
+    if phase == "ready":
+        return "ready", False
+    if (running or active) and phase in _LIVE_PHASES:
+        return phase, True
+    return "stopped", False
+
+
+def _activity_job(
+    project: ProjectDetail,
+    *,
+    phase: str,
+    running: bool,
+    updated: str,
+    steps: tuple[ActivityStep, ...] = (),
+) -> dict[str, object]:
     return {
         "project": project.project,
         "name": project.name,
@@ -516,11 +1207,123 @@ def _activity_job(project: ProjectDetail, *, phase: str, running: bool) -> dict[
         "scanned": project.scanned_seconds,
         "duration": project.duration_seconds,
         "error": project.error,
+        "youtube": project.youtube_url is not None,
         "play_count": len(project.plays),
+        "updated": updated,
+        "steps": _step_times(steps),
     }
 
 
-def _project_payload(project: ProjectDetail, *, running: bool = False) -> dict[str, object]:
+def _play_uid(project_id: int, play_number: int) -> str:
+    return f"{project_id}-{play_number}"
+
+
+def _parse_play_uid(uid: str) -> tuple[int, int] | None:
+    project, separator, number = uid.partition("-")
+    if separator != "-" or not project.isdigit() or not number.isdigit():
+        return None
+    project_id = int(project)
+    play_number = int(number)
+    if (
+        project_id < 1
+        or play_number < 1
+        or str(project_id) != project
+        or str(play_number) != number
+    ):
+        return None
+    return project_id, play_number
+
+
+def _ordered_plays(project: ProjectDetail) -> list[PlayRecord]:
+    return sorted(project.plays, key=lambda play: (play.start_seconds, play.play_number))
+
+
+def _play_summary(project_id: int, play: PlayRecord) -> dict[str, object]:
+    return {
+        "uid": _play_uid(project_id, play.play_number),
+        "play_number": play.play_number,
+        "label": format_play(play.play_number, play.start_seconds, play.end_seconds),
+        "start": play.start_seconds,
+        "end": play.end_seconds,
+        "family": play.family,
+        "play_type": play.play_type,
+        "video": f"/projects/{project_id}/plays/{play.play_number}",
+    }
+
+
+def _play_payload(project: ProjectDetail, play_number: int) -> dict[str, object] | None:
+    ordered = _ordered_plays(project)
+    index = next(
+        (position for position, play in enumerate(ordered) if play.play_number == play_number),
+        None,
+    )
+    if index is None:
+        return None
+    play = ordered[index]
+    previous_play = ordered[index - 1] if index else None
+    next_play = ordered[index + 1] if index + 1 < len(ordered) else None
+    return {
+        **_play_summary(project.project, play),
+        "project": project.project,
+        "name": project.name,
+        "channel": project.channel,
+        "position": index + 1,
+        "count": len(ordered),
+        "film": f"/projects/{project.project}",
+        "previous": (
+            None
+            if previous_play is None
+            else _play_uid(project.project, previous_play.play_number)
+        ),
+        "next": None if next_play is None else _play_uid(project.project, next_play.play_number),
+    }
+
+
+def _saved_steps(catalog: Catalog, project_id: int) -> tuple[ActivityStep, ...]:
+    try:
+        row = catalog.get_activity(project_id)
+    except CatalogError:
+        return ()
+    if row is None:
+        return ()
+    return row.steps
+
+
+def _step_times(steps: tuple[ActivityStep, ...]) -> list[dict[str, object]]:
+    now = datetime.now(UTC)
+    timed: list[dict[str, object]] = []
+    for step in steps:
+        started = _stamp(step.started_at)
+        ended = now if step.ended_at is None else _stamp(step.ended_at)
+        seconds = 0.0
+        if started is not None and ended is not None:
+            seconds = max(0.0, (ended - started).total_seconds())
+        timed.append(
+            {
+                "name": step.name,
+                "seconds": round(seconds, 1),
+                "running": step.ended_at is None,
+            }
+        )
+    return timed
+
+
+def _stamp(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _project_payload(
+    project: ProjectDetail,
+    *,
+    running: bool = False,
+    steps: tuple[ActivityStep, ...] = (),
+) -> dict[str, object]:
     return {
         "running": running,
         "project": project.project,
@@ -534,17 +1337,37 @@ def _project_payload(project: ProjectDetail, *, running: bool = False) -> dict[s
         "thumbnail": thumbnail_url(project.youtube_url),
         "downloaded": project.downloaded_bytes,
         "total_bytes": project.total_bytes,
-        "plays": [
+        "steps": _step_times(steps),
+        "plays": [_play_summary(project.project, play) for play in _ordered_plays(project)],
+        "reviews": [
             {
-                "play_number": play.play_number,
-                "label": format_play(play.play_number, play.start_seconds, play.end_seconds),
-                "start": play.start_seconds,
-                "end": play.end_seconds,
-                "video": f"/projects/{project.project}/plays/{play.play_number}",
+                "start": span.start_seconds,
+                "end": span.end_seconds,
+                "video": f"/projects/{project.project}/source",
             }
-            for play in project.plays
+            for span in sorted(
+                (span for span in project.spans if span.kind == "uncertain"),
+                key=lambda span: (span.start_seconds, span.end_seconds),
+            )
         ],
     }
+
+
+def _matching_review(
+    spans: tuple[SpanRecord, ...],
+    start: float,
+    end: float,
+) -> SpanRecord | None:
+    return next(
+        (
+            span
+            for span in spans
+            if span.kind == "uncertain"
+            and abs(span.start_seconds - start) < 0.05
+            and abs(span.end_seconds - end) < 0.05
+        ),
+        None,
+    )
 
 
 def _load_dotenv() -> None:
@@ -560,6 +1383,98 @@ def _load_dotenv() -> None:
             continue
         key, value = stripped.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def _saved_id(value: str) -> int | None:
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        project_id = int(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Choose a downloaded film.") from None
+    if project_id < 1:
+        raise HTTPException(status_code=400, detail="Choose a downloaded film.")
+    return project_id
+
+
+def _analyze_saved(
+    catalog: Catalog,
+    source_id: int,
+    *,
+    agent: PlayBoundaryAgent | None,
+    fetch: _Downloader,
+    split: _Cutter,
+    probe: _Duration,
+    sample: _Frames,
+    workers: int,
+    limit: WorkerLimit,
+    running: set[int],
+    activity: dict[int, str],
+    running_lock: threading.Lock,
+    details: _Details,
+    cloud: tuple[str, str] | None,
+    request: Request,
+) -> dict[str, object] | JSONResponse:
+    """Start a new analysis from a film that is already stored."""
+
+    try:
+        origin = catalog.get_project(source_id)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if origin is None:
+        raise HTTPException(status_code=404, detail="That film is no longer available.")
+    try:
+        chosen = agent if agent is not None else agent_from_env()
+    except MissingApiKeyError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    try:
+        project_id = catalog.create_project(origin.name, origin.youtube_url)
+        catalog.describe_film(
+            project_id,
+            name=origin.name,
+            channel=origin.channel,
+            duration_seconds=origin.duration_seconds,
+        )
+        copied = catalog.copy_source(source_id, project_id)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if not copied:
+        _progress(
+            catalog,
+            project_id,
+            "failed",
+            None,
+            0.0,
+            "That film is no longer available.",
+        )
+        raise HTTPException(status_code=400, detail="That film is no longer available.")
+    if cloud is not None:
+        return _dispatch_cloud(request, catalog, project_id, None, cloud, limit)
+    _claim(running, running_lock, project_id)
+    _start_film(
+        running,
+        activity,
+        running_lock,
+        catalog=catalog,
+        project_id=project_id,
+        agent=chosen,
+        fetch=fetch,
+        split=split,
+        probe=probe,
+        sample=sample,
+        workers=workers,
+        limit=limit,
+        youtube=None,
+        upload_path=None,
+        details=details,
+        resume_scan=True,
+        resume_at=0.0,
+    )
+    detail = catalog.get_project(project_id)
+    if detail is None:
+        raise HTTPException(status_code=502, detail="Could not save that analysis.")
+    return _project_payload(detail, running=True)
 
 
 def _has_upload(video: UploadFile | None) -> bool:

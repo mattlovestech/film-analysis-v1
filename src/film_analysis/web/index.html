@@ -33,6 +33,15 @@
     }
     h1 { margin: 0; font-size: 1.5rem; font-weight: 650; letter-spacing: -0.03em; }
     h2 { margin: 2rem 0 0; font-size: 0.8rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .section-head h2 { margin: 0; }
+    #refresh-analyses { font-size: 0.8rem; }
     a { color: inherit; }
     header nav { display: flex; align-items: center; gap: 0.35rem 1rem; }
     header nav a.quiet {
@@ -90,7 +99,8 @@
       font-size: 0.8rem;
     }
     .or::before, .or::after { content: ""; height: 1px; background: var(--line); }
-    input[type="url"] {
+    input[type="url"],
+    select {
       box-sizing: border-box;
       width: 100%;
       padding: 0.65rem 0.75rem;
@@ -102,7 +112,8 @@
       outline: none;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    input[type="url"]:focus {
+    input[type="url"]:focus,
+    select:focus {
       border-color: var(--blue);
       box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.28);
     }
@@ -132,44 +143,49 @@
     #status { margin: 0.85rem 0 0; color: var(--ink); font-weight: 650; }
     #status:empty { display: none; }
     #status.error { color: #ff9b90; }
-    #projects, #results { margin: 0.35rem 0 0; padding: 0; list-style: none; }
+    #projects, #results, #reviews { margin: 0.35rem 0 0; padding: 0; list-style: none; }
     #projects {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
-      gap: 0.45rem;
-      margin-top: 0.7rem;
+      gap: 0.55rem;
+      margin-top: 0.85rem;
     }
     #projects a {
-      position: relative;
       display: grid;
-      grid-template-columns: 6rem minmax(0, 1fr);
-      gap: 0.75rem;
+      grid-template-columns: 7.25rem minmax(0, 1fr) auto;
+      gap: 0.8rem 0.85rem;
       align-items: center;
-      padding: 0.5rem;
-      border-radius: 10px;
+      padding: 0.65rem;
+      border-radius: var(--radius);
       background: var(--surface);
       text-decoration: none;
       transition: background 0.15s ease;
     }
     #projects a:hover { background: #242426; }
+    #projects a:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    #projects a[data-bucket="needs"],
+    #projects a[data-bucket="working"] { box-shadow: inset 3px 0 0 var(--gold); }
+    #projects a[data-bucket="failed"] { box-shadow: inset 3px 0 0 #ff9b90; }
     #projects img, #projects .blank {
       display: block;
-      width: 6rem;
-      height: 3.4rem;
+      width: 7.25rem;
+      height: 4.08rem;
       object-fit: cover;
-      border-radius: 6px;
+      border-radius: 8px;
       background: #000;
     }
     #projects .copy {
       display: flex;
       flex-direction: column;
-      gap: 0.15rem;
+      gap: 0.12rem;
       min-width: 0;
     }
     #projects .title {
       margin: 0;
       color: var(--ink);
-      font-size: 0.82rem;
+      font-size: 0.95rem;
       font-weight: 650;
       letter-spacing: -0.02em;
       line-height: 1.25;
@@ -178,37 +194,111 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    #projects .meta {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 0.5rem;
-    }
-    #projects .plays {
-      display: flex;
-      align-items: baseline;
-      gap: 0.28rem;
-      margin: 0;
-      color: var(--ink);
-    }
-    #projects .plays strong {
-      font-size: 1.2rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      font-variant-numeric: tabular-nums;
-      color: var(--ink);
-    }
-    #projects .plays span {
-      color: #d9d3c8;
-      font-size: 0.82rem;
-      font-weight: 650;
-    }
-    #projects .plays.progress strong { color: var(--gold); }
     #projects .when {
       margin: 0;
       color: var(--muted);
       font-size: 0.75rem;
       font-variant-numeric: tabular-nums;
+    }
+    #projects .next {
+      margin: 0.12rem 0 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      line-height: 1.35;
+    }
+    #projects .next.attention { color: var(--gold); }
+    #projects .fault {
+      margin: 0.15rem 0 0;
+      color: #ff9b90;
+      font-size: 0.8rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    #projects .retry { justify-self: start; margin-top: 0.2rem; }
+    #projects .track {
+      display: block;
+      height: 4px;
+      margin-top: 0.45rem;
+      border-radius: 999px;
+      background: #2c2c2e;
+      overflow: hidden;
+    }
+    #projects .track[hidden] { display: none; }
+    #projects .track > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--gold);
+    }
+    #projects .track.unknown > span {
+      width: 38%;
+      animation: download-slide 1.15s ease-in-out infinite;
+    }
+    #projects .stat {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      min-width: 4.6rem;
+      text-align: right;
+    }
+    #projects .stat strong {
+      color: var(--ink);
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    #projects .stat strong[hidden] { display: none; }
+    #projects .stat span {
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+    }
+    #projects .stat.working strong,
+    #projects .stat.needs strong,
+    #projects .stat.needs span { color: var(--gold); }
+    #projects .stat.failed span { color: #ff9b90; }
+    #project-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.85rem;
+    }
+    #project-filters[hidden] { display: none; }
+    #project-filters .chip {
+      padding: 0.28rem 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 650;
+    }
+    #project-filters .chip:hover:not(:disabled) {
+      filter: none;
+      color: var(--ink);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+    #project-filters .chip[aria-pressed="true"] {
+      border-color: transparent;
+      background: var(--ink);
+      color: #111;
+    }
+    @media (max-width: 640px) {
+      #projects a { grid-template-columns: 5.4rem minmax(0, 1fr); }
+      #projects img, #projects .blank { width: 5.4rem; height: 3.05rem; }
+      #projects .stat {
+        grid-column: 2;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 0.35rem;
+        justify-content: flex-start;
+        min-width: 0;
+        text-align: left;
+      }
     }
     .pie {
       width: 2.6rem;
@@ -216,14 +306,6 @@
       border-radius: 50%;
       background: conic-gradient(from -90deg, var(--gold) var(--pct, 0%), #2c2c2e 0);
       flex: none;
-    }
-    #projects .pie {
-      position: absolute;
-      top: 0.4rem;
-      left: 5.15rem;
-      width: 1.05rem;
-      height: 1.05rem;
-      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
     }
     #activity-list { margin: 0.7rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.45rem; }
     #activity-list a {
@@ -242,9 +324,38 @@
       font-weight: 650;
       letter-spacing: -0.02em;
     }
-    #activity-list .step { margin: 0; color: var(--gold); font-size: 0.95rem; font-weight: 700; }
+    #activity-list .step {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin: 0;
+      color: var(--gold);
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
     #activity-list .step.stopped { color: #ff9b90; }
-    #activity-list .detail { margin: 0; color: #d9d3c8; font-size: 0.85rem; }
+    #activity-list .step.done { color: var(--ink); }
+    #activity-list .step .when {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    #activity-list .step .label { margin-right: auto; }
+    #activity-list .step .pct { font-variant-numeric: tabular-nums; }
+    #activity-list .step .pct[hidden] { display: none; }
+    #activity-list .detail { margin: 0; color: #d9d3c8; font-size: 0.85rem; line-height: 1.35; }
+    #activity-list .fault {
+      margin: 0;
+      color: #ff9b90;
+      font-size: 0.85rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    #activity-list .retry { justify-self: start; margin-top: 0.1rem; }
     #activity-list .bar {
       height: 4px;
       border-radius: 999px;
@@ -253,25 +364,196 @@
     }
     #activity-list .bar div { height: 100%; width: 0; background: var(--gold); }
     #activity-list .bar.stopped div { background: #ff9b90; }
+    #activity-list .bar.unknown div {
+      width: 38%;
+      animation: download-slide 1.15s ease-in-out infinite;
+    }
+    #activity-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.85rem;
+      margin-top: 0.35rem;
+    }
+    #activity-status .lead { margin: 0; color: var(--ink); font-weight: 650; }
+    #activity-status > div { min-width: 0; }
+    #activity-note {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin: 0.2rem 0 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+    #activity-note-text { min-width: 0; }
+    #activity-live {
+      width: 0.45rem;
+      height: 0.45rem;
+      border-radius: 50%;
+      background: var(--gold);
+      box-shadow: 0 0 0 0 rgba(255, 214, 10, 0.55);
+      animation: activity-pulse 1.6s ease-out infinite;
+      flex: none;
+    }
+    #activity-live[hidden] { display: none; }
+    #activity-loading {
+      width: 1.35rem;
+      height: 1.35rem;
+    }
+    #activity-loading[hidden] { display: none; }
+    #activity-retry { margin-top: 0.45rem; }
+    .stages {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.85rem;
+      margin: 0.55rem 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .stages li {
+      display: flex;
+      align-items: center;
+      gap: 0.32rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 650;
+    }
+    .stages li::before {
+      content: "";
+      width: 0.45rem;
+      height: 0.45rem;
+      border-radius: 50%;
+      background: #3a3a3c;
+      flex: none;
+    }
+    .stages li.done { color: #d9d3c8; }
+    .stages li.done::before { background: var(--gold); }
+    .stages li.now { color: var(--gold); }
+    .stages li.now::before {
+      background: var(--gold);
+      box-shadow: 0 0 0 3px rgba(255, 214, 10, 0.28);
+    }
+    .stages li.stopped { color: #ff9b90; }
+    .stages li.stopped::before { background: #ff9b90; }
+    .stages[hidden],
+    #activity-list .stages { margin-top: 0.15rem; }
+    #activity-list .stages .took,
+    #film-steps .took {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    #film-steps { margin-top: 0.85rem; }
+    #film-steps[hidden] { display: none; }
+    #activity-list li.skeleton {
+      display: grid;
+      gap: 0.45rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    #activity-list .bone {
+      display: block;
+      height: 0.7rem;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #2a2a2c 25%, #3a3a3c 50%, #2a2a2c 75%);
+      background-size: 200% 100%;
+      animation: activity-shimmer 1.2s ease-in-out infinite;
+    }
+    #activity-list .bone.title { width: 62%; height: 0.85rem; }
+    #activity-list .bone.step { width: 28%; }
+    #activity-list .bone.detail { width: 84%; }
+    #activity-list .bone.bar { width: 100%; height: 4px; }
+    @keyframes activity-shimmer {
+      from { background-position: 100% 0; }
+      to { background-position: -100% 0; }
+    }
+    @keyframes activity-pulse {
+      70% { box-shadow: 0 0 0 6px rgba(255, 214, 10, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(255, 214, 10, 0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #activity-list .bone,
+      #activity-live { animation: none; }
+    }
+    label.workers {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 650;
+    }
+    label.workers[hidden] { display: none; }
+    label.workers input {
+      width: 3.5rem;
+      padding: 0.35rem 0.4rem;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--ink);
+      font: inherit;
+      font-variant-numeric: tabular-nums;
+    }
+    label.workers input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.28);
+      outline: none;
+    }
+    .workers-note {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    .run-where {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-top: 0.85rem;
+    }
+    .place {
+      display: inline-flex;
+      padding: 0.15rem;
+      border-radius: 999px;
+      background: #2c2c2e;
+    }
+    .place button {
+      padding: 0.3rem 0.75rem;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    .place button[aria-pressed="true"] {
+      background: var(--ink);
+      color: #111;
+    }
+    .place button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
     #review h2 { margin-top: 1.35rem; }
+    #outcome { margin: 1.1rem 0 0; color: var(--ink); font-weight: 650; }
+    #outcome.working { color: var(--gold); }
     .pie.unknown {
       background: conic-gradient(from -90deg, var(--gold) 0 28%, #2c2c2e 0);
       animation: spin 0.9s linear infinite;
     }
-    #results {
+    #results, #reviews {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
       gap: 0.7rem;
       margin-top: 0.7rem;
     }
-    #results .play-card {
+    #results .play-card, #reviews .play-card {
       position: relative;
       overflow: hidden;
       border-radius: var(--radius);
       background: var(--surface);
     }
-    #results .play-card.playing { box-shadow: 0 0 0 2px var(--gold); }
-    #results video {
+    #results .play-card.playing, #reviews .play-card.playing { box-shadow: 0 0 0 2px var(--gold); }
+    #results video, #reviews video {
       display: block;
       width: 100%;
       aspect-ratio: 16 / 9;
@@ -279,7 +561,7 @@
       background: #000;
       object-fit: cover;
     }
-    #results .play-badge {
+    #results .play-badge, #reviews .play-badge {
       position: absolute;
       top: 0.45rem;
       left: 0.45rem;
@@ -290,8 +572,9 @@
       font-size: 0.75rem;
       font-weight: 650;
       font-variant-numeric: tabular-nums;
+      text-decoration: none;
     }
-    #results .play-meta {
+    #results .play-meta, #reviews .play-meta {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
@@ -300,8 +583,104 @@
       padding: 0.55rem 0.7rem 0.65rem;
       color: var(--ink);
       font-variant-numeric: tabular-nums;
+      text-decoration: none;
     }
-    #results .play-length { color: var(--muted); font-size: 0.8rem; }
+    #results a.play-meta:hover { color: var(--blue); }
+    #play-back {
+      color: var(--muted);
+      font-size: 0.85rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    #play-back:hover { color: var(--ink); }
+    #play-title {
+      margin: 0.35rem 0 0;
+      font-size: 1.5rem;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      text-transform: none;
+      color: var(--ink);
+    }
+    #play-video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      margin-top: 0.85rem;
+      border-radius: var(--radius);
+      background: #000;
+    }
+    #play-details {
+      display: grid;
+      grid-template-columns: 7.5rem 1fr;
+      gap: 0.55rem 0.85rem;
+      margin: 1.1rem 0 0;
+    }
+    #play-details dt {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    #play-details dd { margin: 0; }
+    #play-details a { color: inherit; }
+    #play-nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      margin: 1.25rem 0 0;
+    }
+    #play-nav a {
+      color: var(--blue);
+      font-size: 0.85rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    #play-nav a:hover { color: #409cff; }
+    #play-types { display: grid; gap: 0.85rem; margin-top: 1.15rem; }
+    #play-types .type-label {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #play-types .review-actions { padding: 0.4rem 0 0; }
+    #play-types > button { justify-self: start; }
+    #play-types button.chosen,
+    .review-actions button.chosen {
+      background: var(--gold);
+      color: #111;
+    }
+    .play-card select.play-type {
+      width: calc(100% - 1.4rem);
+      margin: 0 0.7rem 0.45rem;
+    }
+    a.view-play {
+      display: block;
+      margin: 0 0.7rem 0.7rem;
+      padding: 0.45rem 0.65rem;
+      border-radius: 10px;
+      background: var(--ink);
+      color: #111;
+      font-size: 0.8rem;
+      font-weight: 650;
+      text-align: center;
+      text-decoration: none;
+    }
+    a.view-play:hover { filter: brightness(1.06); color: #111; }
+    a.view-play:active { transform: scale(0.98); }
+    #results .play-length, #reviews .play-length { color: var(--muted); font-size: 0.8rem; }
+    .review-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0 0.7rem 0.7rem;
+    }
+    .review-actions button { padding: 0.4rem 0.65rem; font-size: 0.78rem; }
+    .review-actions button.discard {
+      background: transparent;
+      color: var(--muted);
+    }
     #film-thumb {
       display: block;
       width: 100%;
@@ -311,6 +690,8 @@
       background: #000;
       margin-top: 0.85rem;
     }
+    #film-thumb[hidden],
+    #meter[hidden] { display: none; }
     #project-name { color: var(--ink); margin: 0.85rem 0 0.2rem; letter-spacing: -0.02em; }
     #film-meta { margin: 0; }
     #film-url {
@@ -324,16 +705,49 @@
     }
     #film-url:not([hidden]) { display: block; }
     #film-url:hover { color: var(--ink); }
+    #film-error {
+      margin: 0.85rem 0 0;
+      color: #ff9b90;
+      font-size: 0.95rem;
+      font-weight: 650;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    #review .retry { margin-top: 0.45rem; }
     #meter {
       display: grid;
-      gap: 0.5rem;
-      margin-top: 0.95rem;
+      gap: 0.55rem;
+      margin-top: 1.15rem;
+    }
+    #readout {
+      display: none;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    #read-elapsed,
+    #read-total {
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+    #read-elapsed {
+      color: var(--ink);
+      font-size: 2.15rem;
+      font-weight: 600;
+    }
+    #read-total {
+      color: #c7c1b6;
+      font-size: 1.05rem;
+      font-weight: 500;
     }
     #download-label {
       margin: 0;
       color: var(--ink);
       font-weight: 650;
     }
+    #download-label:empty { display: none; }
     #download-track {
       height: 0.3rem;
       border-radius: 999px;
@@ -354,6 +768,44 @@
       inset: 0;
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), transparent 70%);
     }
+    #meter.reading {
+      gap: 0.45rem;
+      margin-top: 1.35rem;
+    }
+    #meter.reading #readout { display: flex; }
+    #meter.reading #download-label { display: none; }
+    #meter.reading #download-bytes {
+      font-size: 0.84rem;
+      font-weight: 500;
+      letter-spacing: -0.011em;
+      color: var(--muted);
+    }
+    #meter.reading #download-track {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.28);
+    }
+    #meter.reading #download-track:not(.unknown) { overflow: visible; }
+    #meter.reading #download-fill {
+      background: #fff;
+    }
+    #meter.reading #download-fill::after { display: none; }
+    #meter.reading #download-track:not(.unknown) #download-fill::after {
+      display: block;
+      inset: auto;
+      top: 50%;
+      right: -7px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--gold);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.4);
+      transform: translateY(-50%);
+    }
+    #meter.reading #download-figures {
+      margin-top: 0.1rem;
+    }
+    #meter.reading #download-pct { display: none; }
+    #meter.reading[hidden] { display: none; }
     #download-track.unknown #download-fill {
       width: 38%;
       animation: download-slide 1.15s ease-in-out infinite;
@@ -384,7 +836,7 @@
     <header>
       <h1>Film analysis</h1>
       <nav>
-        <a class="quiet" href="/analyses">My analyses</a>
+        <a class="quiet" href="/projects">Projects</a>
         <a class="quiet" href="/activity">Activity</a>
         <a id="new-analysis" href="/">New analysis</a>
       </nav>
@@ -393,7 +845,7 @@
     <section id="composer">
       <section>
         <h2>New analysis</h2>
-        <p class="lead">Paste a YouTube link or drop a video. Plays show up as the film is read.</p>
+        <p class="lead">Paste a YouTube link, drop a video, or pick one already downloaded.</p>
       <form id="upload">
         <label class="drop" id="drop" for="video">
           <input id="video" name="video" type="file" accept="video/*">
@@ -402,23 +854,66 @@
         <p class="or">or</p>
         <label for="youtube">YouTube link</label>
         <input id="youtube" name="youtube" type="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+        <p class="or">or</p>
+        <label for="saved">Downloaded film</label>
+        <select id="saved" name="saved">
+          <option value="">No downloaded films yet</option>
+        </select>
         <button type="submit">Analyze</button>
       </form>
       </section>
     </section>
     <section id="history" hidden>
-      <h2>My analyses</h2>
-      <p id="empty" class="lead" hidden>No films yet.</p>
+      <div class="section-head">
+        <h2>Projects</h2>
+        <button id="refresh-analyses" class="retry" type="button">Refresh</button>
+      </div>
+      <p id="projects-lead" class="lead">Each film is cut into plays you can study on their own.</p>
+      <p id="projects-summary" class="lead" hidden></p>
+      <div id="project-filters" role="group" aria-label="Show films" hidden></div>
+      <p id="empty" class="lead" hidden>No films yet. Use New analysis to add a game. Each play is cut out so you can study it on its own.</p>
+      <p id="filter-empty" class="lead" hidden>No films in this view.</p>
       <ul id="projects"></ul>
     </section>
     <section id="activity" hidden>
       <h2>Activity</h2>
-      <p id="activity-lead" class="lead">The server is idle.</p>
+      <div class="run-where">
+        <div class="place" role="group" aria-label="Where jobs run">
+          <button type="button" id="place-local" aria-pressed="true">Local</button>
+          <button type="button" id="place-cloud" aria-pressed="false">Cloud</button>
+        </div>
+        <label class="workers" id="workers-field" for="workers" hidden>Workers
+          <input id="workers" type="number" min="1" max="16" value="4" inputmode="numeric">
+        </label>
+      </div>
+      <p class="workers-note" id="place-note">Jobs run on this server.</p>
+      <div id="activity-status">
+        <div>
+          <p id="activity-lead" class="lead">Checking the server</p>
+          <p id="activity-note">
+            <span id="activity-live" hidden></span>
+            <span id="activity-note-text">Looking up films that are running or stopped.</span>
+          </p>
+        </div>
+        <div id="activity-loading" class="pie unknown" role="status" aria-label="Loading activity"></div>
+      </div>
+      <ol id="activity-legend" class="stages" aria-label="Film steps">
+        <li>Start</li>
+        <li>Download</li>
+        <li>Save</li>
+        <li>Read</li>
+        <li>Check</li>
+      </ol>
+      <button id="activity-retry" class="retry" type="button" hidden>Try again</button>
       <ul id="activity-list"></ul>
     </section>
     <section id="review" hidden>
       <img id="film-thumb" alt="" hidden>
       <div id="meter" hidden>
+        <div id="readout">
+          <span id="read-elapsed">0:00</span>
+          <span id="read-total">0:00</span>
+        </div>
         <p id="download-label"></p>
         <div id="download-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
           <div id="download-fill"></div>
@@ -428,43 +923,102 @@
           <span id="download-bytes"></span>
         </p>
       </div>
+      <p id="film-error" hidden></p>
       <button id="retry" class="retry" type="button" hidden>Retry download</button>
       <p id="project-name"></p>
       <p id="film-meta"></p>
+      <ol id="film-steps" class="stages" hidden></ol>
       <a id="film-url" hidden></a>
+      <p id="outcome" class="lead" hidden></p>
       <h2 id="plays-heading" hidden>Plays</h2>
       <ul id="results"></ul>
+      <h2 id="reviews-heading" hidden>Needs a look</h2>
+      <p id="reviews-lead" class="lead" hidden>These stretches were not clearly a play. Mark each one, or leave it for later.</p>
+      <ul id="reviews"></ul>
+    </section>
+    <section id="play" hidden>
+      <a id="play-back" href="/projects">Film</a>
+      <h2 id="play-title">Play</h2>
+      <video id="play-video" controls playsinline preload="metadata"></video>
+      <dl id="play-details"></dl>
+      <div id="play-types"></div>
+      <p id="play-nav" hidden></p>
     </section>
   </main>
   <script>
     const form = document.querySelector("#upload");
     const status = document.querySelector("#status");
     const results = document.querySelector("#results");
+    const reviews = document.querySelector("#reviews");
     const playsHeading = document.querySelector("#plays-heading");
+    const outcome = document.querySelector("#outcome");
+    const reviewsHeading = document.querySelector("#reviews-heading");
+    const reviewsLead = document.querySelector("#reviews-lead");
     const button = form.querySelector("button");
     const composer = document.querySelector("#composer");
     const review = document.querySelector("#review");
+    const playSection = document.querySelector("#play");
+    const playBack = document.querySelector("#play-back");
+    const playTitle = document.querySelector("#play-title");
+    const playVideo = document.querySelector("#play-video");
+    const playDetails = document.querySelector("#play-details");
+    const playTypes = document.querySelector("#play-types");
+    const playNav = document.querySelector("#play-nav");
     const historySection = document.querySelector("#history");
     const activitySection = document.querySelector("#activity");
     const activityList = document.querySelector("#activity-list");
     const activityLead = document.querySelector("#activity-lead");
+    const activityNoteText = document.querySelector("#activity-note-text");
+    const activityLive = document.querySelector("#activity-live");
+    const activityLoading = document.querySelector("#activity-loading");
+    const activityRetry = document.querySelector("#activity-retry");
+    const activityLegend = document.querySelector("#activity-legend");
+    const workersInput = document.querySelector("#workers");
+    const workersField = document.querySelector("#workers-field");
+    const placeLocal = document.querySelector("#place-local");
+    const placeCloud = document.querySelector("#place-cloud");
+    const placeNote = document.querySelector("#place-note");
     const projectList = document.querySelector("#projects");
     const projectName = document.querySelector("#project-name");
     const filmThumb = document.querySelector("#film-thumb");
     const filmMeta = document.querySelector("#film-meta");
+    const filmSteps = document.querySelector("#film-steps");
     const filmUrl = document.querySelector("#film-url");
     const meter = document.querySelector("#meter");
+    const readout = document.querySelector("#readout");
+    const readElapsed = document.querySelector("#read-elapsed");
+    const readTotal = document.querySelector("#read-total");
     const downloadLabel = document.querySelector("#download-label");
     const downloadTrack = document.querySelector("#download-track");
     const downloadFill = document.querySelector("#download-fill");
     const downloadPct = document.querySelector("#download-pct");
     const downloadBytes = document.querySelector("#download-bytes");
     const retryButton = document.querySelector("#retry");
+    const filmError = document.querySelector("#film-error");
     const fileInput = document.querySelector("#video");
     const youtubeInput = document.querySelector("#youtube");
+    const savedSelect = document.querySelector("#saved");
     const drop = document.querySelector("#drop");
     const dropLabel = document.querySelector("#drop-label");
     let watch = 0;
+    let activityLoaded = false;
+    let activityBusy = false;
+    let activityNoteMode = "loading";
+    let activityWorkers = 4;
+    let activityOnCloud = false;
+    let activityRefreshedAt = 0;
+    let activityJobs = [];
+    let activitySlowTimer = 0;
+    let activitySpinTimer = 0;
+    let activityClock = 0;
+    const activityPace = new Map();
+    const ACTIVITY_STAGES = [
+      ["starting", "Start"],
+      ["downloading", "Download"],
+      ["saving", "Save"],
+      ["scanning", "Read"],
+      ["checking", "Check"],
+    ];
 
     document.querySelector("header").addEventListener("click", (event) => {
       const link = event.target.closest("a");
@@ -509,18 +1063,22 @@
       event.preventDefault();
       const hasFile = fileInput.files.length > 0;
       const link = youtubeInput.value.trim();
+      const saved = savedSelect.value;
+      const choices = [hasFile, Boolean(link), Boolean(saved)].filter(Boolean).length;
       status.className = "";
-      if (hasFile && link) {
+      if (choices > 1) {
         status.className = "error";
-        status.textContent = "Use a file or a YouTube link.";
+        status.textContent = "Use a file, a YouTube link, or a downloaded film.";
         return;
       }
-      if (!hasFile && !link) {
+      if (choices === 0) {
         status.className = "error";
-        status.textContent = "Upload a video or paste a YouTube link.";
+        status.textContent = "Upload a video, paste a YouTube link, or choose a downloaded film.";
         return;
       }
-      const body = hasFile ? new FormData(form) : new URLSearchParams({ youtube: link });
+      let body;
+      if (hasFile) body = new FormData(form);
+      else body = new URLSearchParams(saved ? { saved } : { youtube: link });
       status.textContent = "Starting…";
       button.disabled = true;
       try {
@@ -547,9 +1105,17 @@
     route();
 
     async function route() {
+      document.title = "Film analysis";
+      const playMatch = location.pathname.match(/^\/play\/([^/]+)$/);
+      if (playMatch) {
+        await showPlay(decodeURIComponent(playMatch[1]));
+        return;
+      }
+      leavePlay();
       const match = location.pathname.match(/^\/projects\/(\d+)$/);
       if (!match) {
-        if (location.pathname === "/analyses") await showAnalyses();
+        if (location.pathname === "/analyses") history.replaceState({}, "", "/projects");
+        if (location.pathname === "/projects") await showAnalyses();
         else if (location.pathname === "/activity") await showActivity();
         else await showComposer();
         return;
@@ -566,6 +1132,211 @@
         return;
       }
       showReview(payload);
+    }
+
+    function leavePlay() {
+      playSection.hidden = true;
+      playVideo.pause();
+    }
+
+    async function showPlay(uid) {
+      const token = ++watch;
+      composer.hidden = true;
+      historySection.hidden = true;
+      activitySection.hidden = true;
+      review.hidden = true;
+      playSection.hidden = false;
+      markCurrent();
+      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`);
+      if (token !== watch) return;
+      const payload = await response.json().catch(() => ({}));
+      if (token !== watch) return;
+      if (!response.ok) {
+        status.className = "error";
+        status.textContent = typeof payload.detail === "string"
+          ? payload.detail
+          : "That play is no longer available.";
+        history.replaceState({}, "", "/projects");
+        await showAnalyses();
+        return;
+      }
+      status.className = "";
+      status.textContent = "";
+      paintPlay(payload);
+    }
+
+    function paintPlay(play) {
+      const title = play.count > 1 ? `Play ${play.position} of ${play.count}` : `Play ${play.position}`;
+      document.title = play.name ? `${title} · ${play.name}` : title;
+      playTitle.textContent = title;
+      playBack.textContent = play.name || "Film";
+      playBack.href = play.film || "/projects";
+      if (playVideo.dataset.clip !== play.video) {
+        playVideo.dataset.clip = play.video || "";
+        playVideo.src = play.video || "";
+      }
+      playDetails.replaceChildren();
+      const rows = [
+        ["Film", playLink(play.film, play.name || "Film")],
+        ["Type", kindLabel(play)],
+        ["In the film", `${clock(play.start)} – ${clock(play.end)}`],
+        ["Length", playLength(play.end - play.start)],
+      ];
+      if (play.channel) rows.splice(1, 0, ["Channel", play.channel]);
+      for (const [term, value] of rows) {
+        const label = document.createElement("dt");
+        label.textContent = term;
+        const detail = document.createElement("dd");
+        if (value instanceof Node) detail.append(value);
+        else detail.textContent = value;
+        playDetails.append(label, detail);
+      }
+      paintPlayTypes(play);
+      playNav.replaceChildren();
+      playNav.hidden = !play.previous && !play.next;
+      playNav.append(play.previous ? playLink(`/play/${play.previous}`, "Previous") : document.createElement("span"));
+      playNav.append(play.next ? playLink(`/play/${play.next}`, "Next") : document.createElement("span"));
+    }
+
+    const playTypeGroups = [
+      ["Offense / defense", [
+        ["scrimmage", "Offense / defense"],
+        ["run", "Run"],
+        ["pass", "Pass"],
+        ["kneel", "Kneel"],
+        ["spike", "Spike"],
+        ["two_point", "Two-point"],
+      ]],
+      ["Special teams", [
+        ["special_teams", "Special teams"],
+        ["kickoff", "Kickoff"],
+        ["punt", "Punt"],
+        ["field_goal", "Field goal"],
+        ["extra_point", "Extra point"],
+      ]],
+    ];
+
+    function typeName(value) {
+      for (const [, choices] of playTypeGroups) {
+        const match = choices.find(([type]) => type === value);
+        if (match) return match[1];
+      }
+      return value;
+    }
+
+    function kindLabel(play) {
+      if (play.play_type) return typeName(play.play_type);
+      return play.family === "special_teams" ? "Special teams" : "Offense / defense";
+    }
+
+    function cardKind(play) {
+      if (play.play_type) return typeName(play.play_type);
+      return play.family === "special_teams" ? "Special teams" : "";
+    }
+
+    function selectedType(play) {
+      return play.play_type || play.family || "scrimmage";
+    }
+
+    function paintPlayTypes(play) {
+      playTypes.replaceChildren();
+      for (const [name, choices] of playTypeGroups) {
+        const group = document.createElement("div");
+        const heading = document.createElement("p");
+        heading.className = "type-label";
+        heading.textContent = name;
+        const actions = document.createElement("div");
+        actions.className = "review-actions";
+        for (const [value, label] of choices) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = label;
+          button.classList.toggle("chosen", selectedType(play) === value);
+          button.addEventListener("click", () => {
+            if (button.classList.contains("chosen")) return;
+            relabelPlay(play.uid, value);
+          });
+          actions.append(button);
+        }
+        group.append(heading, actions);
+        playTypes.append(group);
+      }
+      const discard = document.createElement("button");
+      discard.type = "button";
+      discard.className = "discard";
+      discard.textContent = "Not a play";
+      discard.addEventListener("click", () => relabelPlay(play.uid, "junk", discard));
+      playTypes.append(discard);
+    }
+
+    async function relabelPlay(uid, playType, control) {
+      const buttons = [...playTypes.querySelectorAll("button")];
+      const picker = control instanceof HTMLSelectElement ? control : null;
+      for (const button of buttons) button.disabled = true;
+      if (picker) {
+        picker.dataset.saving = "1";
+        picker.disabled = true;
+      }
+      if (control && control !== picker) control.disabled = true;
+      try {
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ play_type: playType }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not save that play type.";
+          if (picker) picker.value = picker.dataset.type || "scrimmage";
+          return;
+        }
+        status.className = "";
+        status.textContent = "";
+        if (payload.removed) {
+          if (location.pathname.startsWith("/play/")) {
+            history.pushState({}, "", payload.film || "/projects");
+            route();
+          } else if (results.dataset.project) {
+            const project = await fetch(`/api/projects/${results.dataset.project}`);
+            const body = await project.json().catch(() => ({}));
+            if (project.ok) showReview(body);
+          }
+          return;
+        }
+        if (picker) delete picker.dataset.saving;
+        if (location.pathname === `/play/${payload.uid}`) paintPlay(payload);
+        syncPlayCard(payload);
+      } catch {
+        status.className = "error";
+        status.textContent = "Could not save that play type.";
+        if (picker) picker.value = picker.dataset.type || "scrimmage";
+      } finally {
+        if (picker) {
+          delete picker.dataset.saving;
+          picker.disabled = false;
+        }
+        for (const button of buttons) {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+    }
+
+    function playLink(href, label) {
+      const link = document.createElement("a");
+      link.href = href || "#";
+      link.textContent = label;
+      link.addEventListener("click", (event) => followLink(event, href));
+      return link;
+    }
+
+    function followLink(event, href) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+      event.preventDefault();
+      if (location.pathname !== href) history.pushState({}, "", href);
+      route();
     }
 
     async function follow(token, id) {
@@ -589,32 +1360,87 @@
       historySection.hidden = true;
       activitySection.hidden = true;
       review.hidden = true;
+      playSection.hidden = true;
       results.replaceChildren();
       delete results.dataset.project;
       markCurrent();
+      await loadSaved();
+    }
+
+    async function loadSaved() {
+      const response = await fetch("/api/downloads");
+      if (!response.ok) return;
+      const films = await response.json().catch(() => []);
+      const current = savedSelect.value;
+      savedSelect.replaceChildren();
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = films.length ? "Choose a downloaded film" : "No downloaded films yet";
+      savedSelect.append(blank);
+      if (!Array.isArray(films)) return;
+      for (const film of films) {
+        const option = document.createElement("option");
+        option.value = String(film.project);
+        option.textContent = film.name || "Downloaded film";
+        savedSelect.append(option);
+      }
+      if ([...savedSelect.options].some((option) => option.value === current)) {
+        savedSelect.value = current;
+      }
     }
 
     async function showAnalyses() {
       const token = ++watch;
+      document.title = "Projects · Film analysis";
       composer.hidden = true;
       historySection.hidden = false;
       activitySection.hidden = true;
       review.hidden = true;
+      playSection.hidden = true;
       results.replaceChildren();
       delete results.dataset.project;
       markCurrent();
-      await paintHistory(token);
+      try {
+        await paintHistory(token);
+      } catch (error) {
+        status.className = "error";
+        status.textContent = error.message === "Failed to fetch"
+          ? "Couldn't reach the server. Run uv run film-analysis, then reload this page."
+          : (error.message || "Couldn't refresh projects.");
+      }
     }
+
+    document.querySelector("#refresh-analyses").addEventListener("click", async () => {
+      const control = document.querySelector("#refresh-analyses");
+      control.disabled = true;
+      status.className = "";
+      status.textContent = "";
+      try {
+        await paintHistory(watch);
+      } catch (error) {
+        status.className = "error";
+        status.textContent = error.message === "Failed to fetch"
+          ? "Couldn't reach the server. Run uv run film-analysis, then reload this page."
+          : (error.message || "Couldn't refresh projects.");
+      } finally {
+        control.disabled = false;
+      }
+    });
 
     async function showActivity() {
       const token = ++watch;
+      document.title = "Activity · Film analysis";
       composer.hidden = true;
       historySection.hidden = true;
       activitySection.hidden = false;
       review.hidden = true;
+      playSection.hidden = true;
       results.replaceChildren();
       delete results.dataset.project;
       markCurrent();
+      if (!activityLoaded) beginActivityLoad();
+      else paintActivitySummary(activityJobs);
+      startActivityClock();
       await paintActivity(token);
     }
 
@@ -629,12 +1455,18 @@
     async function paintHistory(token) {
       const response = await fetch("/api/projects");
       if (token !== watch) return;
-      const projects = await response.json().catch(() => []);
+      const projects = await response.json().catch(() => null);
       if (token !== watch) return;
-      if (!Array.isArray(projects)) return;
+      if (!response.ok || !Array.isArray(projects)) {
+        const detail = projects && typeof projects.detail === "string" ? projects.detail : "";
+        throw new Error(detail || "Couldn't refresh projects.");
+      }
+      listedProjects = projects;
       const empty = projects.length === 0;
       document.querySelector("#empty").hidden = !empty;
       projectList.hidden = empty;
+      paintProjectSummary(projects);
+      paintProjectFilters(projects);
       const links = [...projectList.querySelectorAll("a")];
       const same = links.length === projects.length
         && projects.every((project, index) => links[index].dataset.id === String(project.project));
@@ -644,34 +1476,73 @@
       } else {
         projects.forEach((project, index) => fillHistoryLink(links[index], project));
       }
-      if (projects.some((project) => project.status === "downloading")) {
+      applyProjectFilter();
+      const pending = projects.some((project) => (
+        project.running || project.status === "downloading" || project.status === "scanning"
+      ));
+      if (pending) {
         window.setTimeout(() => {
-          if (token === watch && !historySection.hidden) paintHistory(token);
+          if (token === watch && !historySection.hidden) paintHistory(token).catch(() => {});
         }, 1000);
       }
     }
 
     async function paintActivity(token) {
-      const response = await fetch("/api/activity");
-      if (token !== watch) return;
-      const payload = await response.json().catch(() => ({}));
-      if (token !== watch) return;
-      if (!response.ok) {
-        status.className = "error";
-        status.textContent = typeof payload.detail === "string"
-          ? payload.detail
-          : "Couldn't read server activity.";
+      if (activityBusy) {
+        if (token === watch && !activitySection.hidden) {
+          window.setTimeout(() => { paintActivity(token); }, 250);
+        }
         return;
       }
+      activityBusy = true;
+      armRefreshSpinner();
+      try {
+        const response = await fetch("/api/activity");
+        if (token !== watch) return;
+        const payload = await response.json().catch(() => ({}));
+        if (token !== watch) return;
+        if (!response.ok) {
+          failActivity(payload);
+          return;
+        }
+        applyActivity(payload);
+      } catch (error) {
+        if (token !== watch) return;
+        const offline = error && error.message === "Failed to fetch";
+        failActivity({
+          detail: offline ? "Couldn't reach the server." : "Couldn't read server activity.",
+        });
+      } finally {
+        activityBusy = false;
+        settleRefreshSpinner();
+        if (token === watch && !activitySection.hidden) {
+          window.setTimeout(() => { paintActivity(token); }, 1000);
+        }
+      }
+    }
+
+    function applyActivity(payload) {
+      activityLoaded = true;
+      activityNoteMode = "live";
+      activityRefreshedAt = Date.now();
+      clearTimeout(activitySlowTimer);
+      activityRetry.hidden = true;
+      status.className = "";
+      status.textContent = "";
+      paintRun(payload);
       const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
-      const running = jobs.filter((job) => job.running).length;
-      const stopped = jobs.length - running;
-      if (!jobs.length) activityLead.textContent = "The server is idle.";
-      else if (!running) activityLead.textContent = stopped === 1 ? "1 stopped." : `${stopped} stopped.`;
-      else if (!stopped) activityLead.textContent = running === 1 ? "1 running." : `${running} running.`;
-      else activityLead.textContent = `${running} running. ${stopped} stopped.`;
+      jobs.sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
+      const seen = new Set();
+      for (const job of jobs) {
+        seen.add(job.project);
+        rememberPace(job);
+      }
+      for (const id of activityPace.keys()) {
+        if (!seen.has(id)) activityPace.delete(id);
+      }
       const links = [...activityList.querySelectorAll("a")];
-      const same = links.length === jobs.length
+      const same = !activityList.querySelector(".skeleton")
+        && links.length === jobs.length
         && jobs.every((job, index) => links[index].dataset.id === String(job.project));
       if (!same) {
         activityList.replaceChildren();
@@ -679,9 +1550,133 @@
       } else {
         jobs.forEach((job, index) => fillActivity(links[index], job));
       }
-      window.setTimeout(() => {
-        if (token === watch && !activitySection.hidden) paintActivity(token);
-      }, 1000);
+      activityJobs = jobs;
+      paintActivitySummary(jobs);
+    }
+
+    function paintWorkers(count) {
+      if (document.activeElement === workersInput) return;
+      const next = String(count || 4);
+      if (workersInput.value !== next) workersInput.value = next;
+    }
+
+    function paintRun(payload) {
+      const place = payload.place === "cloud" ? "cloud" : "local";
+      const cloud = Boolean(payload.cloud);
+      activityOnCloud = place === "cloud";
+      const count = Number(payload.workers);
+      if (Number.isInteger(count) && count > 0) activityWorkers = count;
+      placeLocal.setAttribute("aria-pressed", place === "local" ? "true" : "false");
+      placeCloud.setAttribute("aria-pressed", place === "cloud" ? "true" : "false");
+      placeCloud.disabled = !cloud;
+      workersField.hidden = place !== "cloud";
+      if (place === "cloud") {
+        placeNote.textContent = "More workers read a film faster.";
+        paintWorkers(payload.workers);
+      } else if (cloud) {
+        placeNote.textContent = "Jobs run on this server.";
+      } else {
+        placeNote.textContent = "Jobs run on this server. Cloud workers are not set up.";
+      }
+    }
+
+    workersInput.addEventListener("change", () => saveWorkers());
+    activityRetry.addEventListener("click", () => {
+      if (!activityLoaded) beginActivityLoad();
+      paintActivity(watch);
+    });
+    placeLocal.addEventListener("click", () => savePlace("local"));
+    placeCloud.addEventListener("click", () => {
+      if (!placeCloud.disabled) savePlace("cloud");
+    });
+
+    async function savePlace(place) {
+      const allowCloud = !placeCloud.disabled;
+      placeLocal.disabled = true;
+      placeCloud.disabled = true;
+      try {
+        await saveSetting({ place });
+      } finally {
+        placeLocal.disabled = false;
+        placeCloud.disabled = !allowCloud;
+      }
+    }
+
+    async function saveWorkers() {
+      const count = Number(workersInput.value);
+      if (!Number.isInteger(count) || count < 1 || count > 16) {
+        status.className = "error";
+        status.textContent = "Use 1 to 16 workers.";
+        return;
+      }
+      workersInput.disabled = true;
+      try {
+        await saveSetting({ workers: count });
+      } finally {
+        workersInput.disabled = false;
+      }
+    }
+
+    async function saveSetting(body) {
+      try {
+        const response = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not save that setting.";
+          return;
+        }
+        status.className = "";
+        status.textContent = "";
+        paintRun(payload);
+      } catch {
+        status.className = "error";
+        status.textContent = "Could not save that setting.";
+      }
+    }
+
+    const STEP_NAMES = [
+      ["starting", "Start"],
+      ["downloading", "Download"],
+      ["saving", "Save"],
+      ["scanning", "Read"],
+      ["checking", "Check"],
+    ];
+
+    function paintStages(list, steps, stopped) {
+      if (!list) return;
+      const saved = Array.isArray(steps) ? steps : [];
+      list.hidden = saved.length === 0;
+      list.replaceChildren();
+      if (!saved.length) return;
+      const byName = new Map(saved.map((step) => [step.name, step]));
+      let lastTimed = null;
+      for (const [name, label] of STEP_NAMES) {
+        const step = byName.get(name);
+        const item = document.createElement("li");
+        const title = document.createElement("span");
+        title.textContent = label;
+        item.append(title);
+        if (step) {
+          const took = document.createElement("span");
+          took.className = "took";
+          took.textContent = clock(step.seconds || 0);
+          item.append(took);
+          item.classList.add(step.running ? "now" : "done");
+          lastTimed = item;
+        }
+        list.append(item);
+      }
+      if (stopped && lastTimed) {
+        lastTimed.classList.remove("done", "now");
+        lastTimed.classList.add("stopped");
+      }
     }
 
     function activityItem(job) {
@@ -698,12 +1693,31 @@
       title.className = "title";
       const step = document.createElement("p");
       step.className = "step";
+      const label = document.createElement("span");
+      label.className = "label";
+      const when = document.createElement("span");
+      when.className = "when";
+      step.append(label, when);
       const detail = document.createElement("p");
       detail.className = "detail";
+      const fault = document.createElement("p");
+      fault.className = "fault";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "retry";
+      retry.textContent = "Retry";
+      retry.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        retryDownload(link.dataset.id, retry);
+      });
       const bar = document.createElement("div");
       bar.className = "bar";
       bar.append(document.createElement("div"));
-      link.append(title, step, detail, bar);
+      const times = document.createElement("ol");
+      times.className = "stages";
+      times.setAttribute("aria-label", "Time per step");
+      link.append(title, step, detail, times, fault, retry, bar);
       fillActivity(link, job);
       item.append(link);
       return item;
@@ -712,43 +1726,103 @@
     function fillActivity(link, job) {
       link.querySelector(".title").textContent = job.name;
       const step = link.querySelector(".step");
-      step.textContent = activityStep(job);
-      step.classList.toggle("stopped", !job.running);
+      step.querySelector(".label").textContent = activityStep(job);
+      step.querySelector(".when").textContent = activityWhen(job.updated);
+      step.classList.toggle("stopped", job.phase !== "ready" && !job.running);
+      step.classList.toggle("done", job.phase === "ready");
       link.querySelector(".detail").textContent = activityDetail(job);
+      paintStages(link.querySelector(".stages"), job.steps, !job.running && job.phase !== "ready");
+      const fault = link.querySelector(".fault");
+      const message = activityFault(job);
+      fault.hidden = !message;
+      fault.textContent = message;
+      const retry = link.querySelector(".retry");
+      retry.hidden = !canRetryJob(job);
+      retry.textContent = stoppedWhileReading(job) ? "Retry" : "Retry download";
       const bar = link.querySelector(".bar");
       const percent = activityPercent(job);
-      bar.classList.toggle("stopped", !job.running);
-      bar.hidden = percent == null;
+      const loading = Boolean(job.running) && percent == null;
+      bar.classList.toggle("stopped", job.phase !== "ready" && !job.running);
+      bar.classList.toggle("unknown", loading);
+      bar.hidden = job.phase === "ready" || (percent == null && !loading);
       bar.querySelector("div").style.width = percent == null ? "" : `${percent}%`;
     }
 
+    function activityWhen(iso) {
+      if (!iso) return "";
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return "";
+      return new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+    }
+
     function activityStep(job) {
+      if (job.phase === "ready") return "Complete";
       if (!job.running) return "Stopped";
-      if (job.phase === "scanning") return "Reading";
+      if (job.phase === "scanning" || job.phase === "checking") {
+        return job.phase === "checking" || reachedEnd(job.scanned, job.duration)
+          ? "Checking"
+          : "Finding plays";
+      }
       if (job.phase === "saving") return "Saving";
       if (job.phase === "starting") return "Starting";
       return "Downloading";
     }
 
+    function stoppedWhileReading(job) {
+      if (job.running || job.phase === "ready") return false;
+      if (job.status === "scanning" || Number(job.scanned) > 0) return true;
+      return String(job.error || "").startsWith("Stopped while reading");
+    }
+
     function activityDetail(job) {
+      if (job.phase === "ready") {
+        const count = Number(job.play_count) || 0;
+        if (!count) return "No plays";
+        return count === 1 ? "1 play" : `${count} plays`;
+      }
       if (!job.running) {
-        const last = job.status === "scanning" ? "reading" : "downloading";
+        const error = String(job.error || "");
+        const last = error.startsWith("Stopped while saving")
+          ? "saving"
+          : stoppedWhileReading(job) ? "reading" : "downloading";
         const progress = activityProgress(job);
         return progress ? `Stopped while ${last} · ${progress}` : `Stopped while ${last}`;
       }
       if (job.phase === "starting") return "Getting ready";
       if (job.phase === "saving") return "Saving the film";
-      if (job.phase === "scanning") {
-        const done = clock(job.scanned || 0);
+      if (job.phase === "checking") {
         const plays = `${job.play_count} ${job.play_count === 1 ? "play" : "plays"}`;
+        return `Checking stretches that weren't clearly a play · ${plays}`;
+      }
+      if (job.phase === "scanning") {
+        const plays = `${job.play_count} ${job.play_count === 1 ? "play" : "plays"}`;
+        if (reachedEnd(job.scanned, job.duration)) {
+          return `Checking stretches that weren't clearly a play · ${plays}`;
+        }
+        const done = clock(job.scanned || 0);
         const read = job.duration ? `Read ${done} of ${clock(job.duration)}` : `Read ${done}`;
-        return `${read} · ${plays}`;
+        return `${read} · ${plays} so far`;
       }
       return activityProgress(job) || "Connecting to the video…";
     }
 
+    function activityFault(job) {
+      if (job.running || job.phase === "ready") return "";
+      return job.error || "The server stopped while this was running.";
+    }
+
+    function canRetryJob(job) {
+      if (job.running || job.phase === "ready") return false;
+      return Boolean(job.youtube) || stoppedWhileReading(job);
+    }
+
     function activityProgress(job) {
-      if (job.status === "scanning" || job.phase === "scanning") {
+      if (job.phase === "scanning" || job.phase === "checking" || stoppedWhileReading(job)) {
         const total = Number(job.duration) || 0;
         if (total <= 0) return "";
         return `${Math.min(100, Math.round(((Number(job.scanned) || 0) / total) * 100))}%`;
@@ -761,7 +1835,7 @@
     }
 
     function activityPercent(job) {
-      if (job.phase === "scanning" || (job.status === "scanning" && !job.running)) {
+      if (job.phase === "scanning" || job.phase === "checking" || stoppedWhileReading(job)) {
         const total = Number(job.duration) || 0;
         if (total <= 0) return null;
         return Math.min(100, Math.round(((Number(job.scanned) || 0) / total) * 100));
@@ -771,6 +1845,9 @@
       if (total <= 0) return null;
       return Math.min(100, Math.round(((Number(job.downloaded) || 0) / total) * 100));
     }
+
+    let projectFilter = "all";
+    let listedProjects = [];
 
     function historyItem(project) {
       const item = document.createElement("li");
@@ -782,6 +1859,29 @@
         history.pushState({}, "", link.href);
         route();
       });
+      const copy = document.createElement("span");
+      copy.className = "copy";
+      const title = document.createElement("p");
+      title.className = "title";
+      const when = document.createElement("p");
+      when.className = "when";
+      const next = document.createElement("p");
+      next.className = "next";
+      const fault = document.createElement("p");
+      fault.className = "fault";
+      fault.hidden = true;
+      const track = document.createElement("span");
+      track.className = "track";
+      track.hidden = true;
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.append(document.createElement("span"));
+      copy.append(title, when, next, fault, track);
+      const stat = document.createElement("span");
+      stat.className = "stat";
+      stat.append(document.createElement("strong"), document.createElement("span"));
+      link.append(copy, stat);
       fillHistoryLink(link, project);
       item.append(link);
       return item;
@@ -797,72 +1897,251 @@
           link.prepend(thumb);
         }
         if (thumb.getAttribute("src") !== project.thumbnail) thumb.src = project.thumbnail;
+        sharpenThumb(thumb);
       } else if (!thumb || !thumb.classList.contains("blank")) {
         thumb?.remove();
         thumb = document.createElement("span");
         thumb.className = "blank";
+        thumb.setAttribute("aria-hidden", "true");
         link.prepend(thumb);
       }
-      let copy = link.querySelector(".copy");
-      if (!copy) {
-        copy = document.createElement("span");
-        copy.className = "copy";
-        const title = document.createElement("p");
-        title.className = "title";
-        const meta = document.createElement("span");
-        meta.className = "meta";
-        const plays = document.createElement("p");
-        plays.className = "plays";
-        plays.append(document.createElement("strong"), document.createElement("span"));
-        const when = document.createElement("p");
-        when.className = "when";
-        meta.append(plays, when);
-        copy.append(title, meta);
-        link.append(copy);
-      }
-      copy.querySelector(".title").textContent = project.name;
-      const plays = copy.querySelector(".plays");
-      const strong = plays.querySelector("strong");
-      const label = plays.querySelector("span");
-      const percent = downloadPercent(project);
-      const showingProgress = project.status === "downloading" && !project.play_count && percent != null;
-      plays.classList.toggle("progress", showingProgress);
-      if (project.status === "downloading" && !project.play_count) {
-        strong.hidden = percent == null;
-        strong.textContent = percent == null ? "" : `${percent}%`;
-        label.textContent = percent == null ? "Downloading" : "downloaded";
-      } else {
-        strong.hidden = false;
-        strong.textContent = String(project.play_count);
-        label.textContent = project.play_count === 1 ? "play" : "plays";
-      }
+      const bucket = projectBucket(project);
+      link.dataset.bucket = bucket;
+      const copy = link.querySelector(".copy");
+      copy.querySelector(".title").textContent = project.name || "Film";
       const when = copy.querySelector(".when");
+      when.textContent = whenLabel(project.created);
+      when.hidden = !when.textContent;
+      const next = copy.querySelector(".next");
+      const sentence = nextStep(project, bucket);
+      next.hidden = !sentence;
+      next.textContent = sentence;
+      next.classList.toggle("attention", bucket === "needs" || bucket === "working");
+      const fault = copy.querySelector(".fault");
+      const message = bucket === "failed" ? (project.error || "Could not read that film.") : "";
+      fault.hidden = !message;
+      fault.textContent = message;
       const retry = ensureRetry(link);
-      const waiting = canRetry(project);
-      when.hidden = waiting;
-      retry.hidden = !waiting;
-      if (!waiting) when.textContent = whenLabel(project.created);
-      const next = downloadPieFor(project);
-      const current = link.querySelector(".pie");
-      if (!next) {
-        current?.remove();
-      } else if (!current) {
-        link.append(next);
-      } else if (next.classList.contains("unknown")) {
-        current.classList.add("unknown");
-        current.style.removeProperty("--pct");
-        current.setAttribute("aria-label", "Downloading");
-      } else {
-        current.classList.remove("unknown");
-        current.style.setProperty("--pct", next.style.getPropertyValue("--pct"));
-        current.setAttribute("aria-label", next.getAttribute("aria-label"));
+      retry.hidden = !canRetry(project);
+      retry.textContent = resumeScan(project) ? "Retry" : "Retry download";
+      paintTrack(copy.querySelector(".track"), project, bucket);
+      const view = statView(project, bucket);
+      const stat = link.querySelector(".stat");
+      stat.className = view.tone ? `stat ${view.tone}` : "stat";
+      const strong = stat.querySelector("strong");
+      const label = stat.querySelector("span");
+      strong.hidden = view.number === "";
+      strong.textContent = view.number;
+      label.textContent = view.label;
+    }
+
+    function sharpenThumb(thumb) {
+      if (thumb.dataset.sharpen === "1") return;
+      thumb.dataset.sharpen = "1";
+      const stepDown = () => {
+        const src = thumb.getAttribute("src") || "";
+        const next = src.includes("/maxresdefault.")
+          ? src.replace("/maxresdefault.", "/hqdefault.")
+          : src.includes("/hqdefault.")
+            ? src.replace("/hqdefault.", "/mqdefault.")
+            : "";
+        if (next) {
+          thumb.src = next;
+          return;
+        }
+        const blank = document.createElement("span");
+        blank.className = "blank";
+        blank.setAttribute("aria-hidden", "true");
+        thumb.replaceWith(blank);
+      };
+      thumb.addEventListener("error", stepDown);
+      thumb.addEventListener("load", () => {
+        if (thumb.naturalWidth >= 320) return;
+        stepDown();
+      });
+    }
+
+    function projectBucket(project) {
+      if (hasError(project)) return "failed";
+      if (project.running || project.status === "downloading" || project.status === "scanning") {
+        return "working";
       }
+      if ((Number(project.review_count) || 0) > 0) return "needs";
+      return "ready";
+    }
+
+    function nextStep(project, bucket) {
+      const reviews = Number(project.review_count) || 0;
+      if (bucket === "failed") return "";
+      if (project.status === "downloading") {
+        return downloadPercent(project) == null
+          ? "Connecting to the video"
+          : "Plays show up after the download finishes";
+      }
+      if (bucket === "working") {
+        if (reachedEnd(project.scanned, project.duration)) {
+          return "Checking stretches that weren't clearly a play";
+        }
+        const total = Number(project.duration) || 0;
+        const done = clock(Number(project.scanned) || 0);
+        return total > 0 ? `Finding plays · ${done} of ${clock(total)}` : "Finding plays";
+      }
+      if (reviews === 1) return "1 stretch still needs a look";
+      if (reviews > 1) return `${reviews} stretches still need a look`;
+      if (!(Number(project.play_count) || 0)) return "No plays kept";
+      return "Ready to study";
+    }
+
+    function statView(project, bucket) {
+      const plays = Number(project.play_count) || 0;
+      const reviews = Number(project.review_count) || 0;
+      if (bucket === "failed") return { number: "", label: "Stopped", tone: "failed" };
+      if (bucket === "working" && project.status === "downloading") {
+        const percent = downloadPercent(project);
+        if (percent == null) return { number: "", label: "Downloading", tone: "working" };
+        return { number: `${percent}%`, label: "downloaded", tone: "working" };
+      }
+      if (bucket === "working") {
+        if (!plays) return { number: "", label: "Finding plays", tone: "working" };
+        return { number: String(plays), label: "so far", tone: "working" };
+      }
+      if (!plays && reviews) {
+        return { number: String(reviews), label: "to mark", tone: "needs" };
+      }
+      return { number: String(plays), label: plays === 1 ? "play" : "plays", tone: "" };
+    }
+
+    function paintTrack(track, project, bucket) {
+      if (!track) return;
+      if (bucket !== "working") {
+        track.hidden = true;
+        return;
+      }
+      let percent = null;
+      if (project.status === "downloading") percent = downloadPercent(project);
+      else {
+        const total = Number(project.duration) || 0;
+        if (total > 0) {
+          percent = Math.min(100, Math.round(((Number(project.scanned) || 0) / total) * 100));
+        }
+      }
+      track.hidden = false;
+      track.classList.toggle("unknown", percent == null);
+      track.firstElementChild.style.width = percent == null ? "" : `${percent}%`;
+      if (percent == null) track.removeAttribute("aria-valuenow");
+      else track.setAttribute("aria-valuenow", String(percent));
+      const name = project.status === "downloading" ? "Downloading the film" : "Finding plays";
+      track.setAttribute("aria-label", percent == null ? name : `${name}, ${percent}%`);
+    }
+
+    function paintProjectSummary(projects) {
+      const node = document.querySelector("#projects-summary");
+      const lead = document.querySelector("#projects-lead");
+      if (!projects.length) {
+        node.hidden = true;
+        node.textContent = "";
+        lead.hidden = true;
+        return;
+      }
+      lead.hidden = false;
+      node.hidden = false;
+      node.textContent = summarizeProjects(projects);
+    }
+
+    function summarizeProjects(projects) {
+      const plays = projects.reduce((sum, project) => sum + (Number(project.play_count) || 0), 0);
+      const needs = projects.filter((project) => projectBucket(project) === "needs").length;
+      const working = projects.filter((project) => projectBucket(project) === "working").length;
+      const stopped = projects.filter((project) => projectBucket(project) === "failed").length;
+      const parts = [projects.length === 1 ? "1 film" : `${projects.length} films`];
+      if (plays === 1) parts.push("1 play to study");
+      else if (plays > 1) parts.push(`${plays} plays to study`);
+      if (needs === 1) parts.push("1 film needs a look");
+      else if (needs > 1) parts.push(`${needs} films need a look`);
+      if (working === 1) parts.push("1 still cutting");
+      else if (working > 1) parts.push(`${working} still cutting`);
+      if (stopped === 1) parts.push("1 stopped");
+      else if (stopped > 1) parts.push(`${stopped} stopped`);
+      return parts.join(" · ");
+    }
+
+    function paintProjectFilters(projects) {
+      const bar = document.querySelector("#project-filters");
+      const counts = { all: projects.length, needs: 0, ready: 0, working: 0, failed: 0 };
+      for (const project of projects) counts[projectBucket(project)] += 1;
+      const options = [
+        ["all", "All"],
+        ["needs", "Needs a look"],
+        ["ready", "Ready"],
+        ["working", "In progress"],
+        ["failed", "Stopped"],
+      ].filter(([key]) => key === "all" || counts[key] > 0);
+      if (options.length < 3) {
+        bar.hidden = true;
+        bar.replaceChildren();
+        delete bar.dataset.signature;
+        projectFilter = "all";
+        return;
+      }
+      if (!options.some(([key]) => key === projectFilter)) projectFilter = "all";
+      const signature = options.map(([key]) => `${key}:${counts[key]}:${projectFilter === key}`).join("|");
+      if (bar.dataset.signature === signature) return;
+      bar.dataset.signature = signature;
+      bar.hidden = false;
+      bar.replaceChildren();
+      for (const [key, label] of options) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chip";
+        button.setAttribute("aria-pressed", projectFilter === key ? "true" : "false");
+        button.textContent = key === "all" ? label : `${label} · ${counts[key]}`;
+        button.addEventListener("click", () => {
+          projectFilter = key;
+          delete bar.dataset.signature;
+          paintProjectFilters(listedProjects);
+          applyProjectFilter();
+        });
+        bar.append(button);
+      }
+    }
+
+    function applyProjectFilter() {
+      let shown = 0;
+      for (const link of projectList.querySelectorAll("a")) {
+        const show = projectFilter === "all" || link.dataset.bucket === projectFilter;
+        if (link.parentElement) link.parentElement.hidden = !show;
+        if (show) shown += 1;
+      }
+      const filterEmpty = document.querySelector("#filter-empty");
+      filterEmpty.hidden = projectList.hidden || projectFilter === "all" || shown > 0;
+      if (!filterEmpty.hidden) filterEmpty.textContent = filterEmptyText(projectFilter);
+    }
+
+    function filterEmptyText(bucket) {
+      if (bucket === "needs") return "No films need a look.";
+      if (bucket === "ready") return "No films are ready to study.";
+      if (bucket === "working") return "No films are being cut right now.";
+      if (bucket === "failed") return "No films stopped.";
+      return "No films in this view.";
+    }
+
+    function hasError(project) {
+      return !project.running && (project.status === "failed" || Boolean(project.error));
+    }
+
+    function resumeScan(project) {
+      return project.status === "scanning"
+        || Number(project.scanned) > 0
+        || String(project.error || "").startsWith("Stopped while reading");
     }
 
     function canRetry(project) {
       const linked = Boolean(project.youtube_url || project.youtube);
-      const waiting = project.status === "downloading" || project.status === "failed";
-      return linked && waiting && !project.running;
+      const waiting = project.status === "downloading"
+        || project.status === "scanning"
+        || project.status === "failed";
+      if (!waiting || project.running) return false;
+      return linked || resumeScan(project);
     }
 
     function ensureRetry(link) {
@@ -877,7 +2156,7 @@
         event.stopPropagation();
         retryDownload(link.dataset.id, retry);
       });
-      link.querySelector(".meta").append(retry);
+      link.querySelector(".copy").append(retry);
       return retry;
     }
 
@@ -887,13 +2166,20 @@
         const response = await fetch(`/api/projects/${id}/retry`, { method: "POST" });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          status.className = "error";
-          status.textContent = typeof payload.detail === "string"
+          const message = typeof payload.detail === "string"
             ? payload.detail
             : "Could not retry that download.";
+          status.className = "error";
+          status.textContent = message;
+          const fault = button.parentElement && button.parentElement.querySelector(".fault");
+          if (fault) {
+            fault.hidden = false;
+            fault.textContent = message;
+          }
           return;
         }
         if (location.pathname === `/projects/${id}`) showReview(payload);
+        else if (location.pathname === "/activity") paintActivity(watch);
         else if (!historySection.hidden) paintHistory(watch);
       } finally {
         button.disabled = false;
@@ -923,25 +2209,6 @@
       return Math.min(100, Math.round((done / total) * 100));
     }
 
-    function downloadPieFor(project) {
-      if (project.status !== "downloading") return null;
-      return pie(downloadPercent(project));
-    }
-
-    function pie(percent) {
-      const node = document.createElement("span");
-      node.className = "pie";
-      node.setAttribute("role", "img");
-      if (percent == null) {
-        node.classList.add("unknown");
-        node.setAttribute("aria-label", "Downloading");
-        return node;
-      }
-      node.style.setProperty("--pct", `${percent}%`);
-      node.setAttribute("aria-label", `${percent}% downloaded`);
-      return node;
-    }
-
     function showReview(project) {
       paint(project, ++watch);
     }
@@ -951,9 +2218,11 @@
       historySection.hidden = true;
       activitySection.hidden = true;
       review.hidden = false;
+      playSection.hidden = true;
       markCurrent();
       if (results.dataset.project !== String(project.project)) {
         results.replaceChildren();
+        reviews.replaceChildren();
         results.dataset.project = String(project.project);
       }
       projectName.textContent = project.name;
@@ -967,11 +2236,20 @@
       if (project.channel) meta.push(project.channel);
       if (project.duration) meta.push(clock(project.duration));
       filmMeta.textContent = meta.join(" · ");
+      paintStages(filmSteps, project.steps, project.status === "failed");
       paintUrl(project.youtube_url || "");
+      const message = hasError(project) ? (project.error || "Could not read that film.") : "";
+      filmError.hidden = !message;
+      filmError.textContent = message;
       const active = project.status === "downloading" || project.status === "scanning";
-      meter.hidden = !active;
+      meter.hidden = !active || Boolean(message);
       retryButton.hidden = !canRetry(project);
-      if (project.status === "downloading") paintDownload(project);
+      retryButton.textContent = resumeScan(project) ? "Retry" : "Retry download";
+      if (project.status === "downloading") {
+        meter.classList.remove("reading");
+        readout.hidden = true;
+        paintDownload(project);
+      }
       if (project.status === "scanning") paintScan(project);
       const plays = project.plays || [];
       playsHeading.hidden = plays.length === 0;
@@ -983,38 +2261,87 @@
       for (const item of [...results.children]) {
         if (!seen.has(item.dataset.play)) item.remove();
       }
-      const running = project.status === "downloading" || project.status === "scanning";
-      status.className = project.status === "failed" ? "error" : "";
-      status.textContent = progressText(project, plays.length);
+      for (const play of plays) {
+        const card = results.querySelector(`li[data-play="${play.play_number}"]`);
+        if (!card) continue;
+        syncPlayCard(play, card);
+        results.append(card);
+      }
+      [...results.children].forEach((card, index) => {
+        const badge = card.querySelector(".play-badge");
+        if (badge) badge.textContent = String(index + 1);
+      });
+      paintReviews(project);
+      const failed = hasError(project);
+      const running = !failed && (project.status === "downloading" || project.status === "scanning");
+      const sentence = failed
+        ? ""
+        : progressText(project, plays.length, (project.reviews || []).length);
+      status.className = "";
+      status.textContent = "";
+      outcome.textContent = sentence;
+      outcome.hidden = !sentence;
+      outcome.classList.toggle("working", running);
       if (running) window.setTimeout(() => follow(token, project.project), 1000);
     }
 
-    results.addEventListener("play", (event) => {
+    function holdOneVideo(event) {
       const video = event.target;
       if (!(video instanceof HTMLVideoElement)) return;
-      for (const other of results.querySelectorAll("video")) {
+      for (const other of document.querySelectorAll("#results video, #reviews video")) {
         if (other !== video) other.pause();
       }
-      for (const card of results.querySelectorAll(".play-card")) {
+      for (const card of document.querySelectorAll("#results .play-card, #reviews .play-card")) {
         card.classList.toggle("playing", card.contains(video));
       }
-    }, true);
+    }
+    results.addEventListener("play", holdOneVideo, true);
+    reviews.addEventListener("play", holdOneVideo, true);
 
     function playCard(play) {
       const item = document.createElement("li");
       item.className = "play-card";
       item.dataset.play = String(play.play_number);
-      const badge = document.createElement("span");
+      item.dataset.uid = play.uid;
+      const badge = document.createElement("a");
       badge.className = "play-badge";
+      badge.href = `/play/${play.uid}`;
       badge.textContent = String(play.play_number);
-      const meta = document.createElement("p");
+      badge.addEventListener("click", (event) => followLink(event, badge.getAttribute("href")));
+      const meta = document.createElement("a");
       meta.className = "play-meta";
+      meta.href = `/play/${play.uid}`;
+      meta.addEventListener("click", (event) => followLink(event, meta.getAttribute("href")));
       const range = document.createElement("span");
-      range.textContent = `${clock(play.start)} – ${clock(play.end)}`;
+      range.className = "play-range";
+      const kind = document.createElement("span");
+      kind.className = "play-length play-kind";
       const length = document.createElement("span");
-      length.className = "play-length";
-      length.textContent = playLength(play.end - play.start);
-      meta.append(range, length);
+      length.className = "play-length play-duration";
+      meta.append(range, kind, length);
+      const picker = document.createElement("select");
+      picker.className = "play-type";
+      picker.setAttribute("aria-label", "Play type");
+      const blank = new Option("Play type", "");
+      picker.append(blank);
+      for (const [name, choices] of playTypeGroups) {
+        const group = document.createElement("optgroup");
+        group.label = name;
+        for (const [value, label] of choices) group.append(new Option(label, value));
+        picker.append(group);
+      }
+      picker.append(new Option("Not a play", "junk"));
+      picker.addEventListener("change", () => {
+        if (!picker.value) {
+          picker.value = picker.dataset.type || "scrimmage";
+          return;
+        }
+        relabelPlay(item.dataset.uid, picker.value, picker);
+      });
+      const view = document.createElement("a");
+      view.className = "view-play";
+      view.textContent = "View play";
+      view.addEventListener("click", (event) => followLink(event, view.getAttribute("href")));
       if (play.video) {
         const video = document.createElement("video");
         video.controls = true;
@@ -1023,8 +2350,141 @@
         video.src = play.video;
         item.append(video);
       }
-      item.append(badge, meta);
+      item.append(badge, meta, picker, view);
+      syncPlayCard(play, item);
       return item;
+    }
+
+    function syncPlayCard(play, card) {
+      const item = card || results.querySelector(`li[data-play="${play.play_number}"]`);
+      if (!item) return;
+      item.dataset.uid = play.uid;
+      const range = item.querySelector(".play-range");
+      if (range) range.textContent = `${clock(play.start)} – ${clock(play.end)}`;
+      const kind = item.querySelector(".play-kind");
+      if (kind) {
+        const label = cardKind(play);
+        kind.hidden = !label;
+        kind.textContent = label;
+      }
+      const length = item.querySelector(".play-duration");
+      if (length) length.textContent = playLength(play.end - play.start);
+      const view = item.querySelector(".view-play");
+      if (view) view.href = `/play/${play.uid}`;
+      const picker = item.querySelector(".play-type");
+      if (picker && picker.dataset.saving !== "1") {
+        const value = selectedType(play);
+        picker.dataset.type = value;
+        picker.value = value;
+      }
+    }
+
+    function paintReviews(project) {
+      const items = project.reviews || [];
+      reviewsHeading.hidden = items.length === 0;
+      reviewsLead.hidden = items.length === 0;
+      const seen = new Set(items.map((item) => reviewKey(item)));
+      for (const item of items) {
+        const key = reviewKey(item);
+        if (reviews.querySelector(`li[data-review="${key}"]`)) continue;
+        reviews.append(reviewCard(project, item));
+      }
+      for (const item of [...reviews.children]) {
+        if (!seen.has(item.dataset.review)) item.remove();
+      }
+    }
+
+    function reviewKey(item) {
+      return `${Number(item.start).toFixed(3)}-${Number(item.end).toFixed(3)}`;
+    }
+
+    function reviewCard(project, item) {
+      const card = document.createElement("li");
+      card.className = "play-card";
+      card.dataset.review = reviewKey(item);
+      const badge = document.createElement("span");
+      badge.className = "play-badge";
+      badge.textContent = "Check";
+      const meta = document.createElement("p");
+      meta.className = "play-meta";
+      const range = document.createElement("span");
+      range.textContent = `${clock(item.start)} – ${clock(item.end)}`;
+      const length = document.createElement("span");
+      length.className = "play-length";
+      length.textContent = playLength(item.end - item.start);
+      meta.append(range, length);
+      if (item.video) {
+        const video = document.createElement("video");
+        video.controls = true;
+        video.preload = "metadata";
+        video.playsInline = true;
+        video.src = item.video;
+        clipVideo(video, item.start, item.end);
+        card.append(video);
+      }
+      const actions = document.createElement("div");
+      actions.className = "review-actions";
+      actions.append(
+        reviewButton(project, item, "scrimmage", "Offense / defense"),
+        reviewButton(project, item, "special_teams", "Special teams"),
+        reviewButton(project, item, "junk", "Discard", true),
+      );
+      card.append(badge, meta, actions);
+      return card;
+    }
+
+    function clipVideo(video, start, end) {
+      let armed = false;
+      video.addEventListener("loadedmetadata", () => {
+        if (Number.isFinite(start)) video.currentTime = start;
+      });
+      video.addEventListener("seeked", () => {
+        armed = true;
+      });
+      video.addEventListener("timeupdate", () => {
+        if (armed && video.currentTime >= end - 0.05) video.pause();
+      });
+    }
+
+    function reviewButton(project, item, decision, label, discard) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      if (discard) button.className = "discard";
+      button.addEventListener("click", () => markReview(project.project, item, decision, button));
+      return button;
+    }
+
+    async function markReview(projectId, item, decision, button) {
+      const actions = button.parentElement;
+      if (actions) {
+        for (const control of actions.querySelectorAll("button")) control.disabled = true;
+      }
+      try {
+        const response = await fetch(`/api/projects/${projectId}/reviews`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ start: item.start, end: item.end, decision }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not save that mark.";
+          if (actions) {
+            for (const control of actions.querySelectorAll("button")) control.disabled = false;
+          }
+          return;
+        }
+        showReview(payload);
+      } catch {
+        status.className = "error";
+        status.textContent = "Could not save that mark.";
+        if (actions) {
+          for (const control of actions.querySelectorAll("button")) control.disabled = false;
+        }
+      }
     }
 
     function playLength(seconds) {
@@ -1088,14 +2548,25 @@
     }
 
     function paintScan(project) {
+      meter.classList.add("reading");
+      readout.hidden = false;
+      const count = (project.plays || []).length;
+      const plays = count === 1 ? "1 play" : `${count} plays`;
       const done = Number(project.scanned) || 0;
       const total = Number(project.duration) || 0;
-      if (total > 0) {
-        const pct = Math.min(100, Math.round((done / total) * 100));
-        setMeter(pct, "Reading the film", `Read ${clock(done)} of ${clock(total)}`);
+      readElapsed.textContent = clock(done);
+      readTotal.hidden = total <= 0;
+      readTotal.textContent = total > 0 ? clock(total) : "";
+      if (reachedEnd(done, total)) {
+        setMeter(100, "", count ? `Checking the film · ${plays}` : "Checking the film");
         return;
       }
-      setMeter(null, "Reading the film", `Read ${clock(done)}`);
+      if (total > 0) {
+        const pct = Math.min(100, Math.round((done / total) * 100));
+        setMeter(pct, "", count ? `Finding plays · ${plays}` : "Finding plays");
+        return;
+      }
+      setMeter(null, "", count ? `Finding plays · ${plays}` : "Finding plays");
     }
 
     function setMeter(percent, title, detail) {
@@ -1111,7 +2582,13 @@
       }
       downloadTrack.classList.remove("unknown");
       downloadTrack.setAttribute("aria-valuenow", String(percent));
-      downloadTrack.setAttribute("aria-valuetext", `${percent}%, ${detail}`);
+      const read = readElapsed.textContent && !readTotal.hidden
+        ? `${readElapsed.textContent} of ${readTotal.textContent}`
+        : "";
+      downloadTrack.setAttribute(
+        "aria-valuetext",
+        [percent + "%", read, detail].filter(Boolean).join(", "),
+      );
       downloadFill.style.width = `${percent}%`;
       downloadPct.hidden = false;
       downloadPct.textContent = `${percent}%`;
@@ -1124,15 +2601,25 @@
       return `${mb.toFixed(1)} MB`;
     }
 
-    function progressText(project, count) {
-      if (project.status === "downloading") return "";
-      if (project.status === "scanning") {
-        const done = clock(project.scanned || 0);
-        return project.duration ? `Scanning ${done} of ${clock(project.duration)}` : `Scanning ${done}`;
+    function reachedEnd(scanned, duration) {
+      const total = Number(duration) || 0;
+      const done = Number(scanned) || 0;
+      return total > 0 && done >= total - 1;
+    }
+
+    function progressText(project, count, held) {
+      const plays = count === 1 ? "1 play" : `${count} plays`;
+      if (project.status === "downloading") {
+        return "Downloading the film. Plays show up once the download finishes.";
       }
-      if (project.status === "failed") return project.error || "Could not read that film.";
-      if (!count) return "No plays found.";
-      return "";
+      if (project.status === "scanning") return "";
+      if (project.status === "failed") return "";
+      if (!count && !held) return "Analysis complete. No plays found.";
+      if (held) {
+        const checks = held === 1 ? "1 stretch still needs a look." : `${held} stretches still need a look.`;
+        return `Analysis complete. ${plays}. ${checks}`;
+      }
+      return `Analysis complete. ${plays}.`;
     }
 
     function clock(seconds) {

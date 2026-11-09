@@ -1,0 +1,38 @@
+{
+  "name": "film-analysis",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": true,
+  "containers": [
+    {
+      "class_name": "Website",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 1
+    },
+    {
+      "class_name": "Cutter",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 4
+    },
+    {
+      "class_name": "Task",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 16
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "WEBSITE", "class_name": "Website" },
+      { "name": "CUTTER", "class_name": "Cutter" },
+      { "name": "TASK", "class_name": "Task" }
+    ]
+  },
+  "exports": {
+    "Website": { "type": "durable-object", "storage": "sqlite" },
+    "Cutter": { "type": "durable-object", "storage": "sqlite" },
+    "Task": { "type": "durable-object", "storage": "sqlite" }
+  }
+}
