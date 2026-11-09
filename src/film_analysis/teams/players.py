@@ -323,9 +323,7 @@ def _usable_player_crop(crop, *, require_alone: bool = False) -> bool:
     top = crop[: max(1, int(height * 0.14)), :]
     if _grass(top) < 0.2:
         return False
-    if require_alone and not _alone(crop):
-        return False
-    return True
+    return not require_alone or _alone(crop)
 
 
 def _sharpness(crop) -> int:
@@ -634,7 +632,7 @@ def _dark_bar_between(peaks: list[int], smooth, saturation) -> bool:
 
     # Pair each peak with the next. Do not use strict=True — the second
     # sequence is intentionally one shorter.
-    for left, right in zip(peaks, peaks[1:]):
+    for left, right in zip(peaks, peaks[1:], strict=False):
         if right - left < 3:
             continue
         floor_index = left + int(np.argmin(smooth[left : right + 1]))

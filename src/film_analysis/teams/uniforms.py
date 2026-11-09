@@ -310,7 +310,12 @@ def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 4) -> lis
     for play in sample_plays(plays, limit):
         try:
             frames.append(
-                _frame(video, lineup_moment((play,)), _TEAM_FRAME_SCALE, quality=_TEAM_FRAME_QUALITY)
+                _frame(
+                    video,
+                    lineup_moment((play,)),
+                    _TEAM_FRAME_SCALE,
+                    quality=_TEAM_FRAME_QUALITY,
+                )
             )
         except (VideoAnalysisError, OSError):
             continue
