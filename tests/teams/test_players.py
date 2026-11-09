@@ -1,5 +1,7 @@
 """Player boxes separate the two uniform colors."""
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
@@ -233,6 +235,22 @@ def test_striped_swallows_a_broken_crop(monkeypatch: pytest.MonkeyPatch) -> None
     )
     crop = np.zeros((120, 60, 3), dtype=np.uint8)
     assert _striped(crop) is False
+
+
+def test_broadcast_referee_crop_is_rejected() -> None:
+    from film_analysis.teams.players import usable_player_jpeg
+
+    path = Path(__file__).with_name("fixtures") / "referee-crop.jpg"
+    data = path.read_bytes()
+    assert _striped(cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR))
+    assert usable_player_jpeg(data) is False
+
+
+def test_wide_field_still_is_not_a_player_card() -> None:
+    from film_analysis.teams.players import usable_player_jpeg
+
+    path = Path(__file__).with_name("fixtures") / "wide-field.jpg"
+    assert usable_player_jpeg(path.read_bytes()) is False
 
 
 def test_a_midtone_referee_shirt_is_not_a_team_color(
