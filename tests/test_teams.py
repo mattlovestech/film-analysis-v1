@@ -10,9 +10,12 @@ from fastapi.testclient import TestClient
 from film_analysis.storage.catalog import MemoryCatalog, PlayRecord
 from film_analysis.web.app import create_app
 from film_analysis.web.teams import (
+    Uniform,
     colors_from_pixels,
+    focus_player,
     lineup_moment,
     make_portrait,
+    names_from_reply,
     player_prompt,
     split_lineup,
     suggest_team_names,
@@ -42,44 +45,62 @@ def test_colors_fall_back_when_the_frame_is_only_grass() -> None:
 
 
 def test_player_prompt_asks_for_a_standing_player() -> None:
-    prompt = player_prompt("North", "#003366", "#f4f1ea")
+    prompt = player_prompt(Uniform("North", "dark blue", "white", "dark blue"))
 
     assert "standing full length" in prompt
-    assert "reference photo" in prompt
+    assert "reference photo is a football player" in prompt
+    assert "Madden-style" in prompt
     assert "00" in prompt
-    assert "dark blue" in prompt
-    assert "#003366" not in prompt
-    assert "Madden" not in prompt
+    assert "dark blue jersey" in prompt
+    assert "North" not in prompt
+
+
+def test_both_teams_share_one_prompt() -> None:
+    left = player_prompt(Uniform("Kentucky", "white", "white", "white"))
+    right = player_prompt(Uniform("LSU", "purple", "gold", "gold"))
+
+    def shell(prompt: str) -> str:
+        for color in ("white", "purple", "gold"):
+            prompt = prompt.replace(color, "COLOR")
+        return prompt
+
+    assert shell(left) == shell(right)
+
+
+def test_a_model_reply_becomes_two_uniforms() -> None:
+    from film_analysis.web.teams import parse_uniforms
+
+    reply = (
+        '{"left":{"name":"Kentucky","jersey":"white","pants":"white","helmet":"white"},'
+        '"right":{"name":"LSU","jersey":"purple with a logo","pants":"gold","helmet":"gold"}}'
+    )
+
+    left, right = parse_uniforms(reply, "Kentucky vs LSU")
+
+    assert left == Uniform("Kentucky", "white", "white", "white")
+    assert right.jersey == "purple"
+    assert right.pants == "gold"
+    assert "with a logo" not in player_prompt(right)
+    assert "purple jersey" in player_prompt(right)
 
 
 def test_portrait_falls_back_to_a_drawing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "film_analysis.web.teams._flux",
-        lambda still, team_name, jersey, pants: None,
-    )
-    monkeypatch.setattr(
-        "film_analysis.web.teams.dominant_colors",
-        lambda still: ("#aa0000", "#eeeeee"),
-    )
+    monkeypatch.setattr("film_analysis.web.teams._render", lambda prompt, still=None: None)
 
-    data, suffix = make_portrait(b"still", "Home")
+    data, suffix = make_portrait(Uniform("Home", "red", "white", "red"))
 
     assert suffix == ".svg"
-    assert b"#aa0000" in data
+    assert b"#b42318" in data
     assert b">00<" in data
 
 
 def test_portrait_keeps_a_generated_image(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "film_analysis.web.teams._flux",
-        lambda still, team_name, jersey, pants: b"\xff\xd8\xfffake",
-    )
-    monkeypatch.setattr(
-        "film_analysis.web.teams.dominant_colors",
-        lambda still: ("#003366", "#f4f1ea"),
+        "film_analysis.web.teams._render",
+        lambda prompt, still=None: b"\xff\xd8\xfffake",
     )
 
-    data, suffix = make_portrait(b"still", "Away")
+    data, suffix = make_portrait(Uniform("Away", "dark blue", "white", "dark blue"))
 
     assert suffix == ".jpg"
     assert data.startswith(b"\xff\xd8\xff")
@@ -118,20 +139,41 @@ def test_split_lineup_crops_each_side(tmp_path: Path) -> None:
     )[0].startswith("#c000")
 
 
+def test_a_still_without_a_photo_stays_whole() -> None:
+    assert focus_player(b"not-a-photo", "left") == b"not-a-photo"
+
+
 def test_a_matchup_title_names_both_sides() -> None:
     assert suggest_team_names("Pike County vs. Lamar") == ("Pike County", "Lamar")
 
 
-def test_uniform_colors_name_the_sides_when_the_title_does_not(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    colors = iter((("#003366", "#ffffff"), ("#c0a020", "#111111")))
+def test_school_and_mascot_come_from_the_lineup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "film_analysis.web.teams.dominant_colors",
-        lambda still: next(colors),
+        "film_analysis.web.teams._read_team_names",
+        lambda title, left, right: ("Johns Creek Gladiators", "HF Wildcats"),
     )
 
-    assert suggest_team_names("Friday night", b"left", b"right") == ("Dark Blue", "Gold")
+    assert suggest_team_names("Friday night", b"left", b"right") == (
+        "Johns Creek Gladiators",
+        "HF Wildcats",
+    )
+
+
+def test_a_reply_keeps_each_schools_mascot() -> None:
+    reply = '{"left": "Johns Creek Gladiators", "right": "HF Wildcats"}'
+
+    assert names_from_reply(reply) == ("Johns Creek Gladiators", "HF Wildcats")
+
+
+def test_a_lineup_without_a_readable_name_stays_home_and_away(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "film_analysis.web.teams._read_team_names",
+        lambda title, left, right: None,
+    )
+
+    assert suggest_team_names("Friday night", b"left", b"right") == ("Home", "Away")
 
 
 def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
@@ -140,7 +182,7 @@ def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=lambda still, name: (f"<svg>{name}</svg>".encode(), ".svg"),
+            portrait=lambda uniform, still=b"": (f"<svg>{uniform.name}</svg>".encode(), ".svg"),
         )
     )
 

@@ -1,5 +1,7 @@
 """A scouting report from the play chart, once a team is labeled."""
 
+import csv
+import io
 from collections.abc import Sequence
 
 from fpdf import FPDF
@@ -90,12 +92,68 @@ def scouting_pdf(
     return bytes(pdf.output())
 
 
+def scouting_csv(
+    film_name: str,
+    teams: FilmTeams | None,
+    plays: Sequence[PlayRecord],
+) -> str:
+    """One row per play, for a spreadsheet."""
+
+    yours, opponent, _owned = _names(teams)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(
+        [
+            "film",
+            "your_team",
+            "opponent",
+            "play",
+            "start_seconds",
+            "end_seconds",
+            "seconds",
+            "call",
+            "family",
+            "side",
+        ]
+    )
+    for play in plays:
+        span = max(0.0, play.end_seconds - play.start_seconds)
+        writer.writerow(
+            [
+                film_name,
+                yours,
+                opponent,
+                play.play_number,
+                _csv_number(play.start_seconds),
+                _csv_number(play.end_seconds),
+                _csv_number(span),
+                _call(play),
+                play.family,
+                _side(play),
+            ]
+        )
+    return buffer.getvalue()
+
+
 def _needs_unit(play: PlayRecord) -> bool:
     return not _special(play) and play.unit not in {"offense", "defense"}
 
 
 def _special(play: PlayRecord) -> bool:
     return play.family == "special_teams"
+
+
+def _side(play: PlayRecord) -> str:
+    if _special(play):
+        return "special teams"
+    if play.unit in {"offense", "defense"}:
+        return play.unit
+    return ""
+
+
+def _csv_number(value: float) -> str:
+    text = f"{value:.3f}".rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _names(teams: FilmTeams | None) -> tuple[str, str, bool]:

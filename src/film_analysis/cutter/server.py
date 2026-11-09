@@ -16,6 +16,7 @@ from film_analysis.agents.scan import (
     WorkerLimit,
     clamp_workers,
     family_at,
+    needs_retry,
     ready_non_plays,
     ready_plays,
     resolve_held,
@@ -25,7 +26,7 @@ from film_analysis.agents.scan import (
 )
 from film_analysis.agents.segments import FilmSpan
 from film_analysis.storage.catalog import Catalog, CatalogError, catalog_from_env
-from film_analysis.web.app import _job_error, _load_dotenv, _progress
+from film_analysis.web.app import _job_error, _load_dotenv, _progress, start_team_analysis
 
 app = FastAPI(title="film-cutter", docs_url=None, redoc_url=None, openapi_url=None)
 _lock = threading.Lock()
@@ -196,7 +197,8 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
     watcher.start()
     try:
         _mark(catalog, project_id, "scanning", workers=slots.get())
-        _progress(catalog, project_id, "scanning", duration, 0.0, None)
+        _progress(catalog, project_id, "scanning", duration, 0.0, None, retries=0, retries_done=0)
+        retry_found = 0
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             jobs = [
                 pool.submit(
@@ -214,6 +216,8 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
             ]
             for index, job in enumerate(jobs):
                 collected[index] = _spans(job.result())
+                if needs_retry(collected[index]):
+                    retry_found += 1
                 stable = stable_through(index + 1, bounds, duration)
                 spans = [span for group in collected.values() for span in group]
                 for start, end in ready_plays(spans, stable):
@@ -241,12 +245,22 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
                     [span for span in ready_non_plays(spans, stable)],
                     published,
                 )
-                _progress(catalog, project_id, "scanning", duration, stable, None)
+                _progress(
+                    catalog,
+                    project_id,
+                    "scanning",
+                    duration,
+                    stable,
+                    None,
+                    retries=retry_found,
+                    retries_done=0,
+                )
 
         spans = [span for group in collected.values() for span in group]
         if review_ranges(spans):
             _mark(catalog, project_id, "checking", workers=slots.get())
-        _review(catalog, body, token, spans, kept, published, play_number, slots)
+        _review(catalog, body, token, spans, kept, published, play_number, slots, duration)
+        start_team_analysis(catalog, project_id)
         _progress(catalog, project_id, "ready", duration, duration, None)
         _mark(catalog, project_id, "ready", running=False)
     finally:
@@ -262,10 +276,31 @@ def _review(
     published: set[tuple[str, float, float]],
     play_number: int,
     slots: WorkerLimit,
+    duration: float,
 ) -> None:
     held = review_ranges(spans)
     if not held:
+        _progress(
+            catalog,
+            body.project_id,
+            "scanning",
+            duration,
+            duration,
+            None,
+            retries=0,
+            retries_done=0,
+        )
         return
+    _progress(
+        catalog,
+        body.project_id,
+        "scanning",
+        duration,
+        duration,
+        None,
+        retries=len(held),
+        retries_done=0,
+    )
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         jobs = [
             pool.submit(
@@ -281,7 +316,19 @@ def _review(
             )
             for index, (start, end) in enumerate(held)
         ]
-        decisions = [_spans(job.result()) for job in jobs]
+        decisions = []
+        for index, job in enumerate(jobs, start=1):
+            decisions.append(_spans(job.result()))
+            _progress(
+                catalog,
+                body.project_id,
+                "scanning",
+                duration,
+                duration,
+                None,
+                retries=len(held),
+                retries_done=index,
+            )
     plays, leftovers = resolve_held(held, decisions, kept)
     for play in plays:
         play_number += 1

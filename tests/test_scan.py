@@ -9,6 +9,7 @@ from film_analysis.agents.scan import (
     family_at,
     merge_plays,
     open_window,
+    processing_percent,
     ready_non_plays,
     ready_plays,
     resolve_held,
@@ -307,3 +308,37 @@ def test_a_failed_second_look_is_logged_and_left_unsure(caplog: pytest.LogCaptur
     assert spans == [("uncertain", 0.0)]
     assert "second look at 0.0–8.0 failed" in caplog.text
     assert "review broke" in caplog.text
+
+
+def test_retries_lower_the_overall_processing_until_the_second_look_finishes() -> None:
+    counts: list[tuple[int, int]] = []
+
+    def frames(path: Path, start: float, seconds: float) -> list[tuple[float, bytes]]:
+        del path, seconds
+        return [(start, b"jpeg")]
+
+    def label(samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+        start = samples[0][0]
+        if start < 1:
+            return (FilmSpan(kind="uncertain", start_seconds=0, end_seconds=8),)
+        return (FilmSpan(kind="scrimmage", start_seconds=start, end_seconds=start + 5),)
+
+    scan_film(
+        Path("film.mp4"),
+        70,
+        label,
+        frames,
+        lambda source, start, end, dest: dest.write_bytes(b"clip"),
+        lambda number, start, end, clip, family: None,
+        lambda kind, start, end: None,
+        lambda seconds: None,
+        on_counts=lambda found, done: counts.append((found, done)),
+    )
+
+    assert (1, 0) in counts
+    assert counts[-1] == (1, 1)
+    # 70s is two windows. One retry means the first settled window is a quarter
+    # of the work, and the film is two thirds done before that retry is read.
+    assert processing_percent(70, 30, 1, 0) == 25
+    assert processing_percent(70, 70, 1, 0) == 67
+    assert processing_percent(70, 70, 1, 1) == 100

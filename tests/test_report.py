@@ -70,6 +70,34 @@ def test_the_pdf_is_ready_after_the_team_is_labeled(tmp_path: Path) -> None:
     assert b"Scrimmage" in report.content
 
 
+def test_the_csv_lists_each_play(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    store.set_film_teams(1, FilmTeams("North", "South", "right"))
+    store.set_play_unit(1, 1, "offense")
+    client = TestClient(create_app(store=store))
+
+    waiting = client.get("/api/projects/1/report.csv")
+    assert waiting.status_code == 200
+    rows = waiting.content.decode().splitlines()
+
+    assert waiting.headers["content-type"].startswith("text/csv")
+    assert "scouting-report.csv" in waiting.headers["content-disposition"]
+    assert rows[0].split(",") == [
+        "film",
+        "your_team",
+        "opponent",
+        "play",
+        "start_seconds",
+        "end_seconds",
+        "seconds",
+        "call",
+        "family",
+        "side",
+    ]
+    assert rows[1] == "Friday night,South,North,1,2,8,6,Run,scrimmage,offense"
+    assert rows[2].endswith(",Scrimmage,scrimmage,")
+
+
 def test_special_teams_do_not_block_the_report(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     clip = tmp_path / "kick.mp4"

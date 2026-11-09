@@ -27,6 +27,7 @@ from film_analysis.agents.scan import (
     FilmWindowError,
     WorkerLimit,
     clamp_workers,
+    processing_percent,
     scan_film,
 )
 from film_analysis.agents.segments import FilmSpan, format_play
@@ -55,8 +56,20 @@ from film_analysis.storage.catalog import (
 )
 from film_analysis.web.cloud import cloud_target
 from film_analysis.web.playback import cut_clip
-from film_analysis.web.report import scouting_pdf, untagged_plays
-from film_analysis.web.teams import lineup_moment, make_portrait, split_lineup, suggest_team_names
+from film_analysis.web.report import scouting_csv, scouting_pdf
+from film_analysis.web.teams import (
+    Uniform,
+    decode_uniforms,
+    detect_uniforms,
+    encode_uniforms,
+    focus_player,
+    lineup_moment,
+    make_portrait,
+    play_frames,
+    split_lineup,
+    suggest_team_names,
+    uniform_line,
+)
 
 _PAGE = Path(__file__).with_name("index.html")
 _DEFAULT_MAX_BYTES = 500 * 1024 * 1024
@@ -209,7 +222,7 @@ def create_app(
     workers: int | None = None,
     details: _Details | None = None,
     lineup: Callable[[Path, float], tuple[bytes, bytes]] | None = None,
-    portrait: Callable[[bytes, str], tuple[bytes, str]] | None = None,
+    portrait: Callable[..., tuple[bytes, str]] | None = None,
 ) -> FastAPI:
     """Build the upload app. Pass an agent in tests; otherwise read it from the environment."""
 
@@ -327,6 +340,14 @@ def create_app(
                 "review_count": item.review_count,
                 "duration": item.duration_seconds,
                 "archived": item.archived,
+                "retries": item.retries,
+                "retries_done": item.retries_done,
+                "processing": processing_percent(
+                    item.duration_seconds,
+                    item.scanned_seconds,
+                    item.retries,
+                    item.retries_done,
+                ),
             }
             for item in saved
         ]
@@ -413,7 +434,7 @@ def create_app(
     def team_stills(project_id: int) -> dict[str, object]:
         saved = _require_project(catalog, project_id)
         _require_identified(saved)
-        _store_lineup(catalog, saved, draw_lineup)
+        run_team_analysis(catalog, saved, draw_lineup, draw_portrait)
         return _project_payload(
             saved,
             running=_running(running, running_lock, project_id),
@@ -431,6 +452,7 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(error)) from error
         if needs_lineup:
             _store_lineup(catalog, saved, draw_lineup)
+            _remember_team_names(catalog, saved)
         named = _named_sides(catalog, saved, body)
         _store_portraits(catalog, project_id, named, draw_portrait)
         try:
@@ -465,22 +487,44 @@ def create_app(
                 status_code=400,
                 detail="The scouting report waits until the plays are identified.",
             )
-        waiting = untagged_plays(saved.plays)
-        if waiting:
-            noun = "play" if waiting == 1 else "plays"
-            raise HTTPException(
-                status_code=400,
-                detail=f"Tag {waiting} {noun} as offense or defense before the scouting report.",
-            )
         try:
             teams = catalog.film_teams(project_id)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
+        if teams is None or teams.mine not in {"left", "right"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Label your team before the scouting report.",
+            )
         pdf = scouting_pdf(saved.name, teams, _ordered_plays(saved))
         return Response(
             content=pdf,
             media_type="application/pdf",
             headers={"Content-Disposition": 'attachment; filename="scouting-report.pdf"'},
+        )
+
+    @app.get("/api/projects/{project_id}/report.csv")
+    def scouting_sheet(project_id: int) -> Response:
+        saved = _require_project(catalog, project_id)
+        if saved.status != "ready" or not saved.plays:
+            raise HTTPException(
+                status_code=400,
+                detail="The scouting report waits until the plays are identified.",
+            )
+        try:
+            teams = catalog.film_teams(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if teams is None or teams.mine not in {"left", "right"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Label your team before the scouting report.",
+            )
+        sheet = scouting_csv(saved.name, teams, _ordered_plays(saved))
+        return Response(
+            content=sheet,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="scouting-report.csv"'},
         )
 
     @app.post("/api/projects/{project_id}/archive")
@@ -555,6 +599,8 @@ def create_app(
             youtube=saved.youtube_url,
             upload_path=None,
             details=lookup,
+            lineup=draw_lineup,
+            portrait=draw_portrait,
             resume_scan=resume_scan,
             resume_at=saved.scanned_seconds if resume_scan else 0.0,
         )
@@ -724,6 +770,8 @@ def create_app(
                 details=lookup,
                 cloud=_cloud_choice(request, catalog),
                 request=request,
+                lineup=draw_lineup,
+                portrait=draw_portrait,
             )
         canonical = _youtube_url(link) if link else None
         upload_path: Path | None = None
@@ -779,6 +827,8 @@ def create_app(
             youtube=canonical,
             upload_path=upload_path,
             details=lookup,
+            lineup=draw_lineup,
+            portrait=draw_portrait,
         )
         detail = catalog.get_project(project_id)
         if detail is None:
@@ -919,6 +969,8 @@ def _watch_film(
     youtube: str | None,
     upload_path: Path | None,
     details: _Details,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
+    portrait: Callable[..., tuple[bytes, str]] = make_portrait,
     resume_scan: bool = False,
     resume_at: float = 0.0,
     limit: WorkerLimit | None = None,
@@ -985,10 +1037,37 @@ def _watch_film(
         def publish_span(kind: str, start: float, end: float) -> None:
             catalog.add_span(project_id, kind, start, end)
 
+        retries = 0
+        retries_done = 0
+
         def progress(seconds: float) -> None:
             nonlocal scanned
             scanned = seconds
-            _progress(catalog, project_id, "scanning", length, seconds, None)
+            _progress(
+                catalog,
+                project_id,
+                "scanning",
+                length,
+                seconds,
+                None,
+                retries=retries,
+                retries_done=retries_done,
+            )
+
+        def on_counts(found: int, finished: int) -> None:
+            nonlocal retries, retries_done
+            retries = found
+            retries_done = finished
+            _progress(
+                catalog,
+                project_id,
+                "scanning",
+                length,
+                scanned,
+                None,
+                retries=retries,
+                retries_done=retries_done,
+            )
 
         def label(samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
             bind_read_note(remember_read)
@@ -1011,7 +1090,16 @@ def _watch_film(
 
         phase = "reading"
         _note(activity, lock, catalog, project_id, "scanning")
-        _progress(catalog, project_id, "scanning", length, resume_at, None)
+        _progress(
+            catalog,
+            project_id,
+            "scanning",
+            length,
+            resume_at,
+            None,
+            retries=0 if resume_at <= 0 else None,
+            retries_done=0 if resume_at <= 0 else None,
+        )
         if resume_at <= 0:
             with contextlib.suppress(CatalogError):
                 catalog.clear_reads(project_id)
@@ -1060,7 +1148,9 @@ def _watch_film(
             next_number=next_number,
             already=already,
             on_review=mark_review,
+            on_counts=on_counts,
         )
+        start_team_analysis(catalog, project_id, lineup, portrait)
         _progress(catalog, project_id, "ready", length, length, None)
         _save_activity(catalog, project_id, "ready", running=False)
     except (Exception, SystemExit) as error:
@@ -1147,6 +1237,8 @@ def _progress(
     duration_seconds: float | None,
     scanned_seconds: float,
     error: str | None,
+    retries: int | None = None,
+    retries_done: int | None = None,
 ) -> None:
     try:
         catalog.set_progress(
@@ -1155,6 +1247,8 @@ def _progress(
             duration_seconds=duration_seconds,
             scanned_seconds=scanned_seconds,
             error=error,
+            retries=retries,
+            retries_done=retries_done,
         )
     except CatalogError:
         return
@@ -1450,6 +1544,14 @@ def _activity_job(
         "total_bytes": project.total_bytes,
         "scanned": project.scanned_seconds,
         "duration": project.duration_seconds,
+        "retries": project.retries,
+        "retries_done": project.retries_done,
+        "processing": processing_percent(
+            project.duration_seconds,
+            project.scanned_seconds,
+            project.retries,
+            project.retries_done,
+        ),
         "error": project.error,
         "youtube": project.youtube_url is not None,
         "play_count": play_count,
@@ -1616,6 +1718,54 @@ def _lineup_video(catalog: Catalog, project: ProjectDetail) -> tuple[Path, float
     return clip, min(0.6, length / 2)
 
 
+def start_team_analysis(
+    catalog: Catalog,
+    project_id: int,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
+    portrait: Callable[..., tuple[bytes, str]] = make_portrait,
+) -> None:
+    """Name the two teams once the plays exist. A miss here leaves the plays in place."""
+
+    try:
+        saved = catalog.get_project(project_id)
+    except CatalogError:
+        _LOG.warning("team analysis could not open film %s", project_id, exc_info=True)
+        return
+    if saved is None or not saved.plays:
+        return
+    try:
+        run_team_analysis(catalog, saved, lineup, portrait)
+    except Exception:
+        _LOG.warning("team analysis did not finish for film %s", project_id, exc_info=True)
+
+
+def run_team_analysis(
+    catalog: Catalog,
+    project: ProjectDetail,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]],
+    portrait: Callable[..., tuple[bytes, str]],
+) -> None:
+    """Read the lineup, name both sides, and draw each player."""
+
+    if not project.plays:
+        return
+    project_id = project.project
+    if _still_bytes(catalog, project_id, "left") is None or _still_bytes(
+        catalog, project_id, "right"
+    ) is None:
+        _store_lineup(catalog, project, lineup)
+    _remember_team_names(catalog, project)
+    if _still_bytes(catalog, project_id, "left-player") is None or _still_bytes(
+        catalog, project_id, "right-player"
+    ) is None:
+        try:
+            named = catalog.film_teams(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if named is not None:
+            _store_portraits(catalog, project_id, named, portrait)
+
+
 def _store_lineup(
     catalog: Catalog,
     project: ProjectDetail,
@@ -1638,17 +1788,58 @@ def _store_lineup(
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
-def _named_sides(catalog: Catalog, project: ProjectDetail, body: _TeamNames) -> FilmTeams:
-    suggested = suggest_team_names(
+def _remember_team_names(catalog: Catalog, project: ProjectDetail) -> None:
+    try:
+        saved = catalog.film_teams(project.project)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    pair = _detected_uniforms(catalog, project)
+    if saved is not None and not _placeholder_names(saved):
+        left_name, right_name, mine = saved.left_name, saved.right_name, saved.mine
+    else:
+        left_name, right_name = pair[0].name, pair[1].name
+        mine = None if saved is None else saved.mine
+    try:
+        catalog.set_film_teams(
+            project.project,
+            FilmTeams(left_name, right_name, mine, encode_uniforms(*pair)),
+        )
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+def _detected_uniforms(catalog: Catalog, project: ProjectDetail) -> tuple[Uniform, Uniform]:
+    video, _at = _lineup_video(catalog, project)
+    return detect_uniforms(
+        play_frames(video, project.plays),
         project.name,
         _still_bytes(catalog, project.project, "left"),
         _still_bytes(catalog, project.project, "right"),
     )
-    return FilmTeams(
-        body.left_name or suggested[0],
-        body.right_name or suggested[1],
-        body.mine,
+
+
+def _remember_uniforms(catalog: Catalog, project: ProjectDetail) -> None:
+    _remember_team_names(catalog, project)
+
+
+def _placeholder_names(teams: FilmTeams) -> bool:
+    return {teams.left_name.casefold(), teams.right_name.casefold()} <= {"", "home", "away"}
+
+
+def _named_sides(catalog: Catalog, project: ProjectDetail, body: _TeamNames) -> FilmTeams:
+    try:
+        existing = catalog.film_teams(project.project)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    suggested = suggest_team_names(project.name)
+    uniforms = "" if existing is None else existing.uniforms
+    left = body.left_name or (
+        existing.left_name if existing and existing.left_name else suggested[0]
     )
+    right = body.right_name or (
+        existing.right_name if existing and existing.right_name else suggested[1]
+    )
+    return FilmTeams(left, right, body.mine, uniforms)
 
 
 def _still_bytes(catalog: Catalog, project_id: int, kind: str) -> bytes | None:
@@ -1668,17 +1859,27 @@ def _store_portraits(
     catalog: Catalog,
     project_id: int,
     teams: FilmTeams,
-    draw: Callable[[bytes, str], tuple[bytes, str]],
+    draw: Callable[..., tuple[bytes, str]],
 ) -> None:
+    pair = decode_uniforms(teams.uniforms)
+    if pair is None:
+        project = catalog.get_project(project_id)
+        pair = (
+            _detected_uniforms(catalog, project)
+            if project is not None
+            else (
+                Uniform(teams.left_name, "white", "white", "white"),
+                Uniform(teams.right_name, "dark blue", "white", "dark blue"),
+            )
+        )
+    wearing = (
+        Uniform(teams.left_name or pair[0].name, pair[0].jersey, pair[0].pants, pair[0].helmet),
+        Uniform(teams.right_name or pair[1].name, pair[1].jersey, pair[1].pants, pair[1].helmet),
+    )
     try:
-        for side, name in (("left", teams.left_name), ("right", teams.right_name)):
-            still = catalog.team_image(project_id, side)
-            if still is None or not still.is_file():
-                raise HTTPException(
-                    status_code=400,
-                    detail="Could not read a lineup from that film.",
-                )
-            image, suffix = draw(still.read_bytes(), name)
+        for side, uniform in zip(("left", "right"), wearing, strict=True):
+            still = focus_player(_still_bytes(catalog, project_id, side) or b"", side)
+            image, suffix = draw(uniform, still)
             catalog.save_team_image(project_id, f"{side}-player", image, suffix)
     except CatalogError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
@@ -1703,17 +1904,16 @@ def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
         project = catalog.get_project(project_id)
     except CatalogError:
         project = None
-    suggested = suggest_team_names(
-        "" if project is None else project.name,
-        _still_bytes(catalog, project_id, "left"),
-        _still_bytes(catalog, project_id, "right"),
-    )
+    suggested = suggest_team_names("" if project is None else project.name)
     left_name = suggested[0] if saved is None or not saved.left_name else saved.left_name
     right_name = suggested[1] if saved is None or not saved.right_name else saved.right_name
+    found = decode_uniforms("" if saved is None else saved.uniforms)
     return {
         "left_name": left_name,
         "right_name": right_name,
         "mine": None if saved is None else saved.mine,
+        "left_uniform": "" if found is None else uniform_line(found[0]),
+        "right_uniform": "" if found is None else uniform_line(found[1]),
         "left_still": url("left"),
         "right_still": url("right"),
         "left_player": url("left-player"),
@@ -1735,6 +1935,14 @@ def _project_payload(
         "status": project.status,
         "duration": project.duration_seconds,
         "scanned": project.scanned_seconds,
+        "retries": project.retries,
+        "retries_done": project.retries_done,
+        "processing": processing_percent(
+            project.duration_seconds,
+            project.scanned_seconds,
+            project.retries,
+            project.retries_done,
+        ),
         "error": project.error,
         "channel": project.channel,
         "youtube_url": project.youtube_url,
@@ -1856,6 +2064,8 @@ def _analyze_saved(
     details: _Details,
     cloud: tuple[str, str] | None,
     request: Request,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
+    portrait: Callable[..., tuple[bytes, str]] = make_portrait,
 ) -> dict[str, object] | JSONResponse:
     """Start a new analysis from a film that is already stored."""
 

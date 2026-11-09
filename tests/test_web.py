@@ -121,6 +121,10 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="chart-plays"' in response.text
     assert "Total time" in response.text
     assert "Reading plays per minute" in response.text
+    assert 'id="activity-source"' in response.text
+    assert 'data-source="local"' in response.text
+    assert 'data-source="cloud"' in response.text
+    assert "Show films by where they ran" in response.text
     assert "× realtime" in response.text
     assert "plays/min" in response.text
     assert 'id="film-steps"' in response.text
@@ -133,13 +137,17 @@ def test_page_offers_a_video_upload() -> None:
     assert "This page stays here. Starting a film sends that job to Cloudflare." in response.text
     assert "This film will run on Cloudflare." in response.text
     assert "Starting on Cloudflare" in response.text
+    assert 'id="analyze"' in response.text
+    assert 'aria-busy="false"' in response.text
     assert "location.assign" not in response.text
     assert "Cloud · 1 worker" in response.text
     assert 'id="teams"' in response.text
-    assert "My team" in response.text
-    assert "Standing players wear the uniform from each lineup photo." in response.text
+    assert "This is my team" in response.text
+    assert "Madden-style players from each side of the film." in response.text
     assert 'id="report"' in response.text
     assert "Scouting report" in response.text
+    assert 'id="report-generate"' in response.text
+    assert "Generate scouting report" in response.text
     assert "Download PDF" in response.text
     library = client.get("/projects")
     assert library.status_code == 200
@@ -242,6 +250,9 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
             "review_count": 0,
             "duration": 4.0,
             "archived": False,
+            "retries": 0,
+            "retries_done": 0,
+            "processing": 100,
         }
     ]
 
@@ -253,6 +264,37 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
     listed = client.get("/api/projects").json()
     assert [item["project"] for item in listed] == [2, 1]
     assert client.get("/projects/1/plays/1").content == b"fake-video"
+
+
+def test_team_analysis_starts_when_the_plays_are_ready() -> None:
+    agent = _Agent((PlaySegment(number=1, start_seconds=1, end_seconds=2),))
+    client = TestClient(
+        create_app(
+            agent=agent,
+            prepare=_keep_source,
+            cut=_copy_clip,
+            duration=_duration,
+            frames=_frames,
+            lineup=lambda video, at: (b"left", b"right"),
+            portrait=lambda uniform, still=None: (f"<svg>{uniform.name}</svg>".encode(), ".svg"),
+        )
+    )
+
+    response = client.post(
+        "/analyze",
+        files={"video": ("clip.mp4", b"fake-video", "video/mp4")},
+    )
+    assert response.status_code == 200
+    body = _settle(client, 1)
+
+    assert body["status"] == "ready"
+    teams = body["teams"]
+    assert isinstance(teams, dict)
+    assert teams["left_name"]
+    assert teams["right_name"]
+    assert teams["left_still"]
+    assert teams["right_still"]
+    assert b"svg" in client.get(str(teams["left_player"])).content
 
 
 def test_archive_takes_a_film_off_the_shelf_until_it_is_put_back(tmp_path: Path) -> None:
@@ -924,6 +966,26 @@ def test_a_step_keeps_the_stack_that_started_it(tmp_path: Path) -> None:
     )
     assert legacy[0].stack is None
     assert legacy[0].workers is None
+
+
+def test_a_step_with_no_place_takes_the_next_one(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project_id = store.create_project("Week 6", "https://youtu.be/abcdefghijk")
+    store.record_activity(
+        project_id,
+        "starting",
+        running=True,
+        updated_at="2026-11-09T05:00:00+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "starting",
+        running=True,
+        stack="local",
+        updated_at="2026-11-09T05:00:20+00:00",
+    )
+    saved = {step.name: step for step in store.get_activity(project_id).steps}
+    assert saved["starting"].stack == "local"
 
 
 def test_activity_shows_the_error_that_stopped_a_job(tmp_path: Path) -> None:

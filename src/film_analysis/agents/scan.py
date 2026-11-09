@@ -90,6 +90,53 @@ SpanSink = Callable[[str, float, float], None]
 Progress = Callable[[float], None]
 
 
+def needs_retry(spans: tuple[FilmSpan, ...]) -> bool:
+    """A window the model left entirely unsure, so that stretch is read again."""
+
+    return bool(spans) and all(span.kind == UNCERTAIN for span in spans)
+
+
+def windows_settled(duration: float, scanned: float) -> int:
+    """How many windows are settled once the scan has reached `scanned`."""
+
+    bounds = window_bounds(duration)
+    finished = 0
+    for index in range(1, len(bounds) + 1):
+        if scanned + 0.05 >= stable_through(index, bounds, duration):
+            finished = index
+    return finished
+
+
+def processing_percent(
+    duration: float | None,
+    scanned: float,
+    retries: int,
+    retries_done: int,
+) -> int | None:
+    """Share of the film that is done, including the retries still ahead.
+
+    The retry rate so far is applied to the whole film. Once every window has
+    been read, the remaining retries are the second look, counted one by one.
+    """
+
+    total = len(window_bounds(duration or 0))
+    if total <= 0:
+        return None
+    done = windows_settled(duration or 0, scanned)
+    found = max(0, retries)
+    finished = max(0, retries_done)
+    if done >= total:
+        projected = float(found)
+    elif done > 0:
+        projected = found / done * total
+    else:
+        projected = 0.0
+    work = total + projected
+    if work <= 0:
+        return 0
+    return min(100, round(100 * (done + finished) / work))
+
+
 def window_bounds(duration: float) -> list[tuple[float, float]]:
     """Return `[start, end)` windows that cover `duration`, overlapping by ten seconds."""
 
@@ -272,6 +319,7 @@ def scan_film(
     next_number: int = 1,
     already: list[tuple[float, float]] | None = None,
     on_review: Callable[[], None] | None = None,
+    on_counts: Callable[[int, int], None] | None = None,
 ) -> None:
     """Label the film from start to end. Publish each play once its end has settled.
 
@@ -286,6 +334,7 @@ def scan_film(
         return
 
     start_index = open_window(bounds, resume_at, duration)
+    retry_found = 0
     kept = list(already or [])
     published_plays = next_number - 1
     published_spans: set[tuple[str, float, float]] = set()
@@ -301,6 +350,8 @@ def scan_film(
             for offset, job in enumerate(jobs):
                 index = start_index + offset
                 collected[index] = job.result()
+                if needs_retry(collected[index]):
+                    retry_found += 1
                 stable = stable_through(index + 1, bounds, duration)
                 spans = [span for group in collected.values() for span in group]
                 published_plays = _publish_ready(
@@ -324,6 +375,7 @@ def scan_film(
                     publish_span,
                 )
                 progress(stable)
+                _report_counts(on_counts, retry_found, 0)
         spans = [span for group in collected.values() for span in group]
         if review_ranges(spans) and on_review is not None:
             on_review()
@@ -340,6 +392,7 @@ def scan_film(
             cuts,
             slots,
             kept,
+            on_counts,
         )
     finally:
         shutil.rmtree(cuts, ignore_errors=True)
@@ -415,21 +468,28 @@ def _review_held(
     cuts: Path,
     slots: WorkerLimit,
     taken: list[tuple[float, float]],
+    on_counts: Callable[[int, int], None] | None = None,
 ) -> None:
     """Look again at unsure stretches, then keep whatever is still unsure."""
 
     held = review_ranges(spans)
     if not held:
+        _report_counts(on_counts, 0, 0)
         return
+    _report_counts(on_counts, len(held), 0)
     if review is None:
         decisions = [() for _ in held]
+        _report_counts(on_counts, len(held), len(held))
     else:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             jobs = [
                 pool.submit(_review_limited, slots, path, start, end, frames, review)
                 for start, end in held
             ]
-            decisions = [job.result() for job in jobs]
+            decisions = []
+            for index, job in enumerate(jobs, start=1):
+                decisions.append(job.result())
+                _report_counts(on_counts, len(held), index)
     plays, leftovers = resolve_held(held, decisions, taken)
     for play in plays:
         published_plays += 1
@@ -470,6 +530,15 @@ def _safe_review(
     except Exception as error:
         _LOG.exception("second look at %.1f–%.1f failed: %s", start, end, error)
         return (FilmSpan(kind=UNCERTAIN, start_seconds=start, end_seconds=end),)
+
+
+def _report_counts(
+    on_counts: Callable[[int, int], None] | None,
+    retries: int,
+    retries_done: int,
+) -> None:
+    if on_counts is not None:
+        on_counts(retries, retries_done)
 
 
 def _emit_play(

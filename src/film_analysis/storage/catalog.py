@@ -66,7 +66,8 @@ def advance_activity_steps(
     """Close the open step, then start `phase` when it is a step we time.
 
     The stack is the one that started the step. A later update of the same
-    open step keeps that stack.
+    open step keeps that stack. A step saved before a place was known takes
+    the place from the first update that has one.
     """
 
     if (
@@ -76,6 +77,16 @@ def advance_activity_steps(
         and steps[-1].ended_at is None
         and steps[-1].name == phase
     ):
+        last = steps[-1]
+        if last.stack is None and stack in {"local", "cloud"}:
+            return (
+                *steps[:-1],
+                replace(
+                    last,
+                    stack=stack,
+                    workers=last.workers if last.workers is not None else workers,
+                ),
+            )
         return steps
     closed = _close_open_step(steps, now)
     if not running or phase not in _TIMED_PHASES:
@@ -168,6 +179,8 @@ class ProjectSummary:
     review_count: int = 0
     duration_seconds: float | None = None
     archived: bool = False
+    retries: int = 0
+    retries_done: int = 0
 
 
 @dataclass(frozen=True)
@@ -206,6 +219,7 @@ class FilmTeams:
     left_name: str
     right_name: str
     mine: str | None = None
+    uniforms: str = ""
 
 
 @dataclass(frozen=True)
@@ -223,6 +237,8 @@ class ProjectDetail:
     total_bytes: int | None = None
     spans: tuple[SpanRecord, ...] = ()
     archived: bool = False
+    retries: int = 0
+    retries_done: int = 0
 
 
 class Catalog(Protocol):
@@ -297,8 +313,15 @@ class Catalog(Protocol):
         duration_seconds: float | None,
         scanned_seconds: float,
         error: str | None,
+        retries: int | None = None,
+        retries_done: int | None = None,
     ) -> None:
-        """Record how far a long film has been downloaded and scanned."""
+        """Record how far a long film has been downloaded and scanned.
+
+        `retries` is how many stretches have to be read again. `retries_done`
+        is how many of those second looks have finished. Omit either to keep
+        the stored count.
+        """
 
     def describe_film(
         self,
@@ -576,6 +599,8 @@ class MemoryCatalog:
                 ),
                 duration_seconds=project.duration_seconds,
                 archived=project.archived,
+                retries=project.retries,
+                retries_done=project.retries_done,
             )
             for project in reversed(projects)
         ]
@@ -616,6 +641,8 @@ class MemoryCatalog:
         duration_seconds: float | None,
         scanned_seconds: float,
         error: str | None,
+        retries: int | None = None,
+        retries_done: int | None = None,
     ) -> None:
         with self._lock:
             current = self._require(project_id)
@@ -638,6 +665,10 @@ class MemoryCatalog:
                     downloaded_bytes=current.downloaded_bytes,
                     total_bytes=current.total_bytes,
                     archived=current.archived,
+                    retries=current.retries if retries is None else retries,
+                    retries_done=(
+                        current.retries_done if retries_done is None else retries_done
+                    ),
                 ),
             )
 
@@ -670,6 +701,8 @@ class MemoryCatalog:
                     downloaded_bytes=current.downloaded_bytes,
                     total_bytes=current.total_bytes,
                     archived=current.archived,
+                    retries=current.retries,
+                    retries_done=current.retries_done,
                 ),
             )
 
@@ -698,6 +731,8 @@ class MemoryCatalog:
                         current.total_bytes if total_bytes is None else total_bytes
                     ),
                     archived=current.archived,
+                    retries=current.retries,
+                    retries_done=current.retries_done,
                 ),
             )
 
@@ -891,6 +926,8 @@ class D1Catalog:
                    projects.scanned_seconds as scanned_seconds,
                    projects.duration_seconds as duration_seconds,
                    projects.archived as archived,
+                   projects.retries as retries,
+                   projects.retries_done as retries_done,
                    count(plays.play_number) as play_count,
                    (
                      select count(*)
@@ -919,6 +956,8 @@ class D1Catalog:
                 review_count=int(row.get("review_count") or 0),
                 duration_seconds=_optional_float(row.get("duration_seconds")),
                 archived=bool(row.get("archived")),
+                retries=int(row.get("retries") or 0),
+                retries_done=int(row.get("retries_done") or 0),
             )
             for row in rows
         ]
@@ -927,7 +966,7 @@ class D1Catalog:
         rows = self._query(
             """
             select id, name, youtube_url, status, duration_seconds, scanned_seconds, error,
-                   channel, downloaded_bytes, total_bytes
+                   channel, downloaded_bytes, total_bytes, retries, retries_done
             from projects where id = ?
             """,
             [project_id],
@@ -966,6 +1005,8 @@ class D1Catalog:
             downloaded_bytes=int(project.get("downloaded_bytes") or 0),
             total_bytes=_optional_int(project.get("total_bytes")),
             spans=tuple(_span_record(span) for span in spans),
+            retries=int(project.get("retries") or 0),
+            retries_done=int(project.get("retries_done") or 0),
         )
 
     def create_project(self, name: str, youtube_url: str | None) -> int:
@@ -1085,7 +1126,7 @@ class D1Catalog:
 
     def film_teams(self, project_id: int) -> FilmTeams | None:
         rows = self._query(
-            "select left_name, right_name, mine from teams where project_id = ?",
+            "select left_name, right_name, mine, uniforms from teams where project_id = ?",
             [project_id],
         )
         if not rows:
@@ -1095,7 +1136,9 @@ class D1Catalog:
         mine = str(raw_mine) if raw_mine else None
         if mine not in {"left", "right"}:
             mine = None
-        return FilmTeams(str(row["left_name"]), str(row["right_name"]), mine)
+        raw_uniforms = row.get("uniforms")
+        uniforms = str(raw_uniforms) if raw_uniforms else ""
+        return FilmTeams(str(row["left_name"]), str(row["right_name"]), mine, uniforms)
 
     def set_film_teams(self, project_id: int, teams: FilmTeams) -> None:
         if teams.mine not in {None, "left", "right"}:
@@ -1104,14 +1147,15 @@ class D1Catalog:
             raise CatalogError("That analysis is no longer available.")
         self._execute(
             """
-            insert into teams (project_id, left_name, right_name, mine)
-            values (?, ?, ?, ?)
+            insert into teams (project_id, left_name, right_name, mine, uniforms)
+            values (?, ?, ?, ?, ?)
             on conflict(project_id) do update set
                 left_name = excluded.left_name,
                 right_name = excluded.right_name,
-                mine = excluded.mine
+                mine = excluded.mine,
+                uniforms = excluded.uniforms
             """,
-            [project_id, teams.left_name, teams.right_name, teams.mine or ""],
+            [project_id, teams.left_name, teams.right_name, teams.mine or "", teams.uniforms],
         )
 
     def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> None:
@@ -1130,6 +1174,8 @@ class D1Catalog:
         duration_seconds: float | None,
         scanned_seconds: float,
         error: str | None,
+        retries: int | None = None,
+        retries_done: int | None = None,
     ) -> None:
         self._execute(
             """
@@ -1137,10 +1183,12 @@ class D1Catalog:
             set status = ?,
                 duration_seconds = coalesce(?, duration_seconds),
                 scanned_seconds = ?,
-                error = ?
+                error = ?,
+                retries = coalesce(?, retries),
+                retries_done = coalesce(?, retries_done)
             where id = ?
             """,
-            [status, duration_seconds, scanned_seconds, error, project_id],
+            [status, duration_seconds, scanned_seconds, error, retries, retries_done, project_id],
         )
 
     def describe_film(
@@ -1421,6 +1469,8 @@ class D1Catalog:
             "alter table projects add column downloaded_bytes integer not null default 0",
             "alter table projects add column total_bytes integer",
             "alter table projects add column archived integer not null default 0",
+            "alter table projects add column retries integer not null default 0",
+            "alter table projects add column retries_done integer not null default 0",
             "alter table plays add column family text not null default 'scrimmage'",
             "alter table plays add column play_type text",
             "alter table plays add column reviewed integer not null default 0",
@@ -1463,9 +1513,11 @@ class D1Catalog:
                 project_id integer primary key,
                 left_name text not null,
                 right_name text not null,
-                mine text not null
+                mine text not null,
+                uniforms text
             )
             """,
+            "alter table teams add column uniforms text",
         )
         for sql in statements:
             try:

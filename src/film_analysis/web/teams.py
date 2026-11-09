@@ -11,15 +11,77 @@ import tempfile
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from film_analysis.agents.errors import VideoAnalysisError
+from film_analysis.agents.play_boundaries import DEFAULT_MODEL
 from film_analysis.storage.catalog import PlayRecord
 
 _FALLBACK = ("#1c3f73", "#f2efe6")
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 _SCHNELL = "@cf/black-forest-labs/flux-1-schnell"
+_COLORS = frozenset(
+    {
+        "white",
+        "black",
+        "gray",
+        "gold",
+        "silver",
+        "blue",
+        "navy",
+        "red",
+        "green",
+        "purple",
+        "orange",
+        "yellow",
+        "maroon",
+        "cardinal",
+        "crimson",
+        "pink",
+        "brown",
+        "teal",
+    }
+)
+_MODS = frozenset({"dark", "light"})
+_PLAYER_PROMPT = (
+    "The reference photo is a football player from this team's game film. "
+    "Turn that player into one Madden-style video-game render. "
+    "Follow the player's build, stance, helmet, and uniform from the photo. "
+    "Stylized 3D football video-game player, helmet on, not a photograph, "
+    "standing full length, facing the camera, both feet on the ground, arms relaxed, "
+    "{jersey} jersey, {pants} pants, {helmet} helmet, shoulder pads, "
+    "only the number 00 on the jersey, no other text, cleats, "
+    "plain dark studio background, entire body from helmet to cleats in frame, "
+    "no field, no crowd, no badges."
+)
+_DETECT_PROMPT = (
+    'These frames are from the football film "{title}". '
+    "Two teams are in the plays. "
+    "The left team is lined up on the left side of the frame. "
+    "The right team is lined up on the right side of the frame. "
+    "Name each team the way a high school roster would: the school, then the mascot. "
+    "Use that shape: Johns Creek Gladiators, HF Wildcats, Walton Raiders. "
+    "Read jerseys, helmets, the scoreboard, and the field. "
+    "A short school name is right when that is what is written. "
+    "Describe jersey, pants, and helmet with color words only, "
+    "such as white, dark blue, or gold. "
+    "Do not put a logo or a jersey number in the color words. "
+    "Reply with JSON only, no markdown: "
+    '{"left":{"name":"","jersey":"","pants":"","helmet":""},'
+    '"right":{"name":"","jersey":"","pants":"","helmet":""}}'
+)
+
+
+@dataclass(frozen=True)
+class Uniform:
+    """The uniform the model saw for one side of the plays."""
+
+    name: str
+    jersey: str
+    pants: str
+    helmet: str
 
 
 def lineup_moment(plays: Sequence[PlayRecord]) -> float:
@@ -66,6 +128,39 @@ def split_lineup(video: Path, at: float) -> tuple[bytes, bytes]:
         return left.read_bytes(), right.read_bytes()
 
 
+def focus_player(still: bytes, side: str) -> bytes:
+    """Crop a lineup half toward the line of scrimmage, where that side stands."""
+
+    if shutil.which("ffmpeg") is None or not still.startswith(b"\xff\xd8\xff"):
+        return still
+    crop = "crop=iw*0.62:ih:iw*0.38:0" if side == "left" else "crop=iw*0.62:ih:0:0"
+    with tempfile.TemporaryDirectory() as folder:
+        source = Path(folder) / "still.jpg"
+        dest = Path(folder) / "players.jpg"
+        source.write_bytes(still)
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(source),
+                "-vf",
+                crop,
+                "-q:v",
+                "4",
+                str(dest),
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0 or not dest.is_file():
+            return still
+        focused = dest.read_bytes()
+    return focused if focused.startswith(b"\xff\xd8\xff") else still
+
+
 def dominant_colors(still: bytes) -> tuple[str, str]:
     """Jersey and pants colors from a lineup still, skipping grass and sky."""
 
@@ -93,32 +188,116 @@ def colors_from_pixels(pixels: Sequence[tuple[int, int, int]]) -> tuple[str, str
     return _hex(jersey), _FALLBACK[1] if pants is None else _hex(pants)
 
 
-def make_portrait(still: bytes, team_name: str) -> tuple[bytes, str]:
-    """A standing number-00 player in this team's uniform, or a drawing if that fails."""
+def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 3) -> list[bytes]:
+    """A lineup frame from each of the first scrimmage plays."""
 
-    jersey, pants = dominant_colors(still)
-    image = _flux(still, team_name, jersey, pants)
+    chosen = [play for play in plays if play.family == "scrimmage"] or list(plays)
+    frames: list[bytes] = []
+    for play in chosen[:limit]:
+        try:
+            frames.append(_frame(video, lineup_moment((play,))))
+        except (VideoAnalysisError, OSError):
+            continue
+    return frames
+
+
+def detect_uniforms(
+    frames: Sequence[bytes],
+    title: str,
+    left_still: bytes | None = None,
+    right_still: bytes | None = None,
+) -> tuple[Uniform, Uniform]:
+    """Ask the model which two teams are in the plays, then keep a color fallback."""
+
+    found = _ask_uniforms(frames, title)
+    if found is not None:
+        return found
+    return _color_uniforms(title, left_still, right_still)
+
+
+def parse_uniforms(reply: str, title: str) -> tuple[Uniform, Uniform] | None:
+    """Read the model's JSON into two uniforms, or return None when it is unusable."""
+
+    payload = _json_object(reply)
+    if payload is None:
+        return None
+    fallback = suggest_team_names(title)
+    left = _uniform_from_model(payload.get("left"), fallback[0])
+    right = _uniform_from_model(payload.get("right"), fallback[1])
+    if left is None or right is None:
+        return None
+    return left, right
+
+
+def encode_uniforms(left: Uniform, right: Uniform) -> str:
+    """Store both uniforms as one JSON string."""
+
+    return json.dumps(
+        {"left": _uniform_dict(left), "right": _uniform_dict(right)},
+        separators=(",", ":"),
+    )
+
+
+def decode_uniforms(value: str) -> tuple[Uniform, Uniform] | None:
+    """Restore uniforms saved with `encode_uniforms`."""
+
+    if not value:
+        return None
+    return parse_uniforms(value, "")
+
+
+def uniform_line(uniform: Uniform) -> str:
+    """One short line for the uniform the standing player will wear."""
+
+    return f"{uniform.jersey} jersey, {uniform.pants} pants, {uniform.helmet} helmet"
+
+
+def make_portrait(uniform: Uniform, still: bytes | None = None) -> tuple[bytes, str]:
+    """A Madden-style player based on this side of the film, wearing the uniform."""
+
+    image = _render(player_prompt(uniform), still)
     if image is not None:
         return image, ".jpg"
-    return roster_svg(jersey, pants), ".svg"
+    return roster_svg(_swatch(uniform.jersey), _swatch(uniform.pants)), ".svg"
 
 
-def player_prompt(team_name: str, jersey: str, pants: str) -> str:
-    """Ask for one full-body player whose uniform matches the lineup photo."""
+def player_prompt(uniform: Uniform) -> str:
+    """The one standing-player prompt. Only the uniform colors change."""
 
-    return (
-        "The reference photo shows this team's football uniform on the field. "
-        "Match its jersey, pants, and helmet colors. Do not copy the photo. "
-        "Create one original 3D American football player standing full length, "
-        "facing the camera, both feet on the ground, arms relaxed, "
-        "sports video-game create-a-player render, helmet on, shoulder pads, "
-        f"{color_words(jersey)} jersey, {color_words(pants)} pants, "
-        "helmet matching the jersey, only the number 00 on the jersey, "
-        "no other text, no patches, no badges, cleats, "
-        "plain dark studio background, entire body from helmet to cleats in frame, "
-        "no field, no crowd, no logos, no trademarks, no real person, "
-        f"uniform for the team named {team_name}."
-    )
+    jersey = color_phrase(uniform.jersey) or "white"
+    pants = color_phrase(uniform.pants) or "white"
+    helmet = color_phrase(uniform.helmet) or jersey
+    return _PLAYER_PROMPT.format(jersey=jersey, pants=pants, helmet=helmet)
+
+
+def color_phrase(value: str) -> str:
+    """Keep only color words, so a team name or hex code cannot enter the prompt."""
+
+    words = re.findall(r"[a-z]+", value.lower())
+    kept: list[str] = []
+    for word in words:
+        if word == "grey":
+            word = "gray"
+        if word in _COLORS or word in _MODS:
+            kept.append(word)
+        if len(kept) == 3:
+            break
+    if not any(word in _COLORS for word in kept):
+        return ""
+    return " ".join(kept)
+
+
+_TEAM_PROMPT = """
+The first photo is the left side of one high school football lineup.
+The second photo is the right side.
+Name each team the way a roster would: the school, then the mascot.
+Use that shape. Johns Creek Gladiators. HF Wildcats. Walton Raiders.
+Read the jerseys, helmets, scoreboard, and field.
+A short school name is right when that is what is written.
+Keep each name under 40 characters. The photos decide which team is on which side.
+The film title may help: {title}
+Reply with JSON only: {{"left": "school mascot", "right": "school mascot"}}
+""".strip()
 
 
 def suggest_team_names(
@@ -126,16 +305,41 @@ def suggest_team_names(
     left_still: bytes | None = None,
     right_still: bytes | None = None,
 ) -> tuple[str, str]:
-    """Name both sides from the film title, or from each lineup's uniform color."""
+    """Name both sides as a school and mascot, then fall back to the film title."""
 
+    if left_still and right_still:
+        named = _read_team_names(title, left_still, right_still)
+        if named is not None:
+            return named
     matchup = _matchup_names(title)
     if matchup is not None:
         return matchup
-    left = _uniform_name(left_still)
-    right = _uniform_name(right_still)
-    if left and right and left.casefold() != right.casefold():
-        return left, right
     return "Home", "Away"
+
+
+def names_from_reply(reply: str) -> tuple[str, str] | None:
+    """Read two school names from the model's JSON."""
+
+    text = reply.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        found = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if found is None:
+            return None
+        try:
+            payload = json.loads(found.group(0))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    left = _school_name(payload.get("left"))
+    right = _school_name(payload.get("right"))
+    if not left or not right or left.casefold() == right.casefold():
+        return None
+    return left, right
 
 
 def color_words(value: str) -> str:
@@ -277,40 +481,294 @@ def _clean_name(value: str) -> str:
     return text[:40]
 
 
-def _uniform_name(still: bytes | None) -> str:
-    if not still:
+def _school_name(value: object) -> str:
+    if not isinstance(value, str):
         return ""
-    jersey, _pants = dominant_colors(still)
-    words = color_words(jersey)
-    if words == "the color in the photo":
+    text = " ".join(value.replace("|", " ").split()).strip(" -–—:|.,")
+    if len(text) > 40:
+        text = text[:40].rsplit(" ", 1)[0].strip()
+    if len(text) < 2:
         return ""
-    return " ".join(part.capitalize() for part in words.split())
+    return text
+
+
+def _read_team_names(
+    title: str,
+    left_still: bytes,
+    right_still: bytes,
+) -> tuple[str, str] | None:
+    if not left_still.startswith(b"\xff\xd8\xff") or not right_still.startswith(b"\xff\xd8\xff"):
+        return None
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    hint = " ".join(title.split()).replace("{", "").replace("}", "")[:120] or "unknown"
+    content: list[dict[str, object]] = [
+        _image_block(left_still),
+        _image_block(right_still),
+        {"type": "text", "text": _TEAM_PROMPT.format(title=hint)},
+    ]
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=os.environ.get("FILM_ANALYSIS_MODEL", "claude-sonnet-5-5"),
+            max_tokens=200,
+            messages=[{"role": "user", "content": content}],
+        )
+    except Exception:
+        return None
+    texts = [
+        block.text
+        for block in getattr(message, "content", [])
+        if getattr(block, "type", None) == "text" and getattr(block, "text", "")
+    ]
+    return names_from_reply("\n".join(texts))
+
+
+def _image_block(jpeg: bytes) -> dict[str, object]:
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": base64.standard_b64encode(jpeg).decode("ascii"),
+        },
+    }
 
 
 def _safe_color(value: str, fallback: str) -> str:
     return value if _COLOR.fullmatch(value) else fallback
 
 
-def _flux(still: bytes, team_name: str, jersey: str, pants: str) -> bytes | None:
+def _frame(video: Path, at: float) -> bytes:
+    if shutil.which("ffmpeg") is None:
+        raise VideoAnalysisError("Could not read a lineup from that film.")
+    with tempfile.TemporaryDirectory() as folder:
+        dest = Path(folder) / "frame.jpg"
+        _run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                f"{max(0.0, at):.3f}",
+                "-i",
+                str(video),
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=640:-2",
+                "-q:v",
+                "4",
+                str(dest),
+            ]
+        )
+        return dest.read_bytes()
+
+
+def _ask_uniforms(frames: Sequence[bytes], title: str) -> tuple[Uniform, Uniform] | None:
+    jpegs = [frame for frame in frames if frame.startswith(b"\xff\xd8\xff")][:3]
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not jpegs or not api_key:
+        return None
+    hint = " ".join(title.split())[:120] or "this film"
+    content: list[dict[str, object]] = []
+    for index, frame in enumerate(jpegs, start=1):
+        content.append({"type": "text", "text": f"Play frame {index}"})
+        content.append(_image_block(frame))
+    content.append({"type": "text", "text": _DETECT_PROMPT.format(title=hint)})
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=os.environ.get("FILM_ANALYSIS_MODEL", DEFAULT_MODEL),
+            max_tokens=400,
+            messages=[{"role": "user", "content": content}],
+        )
+    except Exception:
+        return None
+    texts = [
+        block.text
+        for block in getattr(message, "content", [])
+        if getattr(block, "type", None) == "text" and getattr(block, "text", "")
+    ]
+    return parse_uniforms("\n".join(texts), title)
+
+
+def _color_uniforms(
+    title: str,
+    left_still: bytes | None,
+    right_still: bytes | None,
+) -> tuple[Uniform, Uniform]:
+    names = _matchup_names(title) or ("Home", "Away")
+    return (
+        _uniform_from_colors(names[0], left_still),
+        _uniform_from_colors(names[1], right_still),
+    )
+
+
+def _uniform_from_colors(name: str, still: bytes | None) -> Uniform:
+    jersey, pants = dominant_colors(still or b"")
+    shirt = color_words(jersey)
+    legs = color_words(pants)
+    if shirt == "the color in the photo":
+        shirt = "dark blue"
+    if legs == "the color in the photo":
+        legs = "white"
+    return Uniform(name, shirt, legs, shirt)
+
+
+def _uniform_from_model(value: object, fallback_name: str) -> Uniform | None:
+    if not isinstance(value, dict):
+        return None
+    jersey = color_phrase(str(value.get("jersey") or ""))
+    pants = color_phrase(str(value.get("pants") or ""))
+    helmet = color_phrase(str(value.get("helmet") or "")) or jersey
+    if not jersey or not pants:
+        return None
+    name = _school_name(value.get("name")) or fallback_name
+    return Uniform(name, jersey, pants, helmet)
+
+
+def _uniform_dict(uniform: Uniform) -> dict[str, str]:
+    return {
+        "name": uniform.name,
+        "jersey": uniform.jersey,
+        "pants": uniform.pants,
+        "helmet": uniform.helmet,
+    }
+
+
+def _json_object(reply: str) -> dict[str, object] | None:
+    text = reply.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        found = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if found is None:
+            return None
+        try:
+            payload = json.loads(found.group(0))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _swatch(phrase: str) -> str:
+    text = color_phrase(phrase)
+    if text in _SWATCH:
+        return _SWATCH[text]
+    last = text.split()[-1] if text else ""
+    return _SWATCH.get(last, _FALLBACK[0])
+
+
+_SWATCH = {
+    "white": "#f4f1ea",
+    "black": "#1a1a1a",
+    "gray": "#8a8a8a",
+    "gold": "#c0a020",
+    "silver": "#c0c4c8",
+    "blue": "#1c4fbf",
+    "navy": "#1c3f73",
+    "dark blue": "#1c3f73",
+    "light blue": "#8eb4e8",
+    "red": "#b42318",
+    "green": "#1f7a3a",
+    "purple": "#5b2a86",
+    "orange": "#d86b1f",
+    "yellow": "#e2c044",
+    "maroon": "#6e1d2a",
+}
+
+
+def _render(prompt: str, still: bytes | None = None) -> bytes | None:
     account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
     token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
     if not account or not token:
         return None
-    prompt = player_prompt(team_name, jersey, pants)
-    reference = _reference_jpeg(still)
+    reference = _reference_jpeg(still) if still else None
     if reference is not None:
-        image = _run_reference(account, token, prompt, reference)
+        body, content_type = _form(
+            [("prompt", prompt), ("width", "768"), ("height", "1280")],
+            reference,
+        )
+        image = _post_image(account, token, _KLEIN, body, content_type)
         if image is not None:
             return image
+    body, content_type = _fields([("prompt", prompt), ("width", "768"), ("height", "1280")])
+    image = _post_image(account, token, _KLEIN, body, content_type)
+    if image is not None:
+        return image
     return _run_prompt(account, token, prompt)
 
 
-def _run_reference(account: str, token: str, prompt: str, reference: bytes) -> bytes | None:
-    body, content_type = _form(
-        [("prompt", prompt), ("width", "768"), ("height", "1280")],
-        reference,
+def _form(fields: list[tuple[str, str]], reference: bytes) -> tuple[bytes, str]:
+    boundary = "film-player-boundary"
+    chunks: list[bytes] = []
+    for name, value in fields:
+        header = f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+        chunks.append(f"{header}{value}\r\n".encode())
+    chunks.append(
+        (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="input_image_0"; '
+            'filename="player.jpg"\r\nContent-Type: image/jpeg\r\n\r\n'
+        ).encode()
     )
-    return _post_image(account, token, _KLEIN, body, content_type)
+    chunks.append(reference)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+
+
+def _reference_jpeg(still: bytes) -> bytes | None:
+    """A portrait-sized JPEG of the lineup player, small enough to send with the prompt."""
+
+    if shutil.which("ffmpeg") is None or not still.startswith(b"\xff\xd8\xff"):
+        return None
+    with tempfile.TemporaryDirectory() as folder:
+        source = Path(folder) / "still.jpg"
+        dest = Path(folder) / "reference.jpg"
+        source.write_bytes(still)
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(source),
+                "-vf",
+                "scale=768:1280:force_original_aspect_ratio=decrease",
+                "-q:v",
+                "5",
+                str(dest),
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0 or not dest.is_file():
+            return None
+        data = dest.read_bytes()
+    if not data.startswith(b"\xff\xd8\xff") or len(data) > 1_500_000:
+        return None
+    return data
+
+
+def _fields(fields: list[tuple[str, str]]) -> tuple[bytes, str]:
+    boundary = "film-player-boundary"
+    chunks: list[bytes] = []
+    for name, value in fields:
+        header = f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+        chunks.append(f"{header}{value}\r\n".encode())
+    chunks.append(f"--{boundary}--\r\n".encode())
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
 def _run_prompt(account: str, token: str, prompt: str) -> bytes | None:
@@ -338,57 +796,6 @@ def _post_image(
     except (OSError, urllib.error.URLError, json.JSONDecodeError, UnicodeError, TimeoutError):
         return None
     return _image_bytes(payload)
-
-
-def _form(fields: list[tuple[str, str]], reference: bytes) -> tuple[bytes, str]:
-    boundary = "film-player-boundary"
-    chunks: list[bytes] = []
-    for name, value in fields:
-        header = f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
-        chunks.append(f"{header}{value}\r\n".encode())
-    file_header = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="input_image_0"; filename="lineup.jpg"\r\n'
-        "Content-Type: image/jpeg\r\n\r\n"
-    )
-    chunks.append(file_header.encode())
-    chunks.append(reference)
-    chunks.append(f"\r\n--{boundary}--\r\n".encode())
-    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
-
-
-def _reference_jpeg(still: bytes) -> bytes | None:
-    """Shrink the lineup still so the image model can use it as a uniform reference."""
-
-    if shutil.which("ffmpeg") is None or not still:
-        return None
-    with tempfile.TemporaryDirectory() as folder:
-        source = Path(folder) / "still.jpg"
-        dest = Path(folder) / "reference.jpg"
-        source.write_bytes(still)
-        result = subprocess.run(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                str(source),
-                "-vf",
-                "scale=480:480:force_original_aspect_ratio=decrease",
-                "-q:v",
-                "4",
-                str(dest),
-            ],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0 or not dest.is_file():
-            return None
-        data = dest.read_bytes()
-    if not data.startswith(b"\xff\xd8\xff") or len(data) > 1_500_000:
-        return None
-    return data
 
 
 def _image_bytes(payload: object) -> bytes | None:
