@@ -8,6 +8,9 @@ from pathlib import Path
 from film_analysis.agents.errors import VideoAnalysisError, tool_failure
 
 _INTERVAL = 1.0
+# 1280 is the width of 720p, so the model can still read a formation and the ball.
+FRAME_FILTER = "fps=1,scale=1280:-2"
+FRAME_QUALITY = "4"
 
 
 def video_duration(video_path: Path) -> float:
@@ -35,9 +38,9 @@ def extract_window(video_path: Path, start: float, seconds: float) -> list[tuple
                 "-t",
                 f"{max(0.1, seconds):.3f}",
                 "-vf",
-                "fps=1,scale=512:-2",
+                FRAME_FILTER,
                 "-q:v",
-                "8",
+                FRAME_QUALITY,
                 pattern,
             ],
             check=False,
@@ -72,9 +75,9 @@ def extract_frames(video_path: Path) -> list[tuple[float, bytes]]:
                 "-i",
                 str(video_path),
                 "-vf",
-                "fps=1,scale=512:-2",
+                FRAME_FILTER,
                 "-q:v",
-                "8",
+                FRAME_QUALITY,
                 pattern,
             ],
             check=False,

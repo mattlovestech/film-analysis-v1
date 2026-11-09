@@ -105,14 +105,37 @@ export default {
       return new Response("Not found", { status: 404 });
     }
 
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(request) });
+    }
     const headers = new Headers(request.headers);
     headers.delete("x-film-worker-url");
     headers.set("x-film-worker-url", url.origin);
     headers.set("x-film-delegate", "1");
     const website = await env.WEBSITE.getByName("web").fetch(new Request(request, { headers }));
-    return startFilm(env, website);
+    return allowLocalPage(request, await startFilm(env, website));
   },
 };
+
+function corsHeaders(request: Request): Headers {
+  const headers = new Headers();
+  const origin = request.headers.get("Origin") || "";
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    headers.set("Access-Control-Allow-Headers", "Content-Type");
+    headers.set("Vary", "Origin");
+  }
+  return headers;
+}
+
+function allowLocalPage(request: Request, response: Response): Response {
+  const extra = corsHeaders(request);
+  if (!extra.has("Access-Control-Allow-Origin")) return response;
+  const headers = new Headers(response.headers);
+  extra.forEach((value, key) => headers.set(key, value));
+  return new Response(response.body, { status: response.status, headers });
+}
 
 async function startFilm(env: Env, website: Response): Promise<Response> {
   const projectId = website.headers.get("x-film-start");

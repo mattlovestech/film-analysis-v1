@@ -42,7 +42,7 @@ def test_watch_short_and_embed_links_canonicalize() -> None:
     assert canonical_youtube_url("https://m.youtube.com/watch?v=abcdefghijk") == expected
 
 
-def test_stream_choice_prefers_h264_at_or_below_360p() -> None:
+def test_stream_choice_prefers_h264_at_or_below_720p() -> None:
     chosen = _select_stream(
         {
             "adaptiveFormats": [
@@ -59,20 +59,20 @@ def test_stream_choice_prefers_h264_at_or_below_360p() -> None:
                 },
                 {
                     "type": 'video/mp4; codecs="av01"',
-                    "qualityLabel": "360p",
-                    "url": "https://cdn/av1-360",
+                    "qualityLabel": "720p",
+                    "url": "https://cdn/av1-720",
                 },
                 {
                     "type": 'video/mp4; codecs="avc1.4d401e"',
-                    "qualityLabel": "360p",
-                    "url": "https://cdn/360",
+                    "qualityLabel": "720p",
+                    "url": "https://cdn/720",
                 },
-                {"type": "audio/mp4", "qualityLabel": "360p", "url": "https://cdn/audio"},
+                {"type": "audio/mp4", "qualityLabel": "720p", "url": "https://cdn/audio"},
             ]
         }
     )
 
-    assert chosen == "https://cdn/360"
+    assert chosen == "https://cdn/720"
 
 
 def test_a_stream_reports_each_chunk(tmp_path: Path) -> None:

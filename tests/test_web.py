@@ -102,6 +102,7 @@ def test_page_offers_a_video_upload() -> None:
     assert ">Projects<" in response.text
     assert "Each film is cut into plays you can study on their own." in response.text
     assert 'id="project-filters"' in response.text
+    assert "Put back" in response.text
     assert 'id="refresh-analyses"' in response.text
     assert 'href="/activity"' in response.text
     assert 'href="/settings"' in response.text
@@ -120,7 +121,14 @@ def test_page_offers_a_video_upload() -> None:
     assert "Where jobs run" in response.text
     assert "Jobs run on this computer." in response.text
     assert "Requests go to Cloudflare." in response.text
+    assert "This page stays here. Starting a film sends that job to Cloudflare." in response.text
+    assert "This film will run on Cloudflare." in response.text
+    assert "Starting on Cloudflare" in response.text
+    assert "location.assign" not in response.text
     assert "Cloud · 1 worker" in response.text
+    assert 'id="teams"' in response.text
+    assert "My team" in response.text
+    assert "Roster portraits use each team's colors." in response.text
     library = client.get("/projects")
     assert library.status_code == 200
     assert ">Projects<" in library.text
@@ -219,6 +227,7 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
             "scanned": 4.0,
             "review_count": 0,
             "duration": 4.0,
+            "archived": False,
         }
     ]
 
@@ -230,6 +239,43 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
     listed = client.get("/api/projects").json()
     assert [item["project"] for item in listed] == [2, 1]
     assert client.get("/projects/1/plays/1").content == b"fake-video"
+
+
+def test_archive_takes_a_film_off_the_shelf_until_it_is_put_back(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    kept = store.create_project("Kept", None)
+    away = store.create_project("Away", None)
+    for project_id in (kept, away):
+        store.set_progress(
+            project_id,
+            status="ready",
+            duration_seconds=10,
+            scanned_seconds=10,
+            error=None,
+        )
+    client = TestClient(create_app(agent=_Agent(), store=store))
+
+    archived = client.post(f"/api/projects/{away}/archive", json={"archived": True})
+    assert archived.status_code == 200
+    assert archived.json() == {"project": away, "archived": True}
+    by_id = {item["project"]: item["archived"] for item in client.get("/api/projects").json()}
+    assert by_id == {kept: False, away: True}
+    store.set_progress(
+        away,
+        status="ready",
+        duration_seconds=12,
+        scanned_seconds=12,
+        error=None,
+    )
+    assert client.get("/api/projects").json()[0]["archived"] is True
+    jobs = {job["project"] for job in client.get("/api/activity").json()["jobs"]}
+    assert away not in jobs
+    assert kept in jobs
+
+    restored = client.post(f"/api/projects/{away}/archive", json={"archived": False})
+    assert restored.status_code == 200
+    assert restored.json()["archived"] is False
+    assert client.post("/api/projects/99/archive", json={"archived": True}).status_code == 404
 
 
 def test_youtube_link_saves_a_project() -> None:
@@ -541,6 +587,68 @@ def _saved_download(url: str, directory: Path) -> Path:
     path = directory / "film.mp4"
     path.write_bytes(b"clip-bytes")
     return path
+
+
+def test_a_job_started_on_this_page_is_sent_to_cloudflare(monkeypatch) -> None:
+    class _Upstream:
+        status = 200
+        headers = {"Content-Type": "application/json", "Content-Length": "2"}
+
+        def __init__(self) -> None:
+            self._body = b'{"project": 9, "status": "downloading"}'
+
+        def read(self, _size: int = -1) -> bytes:
+            data, self._body = self._body, b""
+            return data
+
+        def close(self) -> None:
+            return None
+
+    def _open(request, timeout=300):
+        assert timeout == 300
+        assert request.get_method() == "POST"
+        assert request.full_url == (
+            "https://film-analysis.broad-night-d47d.workers.dev/analyze"
+        )
+        assert b"abcdefghijk" in request.data
+        return _Upstream()
+
+    monkeypatch.setattr("film_analysis.web.app.urllib.request.urlopen", _open)
+    client = TestClient(create_app(agent=_Agent()))
+
+    response = client.post("/via-cloud/analyze", data={"youtube": "https://youtu.be/abcdefghijk"})
+
+    assert response.status_code == 200
+    assert response.json()["project"] == 9
+    assert response.json()["status"] == "downloading"
+
+
+def test_the_local_page_forwards_a_cloud_request(monkeypatch) -> None:
+    class _Upstream:
+        status = 200
+        headers = {"Content-Type": "application/json", "Content-Length": "2"}
+
+        def read(self, _size: int = -1) -> bytes:
+            if self.headers["Content-Length"] == "0":
+                return b""
+            self.headers["Content-Length"] = "0"
+            return b"{}"
+
+        def close(self) -> None:
+            return None
+
+    def _open(request, timeout=120):
+        del timeout
+        assert request.full_url == "https://film-analysis.broad-night-d47d.workers.dev/api/settings"
+        return _Upstream()
+
+    monkeypatch.setattr("film_analysis.web.app.urllib.request.urlopen", _open)
+    client = TestClient(create_app(agent=_Agent()))
+
+    response = client.get("/via-cloud/api/settings")
+
+    assert response.status_code == 200
+    assert response.json() == {}
 
 
 def test_worker_setting_is_saved_and_reported(tmp_path: Path) -> None:

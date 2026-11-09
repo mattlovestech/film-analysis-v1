@@ -1,5 +1,6 @@
 """Serve the upload page and run the play-boundary agent."""
 
+import asyncio
 import contextlib
 import inspect
 import logging
@@ -8,12 +9,14 @@ import shutil
 import tempfile
 import threading
 import traceback
-from collections.abc import Callable
+import urllib.error
+import urllib.request
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
@@ -37,9 +40,11 @@ from film_analysis.agents.youtube import (
 )
 from film_analysis.domain.models import PlayType
 from film_analysis.storage.catalog import (
+    TEAM_IMAGE_KINDS,
     ActivityStep,
     Catalog,
     CatalogError,
+    FilmTeams,
     MemoryCatalog,
     PlayRecord,
     ProjectDetail,
@@ -49,6 +54,7 @@ from film_analysis.storage.catalog import (
 )
 from film_analysis.web.cloud import cloud_target
 from film_analysis.web.playback import cut_clip
+from film_analysis.web.teams import lineup_moment, make_portrait, split_lineup
 
 _PAGE = Path(__file__).with_name("index.html")
 _DEFAULT_MAX_BYTES = 500 * 1024 * 1024
@@ -112,6 +118,31 @@ class _WorkerSetting(BaseModel):
         return self
 
 
+class _TeamNames(BaseModel):
+    left_name: str
+    right_name: str
+    mine: str
+
+    @field_validator("left_name", "right_name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        text = " ".join(value.split())
+        if not text or len(text) > 40:
+            raise ValueError("Use a team name of 40 characters or fewer.")
+        return text
+
+    @field_validator("mine")
+    @classmethod
+    def _side(cls, value: str) -> str:
+        if value not in {"left", "right"}:
+            raise ValueError("Mark which side is your team.")
+        return value
+
+
+class _ArchiveFlag(BaseModel):
+    archived: bool
+
+
 class _PlayLabel(BaseModel):
     play_type: str | None = None
     reviewed: bool | None = None
@@ -163,6 +194,8 @@ def create_app(
     frames: _Frames | None = None,
     workers: int | None = None,
     details: _Details | None = None,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]] | None = None,
+    portrait: Callable[[bytes, str], tuple[bytes, str]] | None = None,
 ) -> FastAPI:
     """Build the upload app. Pass an agent in tests; otherwise read it from the environment."""
 
@@ -176,6 +209,8 @@ def create_app(
     sample = frames or extract_window
     pool = 4 if workers is None else workers
     lookup = youtube_details if details is None else details
+    draw_lineup = split_lineup if lineup is None else lineup
+    draw_portrait = make_portrait if portrait is None else portrait
     if store is None:
         storage = tempfile.TemporaryDirectory(prefix="film-analysis-")
         catalog: Catalog = MemoryCatalog(Path(storage.name))
@@ -214,6 +249,37 @@ def create_app(
     def settings_page() -> HTMLResponse:
         return _page()
 
+    @app.api_route("/via-cloud/{path:path}", methods=["GET", "POST", "HEAD"])
+    async def via_cloud(path: str, request: Request) -> StreamingResponse:
+        """Send one request from this computer's page to the Cloudflare site."""
+
+        body = await request.body()
+        forwarded = {
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() in {"content-type", "range", "accept", "user-agent"}
+        }
+        status, headers, upstream = await asyncio.to_thread(
+            _open_cloud,
+            request.method,
+            path,
+            request.url.query,
+            forwarded,
+            body,
+        )
+
+        def chunks() -> Iterator[bytes]:
+            try:
+                while True:
+                    block = upstream.read(256 * 1024)
+                    if not block:
+                        break
+                    yield block
+            finally:
+                upstream.close()
+
+        return StreamingResponse(chunks(), status_code=status, headers=headers)
+
     @app.get("/projects/{project_id}")
     def project_page(project_id: int) -> HTMLResponse:
         del project_id
@@ -246,6 +312,7 @@ def create_app(
                 "scanned": item.scanned_seconds,
                 "review_count": item.review_count,
                 "duration": item.duration_seconds,
+                "archived": item.archived,
             }
             for item in saved
         ]
@@ -266,6 +333,8 @@ def create_app(
             summary = by_id.get(item.project)
             if summary is None:
                 continue
+            if summary.archived and not (item.running or item.project in active):
+                continue
             phase, working = _activity_state(item.phase, item.running, item.project in active)
             dated.append(
                 (
@@ -280,7 +349,7 @@ def create_app(
                 )
             )
         for summary in projects:
-            if summary.project in seen or summary.status != "ready":
+            if summary.archived or summary.project in seen or summary.status != "ready":
                 continue
             stamp = summary.created_at or ""
             dated.append(
@@ -323,7 +392,68 @@ def create_app(
             saved,
             running=_running(running, running_lock, project_id),
             steps=_saved_steps(catalog, project_id),
+            catalog=catalog,
         )
+
+    @app.post("/api/projects/{project_id}/teams/stills")
+    def team_stills(project_id: int) -> dict[str, object]:
+        saved = _require_project(catalog, project_id)
+        _require_identified(saved)
+        _store_lineup(catalog, saved, draw_lineup)
+        return _project_payload(
+            saved,
+            running=_running(running, running_lock, project_id),
+            steps=_saved_steps(catalog, project_id),
+            catalog=catalog,
+        )
+
+    @app.post("/api/projects/{project_id}/teams")
+    def save_teams(project_id: int, body: _TeamNames) -> dict[str, object]:
+        saved = _require_project(catalog, project_id)
+        _require_identified(saved)
+        try:
+            needs_lineup = catalog.team_image(project_id, "left") is None
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if needs_lineup:
+            _store_lineup(catalog, saved, draw_lineup)
+        _store_portraits(catalog, project_id, body, draw_portrait)
+        try:
+            catalog.set_film_teams(
+                project_id,
+                FilmTeams(body.left_name, body.right_name, body.mine),
+            )
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        return _project_payload(
+            saved,
+            running=_running(running, running_lock, project_id),
+            steps=_saved_steps(catalog, project_id),
+            catalog=catalog,
+        )
+
+    @app.get("/projects/{project_id}/teams/{kind}")
+    def team_picture(project_id: int, kind: str) -> FileResponse:
+        if kind not in TEAM_IMAGE_KINDS:
+            raise HTTPException(status_code=404, detail="That picture is not available.")
+        try:
+            path = catalog.team_image(project_id, kind)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="That picture is not available.")
+        media = "image/svg+xml" if path.suffix == ".svg" else "image/jpeg"
+        return FileResponse(path, media_type=media)
+
+    @app.post("/api/projects/{project_id}/archive")
+    def archive_project(project_id: int, body: _ArchiveFlag) -> dict[str, object]:
+        try:
+            catalog.set_archived(project_id, body.archived)
+        except CatalogError as error:
+            missing = "not found" in str(error).lower()
+            detail = "That analysis is no longer available." if missing else str(error)
+            raise HTTPException(status_code=404 if missing else 502, detail=detail) from error
+        return {"project": project_id, "archived": body.archived}
 
     @app.post("/api/projects/{project_id}/retry")
     def retry(project_id: int, request: Request) -> dict[str, object]:
@@ -393,7 +523,7 @@ def create_app(
         detail = catalog.get_project(project_id)
         if detail is None:
             raise HTTPException(status_code=502, detail="Could not save that analysis.")
-        return _project_payload(detail, running=True)
+        return _project_payload(detail, running=True, catalog=catalog)
 
     @app.get("/projects/{project_id}/source")
     def source(project_id: int) -> FileResponse:
@@ -445,6 +575,7 @@ def create_app(
             saved,
             running=_running(running, running_lock, project_id),
             steps=_saved_steps(catalog, project_id),
+            catalog=catalog,
         )
 
     @app.get("/api/plays/{uid}")
@@ -612,7 +743,7 @@ def create_app(
         detail = catalog.get_project(project_id)
         if detail is None:
             raise HTTPException(status_code=502, detail="Could not save that analysis.")
-        return _project_payload(detail, running=True)
+        return _project_payload(detail, running=True, catalog=catalog)
 
     return app
 
@@ -626,6 +757,32 @@ def main() -> None:
     host = os.environ.get("FILM_ANALYSIS_HOST", "127.0.0.1")
     port = int(os.environ.get("FILM_ANALYSIS_PORT") or os.environ.get("PORT") or "8000")
     uvicorn.run(create_app(store=catalog_from_env()), host=host, port=port)
+
+
+_CLOUD_ORIGIN = "https://film-analysis.broad-night-d47d.workers.dev"
+
+
+def _open_cloud(
+    method: str,
+    path: str,
+    query: str,
+    headers: dict[str, str],
+    body: bytes,
+) -> tuple[int, dict[str, str], object]:
+    url = f"{_CLOUD_ORIGIN}/{path.lstrip('/')}"
+    if query:
+        url = f"{url}?{query}"
+    outgoing = urllib.request.Request(url, data=body or None, headers=headers, method=method)
+    try:
+        upstream = urllib.request.urlopen(outgoing, timeout=300)
+    except urllib.error.HTTPError as error:
+        upstream = error
+    kept = {}
+    for key in ("Content-Type", "Content-Range", "Accept-Ranges"):
+        value = upstream.headers.get(key)
+        if value:
+            kept[key] = value
+    return upstream.status, kept, upstream
 
 
 def _page() -> HTMLResponse:
@@ -989,7 +1146,7 @@ def _delegate(catalog: Catalog, project_id: int, youtube: str | None, workers: i
     if detail is None:
         raise HTTPException(status_code=502, detail="Could not save that analysis.")
     return JSONResponse(
-        _project_payload(detail, running=True),
+        _project_payload(detail, running=True, catalog=catalog),
         headers={
             "x-film-start": str(project_id),
             "x-film-youtube": youtube or "",
@@ -1334,11 +1491,112 @@ def _stamp(value: str) -> datetime | None:
     return parsed
 
 
+def _require_project(catalog: Catalog, project_id: int) -> ProjectDetail:
+    try:
+        saved = catalog.get_project(project_id)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if saved is None:
+        raise HTTPException(status_code=404, detail="That analysis is no longer available.")
+    return saved
+
+
+def _require_identified(project: ProjectDetail) -> None:
+    if project.status != "ready" or not project.plays:
+        raise HTTPException(
+            status_code=400,
+            detail="Name the teams after the plays are identified.",
+        )
+
+
+def _lineup_video(catalog: Catalog, project: ProjectDetail) -> tuple[Path, float]:
+    try:
+        video = catalog.source_file(project.project)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if video is not None and video.is_file():
+        return video, lineup_moment(project.plays)
+    clip = catalog.clip_file(project.project, project.plays[0].play_number)
+    if clip is None:
+        raise HTTPException(status_code=400, detail="Could not read a lineup from that film.")
+    length = max(0.0, project.plays[0].end_seconds - project.plays[0].start_seconds)
+    return clip, min(0.6, length / 2)
+
+
+def _store_lineup(
+    catalog: Catalog,
+    project: ProjectDetail,
+    draw: Callable[[Path, float], tuple[bytes, bytes]],
+) -> None:
+    video, at = _lineup_video(catalog, project)
+    try:
+        left, right = draw(video, at)
+    except (VideoAnalysisError, OSError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read a lineup from that film.",
+        ) from error
+    if not left or not right:
+        raise HTTPException(status_code=400, detail="Could not read a lineup from that film.")
+    try:
+        catalog.save_team_image(project.project, "left", left, ".jpg")
+        catalog.save_team_image(project.project, "right", right, ".jpg")
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+def _store_portraits(
+    catalog: Catalog,
+    project_id: int,
+    body: _TeamNames,
+    draw: Callable[[bytes, str], tuple[bytes, str]],
+) -> None:
+    try:
+        for side, name in (("left", body.left_name), ("right", body.right_name)):
+            still = catalog.team_image(project_id, side)
+            if still is None or not still.is_file():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Could not read a lineup from that film.",
+                )
+            image, suffix = draw(still.read_bytes(), name)
+            catalog.save_team_image(project_id, f"{side}-player", image, suffix)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
+    try:
+        saved = catalog.film_teams(project_id)
+        pictures = {kind: catalog.team_image(project_id, kind) for kind in TEAM_IMAGE_KINDS}
+    except CatalogError:
+        return None
+
+    def url(kind: str) -> str | None:
+        path = pictures[kind]
+        if path is None or not path.is_file():
+            return None
+        return f"/projects/{project_id}/teams/{kind}?v={int(path.stat().st_mtime)}"
+
+    if saved is None and url("left") is None and url("right") is None:
+        return None
+    return {
+        "left_name": "" if saved is None else saved.left_name,
+        "right_name": "" if saved is None else saved.right_name,
+        "mine": None if saved is None else saved.mine,
+        "left_still": url("left"),
+        "right_still": url("right"),
+        "left_player": url("left-player"),
+        "right_player": url("right-player"),
+    }
+
+
 def _project_payload(
     project: ProjectDetail,
     *,
     running: bool = False,
     steps: tuple[ActivityStep, ...] = (),
+    catalog: Catalog | None = None,
 ) -> dict[str, object]:
     return {
         "running": running,
@@ -1354,6 +1612,7 @@ def _project_payload(
         "downloaded": project.downloaded_bytes,
         "total_bytes": project.total_bytes,
         "steps": _step_times(steps),
+        "teams": None if catalog is None else _teams_view(catalog, project.project),
         "plays": [_play_summary(project.project, play) for play in _ordered_plays(project)],
         "reviews": [
             {
@@ -1490,7 +1749,7 @@ def _analyze_saved(
     detail = catalog.get_project(project_id)
     if detail is None:
         raise HTTPException(status_code=502, detail="Could not save that analysis.")
-    return _project_payload(detail, running=True)
+    return _project_payload(detail, running=True, catalog=catalog)
 
 
 def _has_upload(video: UploadFile | None) -> bool:

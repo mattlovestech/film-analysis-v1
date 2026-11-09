@@ -20,7 +20,7 @@ _PATH_KINDS = {"embed", "shorts", "live", "v"}
 _UA = "Mozilla/5.0"
 _INSTANCES = "https://api.invidious.io/instances.json?sort_by=health"
 _KNOWN_INSTANCE = "https://yt.chocolatemoo53.com"
-_MAX_HEIGHT = 360
+_MAX_HEIGHT = 720
 _PARTS = 16
 _PART_FLOOR = 4 * 1024 * 1024
 _BUFFER = 1024 * 1024
@@ -138,7 +138,7 @@ def download_youtube(
         raise VideoAnalysisError("yt-dlp is required to fetch a YouTube video.") from error
 
     options = {
-        "format": "bv*[height<=360][ext=mp4]/bv*[height<=360]/bv*[height<=480]/bv*",
+        "format": "bv*[height<=720][ext=mp4]/bv*[height<=720]/bv*[height<=480][ext=mp4]/bv*",
         "outtmpl": str(directory / "film.%(ext)s"),
         "noplaylist": True,
         "quiet": True,

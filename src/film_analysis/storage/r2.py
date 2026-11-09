@@ -1,11 +1,13 @@
 """Play clips in a Cloudflare R2 bucket."""
 
+import contextlib
 import shutil
+import tempfile
 from pathlib import Path
 
 from botocore.exceptions import ClientError
 
-from film_analysis.storage.catalog import CatalogError
+from film_analysis.storage.catalog import TEAM_IMAGE_KINDS, CatalogError, team_media
 
 
 class R2Clips:
@@ -90,13 +92,35 @@ class R2Clips:
             token = page.get("NextContinuationToken")
         shutil.rmtree(self.cache / "projects" / str(project_id), ignore_errors=True)
 
-    def _put(self, source: Path, key: str) -> str:
+    def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> str:
+        cleaned, content_type = team_media(kind, suffix)
+        key = f"projects/{project_id}/teams/{kind}{cleaned}"
+        other = ".svg" if cleaned == ".jpg" else ".jpg"
+        other_key = f"projects/{project_id}/teams/{kind}{other}"
+        with contextlib.suppress(ClientError):
+            self._client.delete_object(Bucket=self.bucket, Key=other_key)
+        (self.cache / other_key).unlink(missing_ok=True)
+        with tempfile.NamedTemporaryFile(suffix=cleaned) as tmp:
+            tmp.write(data)
+            tmp.flush()
+            return self._put(Path(tmp.name), key, content_type)
+
+    def team_image(self, project_id: int, kind: str) -> Path | None:
+        if kind not in TEAM_IMAGE_KINDS:
+            return None
+        for suffix in (".jpg", ".svg"):
+            path = self._local(f"projects/{project_id}/teams/{kind}{suffix}")
+            if path.is_file() and path.stat().st_size:
+                return path
+        return None
+
+    def _put(self, source: Path, key: str, content_type: str = "video/mp4") -> str:
         try:
             self._client.upload_file(
                 str(source),
                 self.bucket,
                 key,
-                ExtraArgs={"ContentType": "video/mp4"},
+                ExtraArgs={"ContentType": content_type},
             )
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code", "")

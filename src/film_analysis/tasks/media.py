@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from film_analysis.agents.errors import VideoAnalysisError
+from film_analysis.agents.frames import FRAME_FILTER, FRAME_QUALITY
 
 
 def extract_window_url(url: str, start: float, seconds: float) -> list[tuple[float, bytes]]:
@@ -27,9 +28,9 @@ def extract_window_url(url: str, start: float, seconds: float) -> list[tuple[flo
                 "-t",
                 f"{max(0.1, seconds):.3f}",
                 "-vf",
-                "fps=1,scale=512:-2",
+                FRAME_FILTER,
                 "-q:v",
-                "8",
+                FRAME_QUALITY,
                 pattern,
             ],
             check=False,

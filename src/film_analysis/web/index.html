@@ -171,6 +171,14 @@
       font-weight: 650;
     }
     button.retry:hover:not(:disabled) { filter: none; color: #409cff; }
+    button.archive {
+      padding: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+    }
+    button.archive:hover:not(:disabled) { filter: none; color: var(--ink); }
     #status { margin: 0.85rem 0 0; color: var(--ink); font-weight: 650; }
     #status:empty { display: none; }
     #status.error { color: #ff9b90; }
@@ -317,7 +325,15 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    #projects .retry { justify-self: start; margin-top: 0.35rem; }
+    #projects .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.15rem 0.85rem;
+      margin-top: 0.45rem;
+    }
+    #projects .actions .retry,
+    #projects .actions .archive { margin-top: 0; }
     #projects .track {
       display: block;
       height: 4px;
@@ -951,6 +967,71 @@
       letter-spacing: -0.04em;
     }
     #download-bytes { font-size: 0.95rem; color: var(--muted); }
+    #teams { margin-top: 1.75rem; }
+    #teams .lead { margin: 0.35rem 0 0.9rem; }
+    .team-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+    }
+    .team-card {
+      display: grid;
+      gap: 0.65rem;
+      align-content: start;
+      padding: 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .team-kicker {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .team-card img {
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+      border-radius: 8px;
+      background: #111;
+    }
+    .team-card img.player {
+      aspect-ratio: 3 / 4;
+      object-fit: contain;
+      background: #14161a;
+    }
+    .team-card label {
+      display: grid;
+      gap: 0.35rem;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .team-card input {
+      width: 100%;
+      padding: 0.5rem 0.6rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #111;
+      color: var(--ink);
+      font: inherit;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .team-card button.mine[aria-pressed="true"] {
+      background: var(--gold);
+      color: #111;
+    }
+    #teams-save { margin-top: 0.85rem; }
+    #teams-error { color: #ff9f0a; }
+    @media (max-width: 700px) {
+      .team-row { grid-template-columns: 1fr; }
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes download-slide {
       from { transform: translateX(-130%); }
@@ -973,6 +1054,7 @@
     <section id="composer">
       <h2>New analysis</h2>
       <p class="lead">Paste a YouTube link. The film is cut into plays.</p>
+      <p class="lead" id="start-place">This film will run on this computer.</p>
       <form id="upload">
         <div class="source primary">
           <label for="youtube">YouTube link</label>
@@ -1075,6 +1157,33 @@
       <ol id="film-steps" class="stages" hidden></ol>
       <a id="film-url" hidden></a>
       <p id="outcome" class="lead" hidden></p>
+      <section id="teams" hidden>
+        <h2>Teams</h2>
+        <p id="teams-note" class="lead">Name each side, then mark your team.</p>
+        <div class="team-row">
+          <article class="team-card">
+            <p class="team-kicker">Left side</p>
+            <img id="team-left-still" alt="Left side of the lineup" hidden>
+            <img id="team-left-player" class="player" alt="Left team player standing in uniform, number 00" hidden>
+            <label for="team-left-name">Team name
+              <input id="team-left-name" maxlength="40" autocomplete="off">
+            </label>
+            <button id="team-left-mine" class="mine" type="button" data-side="left" aria-pressed="false">My team</button>
+          </article>
+          <article class="team-card">
+            <p class="team-kicker">Right side</p>
+            <img id="team-right-still" alt="Right side of the lineup" hidden>
+            <img id="team-right-player" class="player" alt="Right team roster portrait, number 00" hidden>
+            <label for="team-right-name">Team name
+              <input id="team-right-name" maxlength="40" autocomplete="off">
+            </label>
+            <button id="team-right-mine" class="mine" type="button" data-side="right" aria-pressed="false">My team</button>
+          </article>
+        </div>
+        <p id="teams-error" class="lead" hidden></p>
+        <button id="teams-retry" class="retry" type="button" hidden>Read the lineup again</button>
+        <button id="teams-save" type="button">Save teams</button>
+      </section>
       <h2 id="plays-heading" hidden>Plays</h2>
       <ul id="results"></ul>
       <h2 id="reviews-heading" hidden>Needs a look</h2>
@@ -1102,6 +1211,11 @@
     const outcome = document.querySelector("#outcome");
     const reviewsHeading = document.querySelector("#reviews-heading");
     const reviewsLead = document.querySelector("#reviews-lead");
+    const teamsSection = document.querySelector("#teams");
+    const teamsNote = document.querySelector("#teams-note");
+    const teamsError = document.querySelector("#teams-error");
+    const teamsSave = document.querySelector("#teams-save");
+    const teamsRetry = document.querySelector("#teams-retry");
     const button = form.querySelector("button");
     const composer = document.querySelector("#composer");
     const review = document.querySelector("#review");
@@ -1132,6 +1246,7 @@
     const placeCloud = document.querySelector("#place-cloud");
     const placeNote = document.querySelector("#place-note");
     const placeDetail = document.querySelector("#place-detail");
+    const startPlace = document.querySelector("#start-place");
     const projectList = document.querySelector("#projects");
     const projectName = document.querySelector("#project-name");
     const filmThumb = document.querySelector("#film-thumb");
@@ -1226,17 +1341,19 @@
       let body;
       if (hasFile) body = new FormData(form);
       else body = new URLSearchParams(saved ? { saved } : { youtube: link });
-      status.textContent = "Starting…";
+      status.textContent = runningPlace() === "cloud" ? "Starting on Cloudflare…" : "Starting…";
       button.disabled = true;
       try {
-        const response = await fetch("/analyze", { method: "POST", body });
+        const response = await fetch(endpoint("/analyze"), { method: "POST", body });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
           const detail = payload.detail;
           throw new Error(typeof detail === "string" ? detail : "Analysis failed.");
         }
-        history.pushState({}, "", `/projects/${payload.project}`);
-        showReview(payload);
+        status.className = "";
+        status.textContent = "";
+        history.pushState({}, "", "/projects");
+        await route();
       } catch (error) {
         status.className = "error";
         const offline = error.message === "Failed to fetch";
@@ -1247,6 +1364,29 @@
         button.disabled = false;
       }
     });
+
+    const PLACE_KEY = "film-analysis-place";
+
+    function onThisComputer() {
+      const host = location.hostname;
+      return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+    }
+
+    function runningPlace() {
+      if (!onThisComputer()) return "cloud";
+      return localStorage.getItem(PLACE_KEY) === "cloud" ? "cloud" : "local";
+    }
+
+    function endpoint(path) {
+      if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("/via-cloud/")) {
+        return path;
+      }
+      if (runningPlace() === "cloud" && onThisComputer()) return `/via-cloud${path}`;
+      return path;
+    }
+
+    const pageFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => pageFetch(endpoint(input), init);
 
     window.addEventListener("popstate", () => { route(); });
     route();
@@ -1327,7 +1467,7 @@
       playBack.href = play.film || "/projects";
       if (playVideo.dataset.clip !== play.video) {
         playVideo.dataset.clip = play.video || "";
-        playVideo.src = play.video || "";
+        playVideo.src = endpoint(play.video || "");
       }
       playDetails.replaceChildren();
       const rows = [
@@ -1658,6 +1798,7 @@
       results.replaceChildren();
       delete results.dataset.project;
       markCurrent();
+      paintStartPlace();
       await loadSaved();
     }
 
@@ -1993,32 +2134,44 @@
       if (workersInput.value !== next) workersInput.value = next;
     }
 
-    const CLOUD_SITE = "https://film-analysis.broad-night-d47d.workers.dev";
-
-    function onThisComputer() {
-      const host = location.hostname;
-      return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+    function paintStartPlace() {
+      const cloud = runningPlace() === "cloud";
+      startPlace.textContent = cloud
+        ? "This film will run on Cloudflare."
+        : "This film will run on this computer.";
     }
 
     function paintRun(payload) {
       const here = onThisComputer();
-      const place = here ? "local" : "cloud";
+      const place = runningPlace();
       activityOnCloud = place === "cloud";
       const count = Number(payload.workers);
       if (Number.isInteger(count) && count > 0) activityWorkers = count;
-      placeLocal.setAttribute("aria-pressed", here ? "true" : "false");
-      placeCloud.setAttribute("aria-pressed", here ? "false" : "true");
+      placeLocal.setAttribute("aria-pressed", place === "local" ? "true" : "false");
+      placeCloud.setAttribute("aria-pressed", place === "cloud" ? "true" : "false");
       placeLocal.disabled = !here;
       placeCloud.disabled = false;
-      workersField.hidden = here;
-      if (here) {
+      workersField.hidden = place !== "cloud";
+      if (place === "local") {
         placeNote.textContent = "Jobs run on this computer.";
         placeDetail.textContent = "This page is on your computer, so the film is downloaded and read here.";
+      } else if (here) {
+        placeNote.textContent = "Requests go to Cloudflare. More workers read a film faster.";
+        placeDetail.textContent = "This page stays here. Starting a film sends that job to Cloudflare.";
+        paintWorkers(payload.workers);
       } else {
         placeNote.textContent = "Requests go to Cloudflare. More workers read a film faster.";
         placeDetail.textContent = "This page sends each film to Cloudflare. One cutter keeps that film in order while workers read it at the same time.";
         paintWorkers(payload.workers);
       }
+      paintStartPlace();
+    }
+
+    function choosePlace(place) {
+      if (!onThisComputer() || runningPlace() === place) return;
+      localStorage.setItem(PLACE_KEY, place);
+      paintRun({ workers: activityWorkers });
+      route();
     }
 
     async function showSettings() {
@@ -2032,7 +2185,17 @@
       review.hidden = true;
       playSection.hidden = true;
       markCurrent();
-      const response = await fetch("/api/settings");
+      paintRun({ workers: activityWorkers });
+      let response;
+      try {
+        response = await fetch("/api/activity");
+      } catch {
+        status.className = "error";
+        status.textContent = runningPlace() === "cloud"
+          ? "Couldn't reach Cloudflare."
+          : "Couldn't read settings.";
+        return;
+      }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         status.className = "error";
@@ -2051,9 +2214,8 @@
       if (!activityLoaded) beginActivityLoad();
       paintActivity(watch);
     });
-    placeCloud.addEventListener("click", () => {
-      if (onThisComputer()) location.assign(`${CLOUD_SITE}/settings`);
-    });
+    placeLocal.addEventListener("click", () => choosePlace("local"));
+    placeCloud.addEventListener("click", () => choosePlace("cloud"));
 
     async function saveWorkers() {
       const count = Number(workersInput.value);
@@ -2561,6 +2723,7 @@
       }
       const bucket = projectBucket(project);
       link.dataset.bucket = bucket;
+      link.dataset.archived = project.archived ? "1" : "0";
       const mark = poster.querySelector(".mark");
       mark.className = `mark ${bucket}`;
       mark.textContent = bucketLabel[bucket] || "Ready";
@@ -2578,6 +2741,8 @@
       const message = bucket === "failed" ? (project.error || "Could not read that film.") : "";
       fault.hidden = !message;
       fault.textContent = message;
+      const archive = ensureArchive(link);
+      archive.textContent = project.archived ? "Put back" : "Archive";
       const retry = ensureRetry(link);
       retry.hidden = !canRetry(project);
       retry.textContent = resumeScan(project) ? "Retry" : "Retry download";
@@ -2691,9 +2856,14 @@
       track.setAttribute("aria-label", percent == null ? name : `${name}, ${percent}%`);
     }
 
+    function shelfProjects(projects) {
+      return projects.filter((project) => !project.archived);
+    }
+
     function paintProjectSummary(projects) {
       const node = document.querySelector("#projects-summary");
       const lead = document.querySelector("#projects-lead");
+      const shelf = shelfProjects(projects);
       if (!projects.length) {
         node.hidden = true;
         node.textContent = "";
@@ -2702,7 +2872,11 @@
       }
       lead.hidden = true;
       node.hidden = false;
-      node.textContent = summarizeProjects(projects);
+      if (!shelf.length) {
+        node.textContent = projects.length === 1 ? "1 archived film" : `${projects.length} archived films`;
+        return;
+      }
+      node.textContent = summarizeProjects(shelf);
     }
 
     function summarizeProjects(projects) {
@@ -2724,8 +2898,10 @@
 
     function paintProjectFilters(projects) {
       const bar = document.querySelector("#project-filters");
-      const counts = { all: projects.length, needs: 0, ready: 0, working: 0, failed: 0 };
-      for (const project of projects) counts[projectBucket(project)] += 1;
+      const shelf = shelfProjects(projects);
+      const counts = { all: shelf.length, needs: 0, ready: 0, working: 0, failed: 0, archived: 0 };
+      for (const project of shelf) counts[projectBucket(project)] += 1;
+      counts.archived = projects.length - shelf.length;
       const options = [
         ["all", "All"],
         ["needs", "Needs a look"],
@@ -2733,7 +2909,8 @@
         ["working", "In progress"],
         ["failed", "Stopped"],
       ].filter(([key]) => key === "all" || counts[key] > 0);
-      if (options.length < 3) {
+      if (counts.archived > 0) options.push(["archived", "Archived"]);
+      if (counts.archived === 0 && options.length < 3) {
         bar.hidden = true;
         bar.replaceChildren();
         delete bar.dataset.signature;
@@ -2770,13 +2947,21 @@
     function applyProjectFilter() {
       let shown = 0;
       for (const link of projectList.querySelectorAll("a")) {
-        const show = projectFilter === "all" || link.dataset.bucket === projectFilter;
+        const archived = link.dataset.archived === "1";
+        const show = projectFilter === "archived"
+          ? archived
+          : !archived && (projectFilter === "all" || link.dataset.bucket === projectFilter);
         if (link.parentElement) link.parentElement.hidden = !show;
         if (show) shown += 1;
       }
+      const shelfCleared = projectFilter === "all"
+        && shown === 0
+        && listedProjects.some((project) => project.archived);
       const filterEmpty = document.querySelector("#filter-empty");
-      filterEmpty.hidden = projectList.hidden || projectFilter === "all" || shown > 0;
-      if (!filterEmpty.hidden) filterEmpty.textContent = filterEmptyText(projectFilter);
+      filterEmpty.hidden = projectList.hidden || shown > 0 || (projectFilter === "all" && !shelfCleared);
+      if (!filterEmpty.hidden) {
+        filterEmpty.textContent = shelfCleared ? "Every film is archived." : filterEmptyText(projectFilter);
+      }
     }
 
     function filterEmptyText(bucket) {
@@ -2784,6 +2969,7 @@
       if (bucket === "ready") return "No films are ready to study.";
       if (bucket === "working") return "No films are being cut right now.";
       if (bucket === "failed") return "No films stopped.";
+      if (bucket === "archived") return "No archived films.";
       return "No films in this view.";
     }
 
@@ -2806,6 +2992,54 @@
       return linked || resumeScan(project);
     }
 
+    function cardActions(link) {
+      let row = link.querySelector(".actions");
+      if (row) return row;
+      row = document.createElement("span");
+      row.className = "actions";
+      link.querySelector(".copy").append(row);
+      return row;
+    }
+
+    function ensureArchive(link) {
+      let button = link.querySelector(".archive");
+      if (button) return button;
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "archive";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        archiveProject(link.dataset.id, link.dataset.archived !== "1", button);
+      });
+      cardActions(link).append(button);
+      return button;
+    }
+
+    async function archiveProject(id, archived, button) {
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/projects/${id}/archive`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archived }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not archive that film.";
+          return;
+        }
+        status.className = "";
+        status.textContent = "";
+        if (!historySection.hidden) await paintHistory(watch);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     function ensureRetry(link) {
       let retry = link.querySelector(".retry");
       if (retry) return retry;
@@ -2818,7 +3052,7 @@
         event.stopPropagation();
         retryDownload(link.dataset.id, retry);
       });
-      link.querySelector(".copy").append(retry);
+      cardActions(link).append(retry);
       return retry;
     }
 
@@ -2833,7 +3067,8 @@
             : "Could not retry that download.";
           status.className = "error";
           status.textContent = message;
-          const fault = button.parentElement && button.parentElement.querySelector(".fault");
+          const card = button.closest("a");
+          const fault = card && card.querySelector(".fault");
           if (fault) {
             fault.hidden = false;
             fault.textContent = message;
@@ -2873,6 +3108,149 @@
 
     function showReview(project) {
       paint(project, ++watch);
+    }
+
+    function paintTeams(project) {
+      const ready = project.status === "ready" && (project.plays || []).length > 0;
+      teamsSection.hidden = !ready;
+      if (!ready) return;
+      if (teamsSection.dataset.project && teamsSection.dataset.project !== String(project.project)) {
+        teamsSection.dataset.project = "";
+        delete teamsSection.dataset.loading;
+        for (const img of teamsSection.querySelectorAll("img")) {
+          img.removeAttribute("src");
+          delete img.dataset.source;
+          img.hidden = true;
+        }
+        for (const input of teamsSection.querySelectorAll("input")) {
+          input.value = "";
+          delete input.dataset.saved;
+        }
+        for (const mine of teamsSection.querySelectorAll("button.mine")) {
+          mine.setAttribute("aria-pressed", "false");
+        }
+      }
+      const teams = project.teams;
+      if (teams && (teams.left_still || teams.right_still)) {
+        fillTeams(project.project, teams);
+        return;
+      }
+      if (teamsSection.dataset.loading === String(project.project)) return;
+      loadLineup(project.project);
+    }
+
+    function fillTeams(projectId, teams) {
+      if (!teams) return;
+      teamsSection.dataset.project = String(projectId);
+      for (const side of ["left", "right"]) {
+        const still = document.querySelector(`#team-${side}-still`);
+        const stillUrl = teams[`${side}_still`];
+        if (stillUrl && still.dataset.source !== stillUrl) {
+          still.dataset.source = stillUrl;
+          still.src = stillUrl;
+        }
+        still.hidden = !stillUrl;
+        const player = document.querySelector(`#team-${side}-player`);
+        const playerUrl = teams[`${side}_player`];
+        if (playerUrl && player.dataset.source !== playerUrl) {
+          player.dataset.source = playerUrl;
+          player.src = playerUrl;
+        }
+        player.hidden = !playerUrl;
+        const name = document.querySelector(`#team-${side}-name`);
+        const saved = teams[`${side}_name`] || "";
+        if (saved && document.activeElement !== name && name.dataset.saved !== saved) {
+          name.value = saved;
+          name.dataset.saved = saved;
+        }
+        if (teams.mine === "left" || teams.mine === "right") {
+          document.querySelector(`#team-${side}-mine`).setAttribute(
+            "aria-pressed",
+            teams.mine === side ? "true" : "false",
+          );
+        }
+      }
+      teamsRetry.hidden = true;
+      teamsNote.textContent = teams.left_player
+        ? "Roster portraits use each team's colors. The jersey number is 00."
+        : "Name each side from the lineup, then mark your team.";
+    }
+
+    async function loadLineup(projectId) {
+      teamsSection.dataset.loading = String(projectId);
+      teamsNote.textContent = "Reading a lineup from the film.";
+      teamsError.hidden = true;
+      teamsRetry.hidden = true;
+      try {
+        const response = await fetch(`/api/projects/${projectId}/teams/stills`, { method: "POST" });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not read a lineup.");
+        }
+        if (results.dataset.project === String(projectId)) fillTeams(projectId, payload.teams);
+      } catch (error) {
+        if (results.dataset.project !== String(projectId)) return;
+        teamsNote.textContent = "The lineup stills could not be read.";
+        teamsError.hidden = false;
+        teamsError.textContent = error.message || "Could not read a lineup.";
+        teamsRetry.hidden = false;
+      } finally {
+        if (teamsSection.dataset.loading === String(projectId)) delete teamsSection.dataset.loading;
+      }
+    }
+
+    for (const mine of teamsSection.querySelectorAll("button.mine")) {
+      mine.addEventListener("click", () => {
+        for (const other of teamsSection.querySelectorAll("button.mine")) {
+          other.setAttribute("aria-pressed", other === mine ? "true" : "false");
+        }
+      });
+    }
+    teamsRetry.addEventListener("click", () => {
+      if (results.dataset.project) loadLineup(results.dataset.project);
+    });
+    teamsSave.addEventListener("click", () => saveTeams());
+
+    async function saveTeams() {
+      const projectId = results.dataset.project;
+      const left = document.querySelector("#team-left-name").value.trim();
+      const right = document.querySelector("#team-right-name").value.trim();
+      const mine = teamsSection.querySelector('button.mine[aria-pressed="true"]');
+      if (!left || !right) {
+        teamsError.hidden = false;
+        teamsError.textContent = "Name both teams.";
+        return;
+      }
+      if (!mine) {
+        teamsError.hidden = false;
+        teamsError.textContent = "Mark which side is your team.";
+        return;
+      }
+      teamsSave.disabled = true;
+      teamsError.hidden = true;
+      teamsNote.textContent = "Drawing roster portraits.";
+      try {
+        const response = await fetch(`/api/projects/${projectId}/teams`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            left_name: left,
+            right_name: right,
+            mine: mine.dataset.side,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not save those teams.");
+        }
+        fillTeams(projectId, payload.teams);
+      } catch (error) {
+        teamsError.hidden = false;
+        teamsError.textContent = error.message || "Could not save those teams.";
+        teamsNote.textContent = "Name each side from the lineup, then mark your team.";
+      } finally {
+        teamsSave.disabled = false;
+      }
     }
 
     function paint(project, token) {
@@ -2936,6 +3314,7 @@
         if (badge) badge.textContent = String(index + 1);
       });
       paintReviews(project);
+      paintTeams(project);
       const failed = hasError(project);
       const running = !failed && (project.status === "downloading" || project.status === "scanning");
       const sentence = failed
@@ -3092,7 +3471,7 @@
       video.preload = "metadata";
       video.playsInline = true;
       video.muted = true;
-      video.src = src;
+      video.src = endpoint(src);
       return video;
     }
 

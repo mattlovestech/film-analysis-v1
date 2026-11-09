@@ -17,6 +17,19 @@ class CatalogError(Exception):
 
 
 _TIMED_PHASES = frozenset({"starting", "downloading", "saving", "scanning", "checking"})
+TEAM_IMAGE_KINDS = frozenset({"left", "right", "left-player", "right-player"})
+
+
+def team_media(kind: str, suffix: str) -> tuple[str, str]:
+    """Return a stored suffix and content type, or raise when the image is not one we keep."""
+
+    if kind not in TEAM_IMAGE_KINDS:
+        raise CatalogError("Could not store that team image.")
+    cleaned = suffix.lower()
+    if cleaned not in {".jpg", ".svg"}:
+        raise CatalogError("Could not store that team image.")
+    content = "image/svg+xml" if cleaned == ".svg" else "image/jpeg"
+    return cleaned, content
 
 
 @dataclass(frozen=True)
@@ -154,6 +167,7 @@ class ProjectSummary:
     scanned_seconds: float = 0.0
     review_count: int = 0
     duration_seconds: float | None = None
+    archived: bool = False
 
 
 @dataclass(frozen=True)
@@ -174,6 +188,15 @@ class SpanRecord:
 
 
 @dataclass(frozen=True)
+class FilmTeams:
+    """Names for the two sides of a lineup, and which side is the user's team."""
+
+    left_name: str
+    right_name: str
+    mine: str
+
+
+@dataclass(frozen=True)
 class ProjectDetail:
     project: int
     name: str
@@ -187,6 +210,7 @@ class ProjectDetail:
     downloaded_bytes: int = 0
     total_bytes: int | None = None
     spans: tuple[SpanRecord, ...] = ()
+    archived: bool = False
 
 
 class Catalog(Protocol):
@@ -234,6 +258,18 @@ class Catalog(Protocol):
 
     def set_job_place(self, place: str) -> None:
         """Remember whether new jobs run locally or in the cloud."""
+
+    def film_teams(self, project_id: int) -> FilmTeams | None:
+        """Return the saved team names, or nothing when this film has none yet."""
+
+    def set_film_teams(self, project_id: int, teams: FilmTeams) -> None:
+        """Remember both team names and which side is the user's team."""
+
+    def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> None:
+        """Store a lineup still or roster portrait for one side."""
+
+    def team_image(self, project_id: int, kind: str) -> Path | None:
+        """Return a lineup still or roster portrait, when it has been stored."""
 
     def get_project(self, project_id: int) -> ProjectDetail | None:
         """Return one analysis, or nothing when the id is unknown."""
@@ -314,6 +350,9 @@ class Catalog(Protocol):
     def copy_source(self, source_id: int, project_id: int) -> bool:
         """Copy one project's saved film onto another. False when it is missing."""
 
+    def set_archived(self, project_id: int, archived: bool) -> None:
+        """Keep a film off the shelf, or put it back."""
+
     def delete_project(self, project_id: int) -> None:
         """Remove an analysis and its clips."""
 
@@ -341,6 +380,12 @@ class ClipStore(Protocol):
 
     def remove(self, project_id: int) -> None:
         """Delete every object for a project."""
+
+    def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> str:
+        """Store a lineup still or roster portrait and return its key."""
+
+    def team_image(self, project_id: int, kind: str) -> Path | None:
+        """Return a local file for a team image, when one exists."""
 
 
 class ClipDirectory:
@@ -376,6 +421,27 @@ class ClipDirectory:
     def remove(self, project_id: int) -> None:
         shutil.rmtree(self._project(project_id), ignore_errors=True)
 
+    def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> str:
+        cleaned, _content = team_media(kind, suffix)
+        folder = self._project(project_id) / "teams"
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in folder.glob(f"{kind}.*"):
+            old.unlink()
+        dest = folder / f"{kind}{cleaned}"
+        dest.write_bytes(data)
+        return dest.relative_to(self.root).as_posix()
+
+    def team_image(self, project_id: int, kind: str) -> Path | None:
+        if kind not in TEAM_IMAGE_KINDS:
+            return None
+        folder = self._project(project_id) / "teams"
+        if not folder.is_dir():
+            return None
+        matches = [
+            path for path in folder.glob(f"{kind}.*") if path.is_file() and path.stat().st_size
+        ]
+        return matches[0] if matches else None
+
     def _project(self, project_id: int) -> Path:
         return self.root / "projects" / str(project_id)
 
@@ -391,6 +457,7 @@ class MemoryCatalog:
         self._activity: dict[int, ActivityRecord] = {}
         self._workers = 4
         self._place: str | None = None
+        self._teams: dict[int, FilmTeams] = {}
         self._next = 1
         self._lock = threading.Lock()
 
@@ -443,6 +510,25 @@ class MemoryCatalog:
         with self._lock:
             self._place = place
 
+    def film_teams(self, project_id: int) -> FilmTeams | None:
+        with self._lock:
+            return self._teams.get(project_id)
+
+    def set_film_teams(self, project_id: int, teams: FilmTeams) -> None:
+        if teams.mine not in {"left", "right"}:
+            raise CatalogError("Mark which side is your team.")
+        with self._lock:
+            self._require(project_id)
+            self._teams[project_id] = teams
+
+    def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> None:
+        with self._lock:
+            self._require(project_id)
+        self._clips.save_team_image(project_id, kind, data, suffix)
+
+    def team_image(self, project_id: int, kind: str) -> Path | None:
+        return self._clips.team_image(project_id, kind)
+
     def list_projects(self) -> list[ProjectSummary]:
         with self._lock:
             projects = list(self._projects)
@@ -464,6 +550,7 @@ class MemoryCatalog:
                     1 for kind, _, _ in spans.get(project.project, []) if kind == "uncertain"
                 ),
                 duration_seconds=project.duration_seconds,
+                archived=project.archived,
             )
             for project in reversed(projects)
         ]
@@ -525,6 +612,7 @@ class MemoryCatalog:
                     channel=current.channel,
                     downloaded_bytes=current.downloaded_bytes,
                     total_bytes=current.total_bytes,
+                    archived=current.archived,
                 ),
             )
 
@@ -556,6 +644,7 @@ class MemoryCatalog:
                     channel=channel or current.channel,
                     downloaded_bytes=current.downloaded_bytes,
                     total_bytes=current.total_bytes,
+                    archived=current.archived,
                 ),
             )
 
@@ -583,6 +672,7 @@ class MemoryCatalog:
                     total_bytes=(
                         current.total_bytes if total_bytes is None else total_bytes
                     ),
+                    archived=current.archived,
                 ),
             )
 
@@ -685,6 +775,11 @@ class MemoryCatalog:
             self._require(source_id)
         return self._clips.copy_source(source_id, project_id) is not None
 
+    def set_archived(self, project_id: int, archived: bool) -> None:
+        with self._lock:
+            current = self._require(project_id)
+            self._replace(project_id, replace(current, archived=archived))
+
     def delete_project(self, project_id: int) -> None:
         with self._lock:
             self._projects = [
@@ -693,6 +788,7 @@ class MemoryCatalog:
             self._spans.pop(project_id, None)
             self._created.pop(project_id, None)
             self._activity.pop(project_id, None)
+            self._teams.pop(project_id, None)
         self._clips.remove(project_id)
 
     def clip_file(self, project_id: int, play_number: int) -> Path | None:
@@ -743,6 +839,7 @@ class D1Catalog:
                    projects.error as error,
                    projects.scanned_seconds as scanned_seconds,
                    projects.duration_seconds as duration_seconds,
+                   projects.archived as archived,
                    count(plays.play_number) as play_count,
                    (
                      select count(*)
@@ -770,6 +867,7 @@ class D1Catalog:
                 float(row.get("scanned_seconds") or 0),
                 review_count=int(row.get("review_count") or 0),
                 duration_seconds=_optional_float(row.get("duration_seconds")),
+                archived=bool(row.get("archived")),
             )
             for row in rows
         ]
@@ -933,6 +1031,44 @@ class D1Catalog:
             """,
             [place],
         )
+
+    def film_teams(self, project_id: int) -> FilmTeams | None:
+        rows = self._query(
+            "select left_name, right_name, mine from teams where project_id = ?",
+            [project_id],
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        mine = str(row["mine"])
+        if mine not in {"left", "right"}:
+            return None
+        return FilmTeams(str(row["left_name"]), str(row["right_name"]), mine)
+
+    def set_film_teams(self, project_id: int, teams: FilmTeams) -> None:
+        if teams.mine not in {"left", "right"}:
+            raise CatalogError("Mark which side is your team.")
+        if self.get_project(project_id) is None:
+            raise CatalogError("That analysis is no longer available.")
+        self._execute(
+            """
+            insert into teams (project_id, left_name, right_name, mine)
+            values (?, ?, ?, ?)
+            on conflict(project_id) do update set
+                left_name = excluded.left_name,
+                right_name = excluded.right_name,
+                mine = excluded.mine
+            """,
+            [project_id, teams.left_name, teams.right_name, teams.mine],
+        )
+
+    def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> None:
+        if self.get_project(project_id) is None:
+            raise CatalogError("That analysis is no longer available.")
+        self._clips.save_team_image(project_id, kind, data, suffix)
+
+    def team_image(self, project_id: int, kind: str) -> Path | None:
+        return self._clips.team_image(project_id, kind)
 
     def set_progress(
         self,
@@ -1104,10 +1240,20 @@ class D1Catalog:
         self._execute("update projects set source_key = ? where id = ?", [key, project_id])
         return True
 
+    def set_archived(self, project_id: int, archived: bool) -> None:
+        found = self._query("select id from projects where id = ?", [project_id])
+        if not found:
+            raise CatalogError(f"Project {project_id} was not found.")
+        self._execute(
+            "update projects set archived = ? where id = ?",
+            [1 if archived else 0, project_id],
+        )
+
     def delete_project(self, project_id: int) -> None:
         self._execute("delete from activity where project_id = ?", [project_id])
         self._execute("delete from spans where project_id = ?", [project_id])
         self._execute("delete from plays where project_id = ?", [project_id])
+        self._execute("delete from teams where project_id = ?", [project_id])
         self._execute("delete from projects where id = ?", [project_id])
         self._clips.remove(project_id)
 
@@ -1163,6 +1309,7 @@ class D1Catalog:
             "alter table projects add column channel text",
             "alter table projects add column downloaded_bytes integer not null default 0",
             "alter table projects add column total_bytes integer",
+            "alter table projects add column archived integer not null default 0",
             "alter table plays add column family text not null default 'scrimmage'",
             "alter table plays add column play_type text",
             "alter table plays add column reviewed integer not null default 0",
@@ -1187,6 +1334,14 @@ class D1Catalog:
             create table if not exists settings (
                 key text primary key,
                 value text not null
+            )
+            """,
+            """
+            create table if not exists teams (
+                project_id integer primary key,
+                left_name text not null,
+                right_name text not null,
+                mine text not null
             )
             """,
         )
