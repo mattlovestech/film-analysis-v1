@@ -7,12 +7,15 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError, tool_failure
-from film_analysis.agents.play_boundaries import AnthropicPlayAgent
-from film_analysis.agents.segments import FilmSpan, PlaySegment
-from film_analysis.agents.youtube import FilmInfo
-from film_analysis.storage.catalog import MemoryCatalog, ReadNote, decode_activity_steps
+from film_analysis.ingest.errors import MissingApiKeyError, VideoAnalysisError, tool_failure
+from film_analysis.ingest.youtube import FilmInfo
+from film_analysis.plays.boundaries import AnthropicPlayAgent
+from film_analysis.plays.segments import FilmSpan, PlaySegment
+from film_analysis.chart.formation import FORMATIONS
+from film_analysis.storage.catalog import FilmTeams, MemoryCatalog, ReadNote, decode_activity_steps
 from film_analysis.web.app import create_app
+
+_FORMATION_CHOICES = [{"key": key, "label": label} for key, label in FORMATIONS.items()]
 
 
 class _Agent:
@@ -163,11 +166,12 @@ def test_page_offers_a_video_upload() -> None:
     assert "location.assign" not in response.text
     assert "Cloud · 1 worker" in response.text
     assert 'id="teams"' in response.text
-    assert "Select team" in response.text
+    assert "Choose who to scout" in response.text
+    assert "Which team do you want to scout?" in response.text
     assert 'id="team-left-reference"' in response.text
     assert 'id="team-right-reference"' in response.text
     assert ">Reference</figcaption>" in response.text
-    assert "This is my team" in response.text
+    assert "Scout this team" in response.text
     assert "Try different photos" in response.text
     assert 'id="teams-retry"' in response.text
     assert 'id="teams-meter"' in response.text
@@ -175,6 +179,12 @@ def test_page_offers_a_video_upload() -> None:
     assert "Find players" in response.text
     assert "Save cards" in response.text
     assert "New photo" in response.text
+    assert "Reset team photos for all films" in response.text
+    assert 'id="team-reset"' in response.text
+    assert 'id="team-reset-meter"' in response.text
+    assert 'id="team-reset-films"' in response.text
+    assert 'id="team-reset-retry"' in response.text
+    assert "Try failed films again" in response.text
     assert "Generate again" in response.text
     assert 'id="teams-note" class="lead" hidden' in response.text
     assert 'id="report"' in response.text
@@ -191,7 +201,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "Start here" in response.text
     assert "Save trim" in response.text
     assert 'id="play-trim"' in response.text
-    assert "Trim each clip and tag it as offense / defense or special teams." in response.text
+    assert "Discard a play to leave it out of the report." in response.text
     assert "Download PDF" in response.text
     assert "Download CSV" in response.text
     assert 'id="report-downloads" class="exports" hidden' in response.text
@@ -268,12 +278,18 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
             "label": "Play 1: 0:01 - 0:02",
             "start": 1.0,
             "end": 2.0,
+            "room_start": 0.0,
+            "room_end": 4.0,
             "family": "scrimmage",
-                "play_type": None,
-                "unit": None,
-                "formation": None,
-                "reviewed": False,
-                "video": "/projects/1/plays/1",
+            "play_type": None,
+            "unit": None,
+            "formation": None,
+            "formation_key": None,
+            "formation_plot": None,
+            "formation_choices": _FORMATION_CHOICES,
+            "reviewed": False,
+            "discarded": False,
+            "video": "/projects/1/plays/1",
         }
     ]
     film = client.get("/projects/1/plays/1")
@@ -346,7 +362,8 @@ def test_team_analysis_starts_when_the_plays_are_ready() -> None:
     assert teams["right_name"]
     assert teams["left_still"]
     assert teams["right_still"]
-    assert b"svg" in client.get(str(teams["left_player"])).content
+    assert client.get(str(teams["left_player"])).content == b"left"
+    assert client.get(str(teams["right_player"])).content == b"right"
 
 
 def test_archive_takes_a_film_off_the_shelf_until_it_is_put_back(tmp_path: Path) -> None:
@@ -1723,11 +1740,17 @@ def test_play_page_shows_one_play_and_its_neighbors(tmp_path: Path) -> None:
         "label": "Play 2: 0:40 - 0:46",
         "start": 40.0,
         "end": 46.0,
+        "room_start": 28.0,
+        "room_end": 58.0,
         "family": "special_teams",
         "play_type": None,
         "unit": None,
         "formation": None,
+        "formation_key": None,
+        "formation_plot": None,
+        "formation_choices": _FORMATION_CHOICES,
         "reviewed": False,
+        "discarded": False,
         "video": "/projects/1/plays/2",
         "project": 1,
         "name": "Pike County vs Lamar",
@@ -1792,6 +1815,43 @@ def test_a_play_can_be_relabeled_or_dropped(tmp_path: Path) -> None:
     remaining = client.get("/api/projects/1").json()["plays"]
     assert [play["uid"] for play in remaining] == ["1-2"]
     assert remaining[0]["family"] == "scrimmage"
+
+
+def test_a_play_can_be_left_out_of_the_report(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project = store.create_project("Friday night", None)
+    store.set_progress(project, status="ready", duration_seconds=40, scanned_seconds=40, error=None)
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"clip")
+    store.add_play(project, 1, 12, 20, clip, "scrimmage")
+    store.add_play(project, 2, 24, 30, clip, "scrimmage")
+    store.set_film_teams(project, FilmTeams("Home", "Away", "left"))
+    client = TestClient(create_app(agent=_Agent(), store=store))
+
+    page = client.get("/play/1-1")
+    assert "Discard" in page.text
+    assert "Not a play" in page.text
+
+    left = client.post("/api/plays/1-2", json={"discarded": True})
+    assert left.status_code == 200
+    body = left.json()
+    assert body["discarded"] is True
+    assert body["play_type"] is None
+    assert body["uid"] == "1-2"
+    listed = client.get("/api/projects/1").json()["plays"]
+    assert [play["uid"] for play in listed] == ["1-1", "1-2"]
+    assert listed[1]["discarded"] is True
+    assert listed[0]["discarded"] is False
+
+    report = client.get("/api/projects/1/report")
+    assert report.status_code == 200
+    text = "\n".join(block["text"] for block in report.json()["blocks"])
+    assert "Play 2" not in text
+
+    back = client.post("/api/plays/1-2", json={"discarded": False})
+    assert back.status_code == 200
+    assert back.json()["discarded"] is False
+    assert client.get("/api/plays/1-2").status_code == 200
 
 
 def test_the_projects_list_does_not_probe_posters(tmp_path: Path) -> None:
@@ -1870,9 +1930,9 @@ def test_a_play_can_be_trimmed_for_later_reads(tmp_path: Path) -> None:
     too_short = client.post("/api/plays/1-1/trim", json={"start": 12.0, "end": 12.2})
     assert too_short.status_code == 422
 
-    outside = client.post("/api/plays/1-1/trim", json={"start": 10.0, "end": 18.0})
+    outside = client.post("/api/plays/1-1/trim", json={"start": 10.0, "end": 40.0})
     assert outside.status_code == 400
-    assert "inside the current play" in outside.json()["detail"]
+    assert "beside this play" in outside.json()["detail"]
 
     trimmed = client.post("/api/plays/1-1/trim", json={"start": 13.5, "end": 18.0})
     assert trimmed.status_code == 200
@@ -1888,6 +1948,39 @@ def test_a_play_can_be_trimmed_for_later_reads(tmp_path: Path) -> None:
     assert saved.plays[0].end_seconds == 18.0
     assert saved.plays[0].formation is None
     assert store.clip_file(project, 1).read_bytes() == b"trimmed-clip"
+
+
+def test_a_play_can_be_lengthened_past_its_cut(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project = store.create_project("Friday night", None)
+    store.set_progress(project, status="ready", duration_seconds=40, scanned_seconds=40, error=None)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source-film")
+    store.save_source(project, source)
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"old-clip")
+    store.add_play(project, 1, 12.0, 20.0, clip, "scrimmage")
+    store.add_play(project, 2, 28.0, 34.0, clip, "scrimmage")
+    cuts: list[tuple[float, float]] = []
+
+    def cut(path: Path, start: float, end: float, dest: Path) -> None:
+        cuts.append((start, end))
+        dest.write_bytes(b"longer-clip")
+
+    client = TestClient(create_app(agent=_Agent(), store=store, cut=cut))
+    listed = client.get("/api/projects/1").json()["plays"][0]
+    assert listed["room_start"] == 0.0
+    assert listed["room_end"] == 28.0
+
+    longer = client.post("/api/plays/1-1/trim", json={"start": 8.0, "end": 26.0})
+    assert longer.status_code == 200
+    assert longer.json()["start"] == 8.0
+    assert longer.json()["end"] == 26.0
+    assert cuts == [(8.0, 26.0)]
+
+    into_next = client.post("/api/plays/1-1/trim", json={"start": 8.0, "end": 30.0})
+    assert into_next.status_code == 400
+    assert "beside this play" in into_next.json()["detail"]
 
 
 def test_a_tool_failure_keeps_the_programs_own_error() -> None:

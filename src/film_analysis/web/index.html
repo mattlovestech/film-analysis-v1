@@ -1015,6 +1015,26 @@
     }
     #play-details dd { margin: 0; }
     #play-details a { color: inherit; }
+    #play-details img.formation-plot,
+    #play-types img.formation-plot {
+      display: block;
+      width: min(100%, 22rem);
+      height: auto;
+      border-radius: 0.35rem;
+      background: #22482c;
+    }
+    #play-types .formation-controls { display: grid; gap: 0.55rem; }
+    #play-types .formation-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+      max-width: 36rem;
+    }
+    #play-types .formation-choices {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
     #play-nav {
       display: flex;
       justify-content: space-between;
@@ -1155,6 +1175,18 @@
       color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
+    #report-view .report-row a,
+    #report-analysis-table td a {
+      color: var(--ink);
+      text-decoration: underline;
+      text-underline-offset: 0.12em;
+      font-weight: 650;
+    }
+    #report-view .report-row a:hover,
+    #report-analysis-table td a:hover {
+      color: var(--gold);
+      filter: none;
+    }
     #report-view table {
       width: 100%;
       max-width: 28rem;
@@ -1187,6 +1219,20 @@
       font-size: 1.05rem;
     }
     #report-live-note { margin: 0 0 0.7rem; }
+    #report-live-track {
+      height: 0.3rem;
+      margin: 0 0 0.85rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+    #report-live-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--gold);
+      transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    }
     #report-live-tendency { margin: 0 0 0.85rem; }
     #report-live-tendency table {
       width: 100%;
@@ -1244,7 +1290,9 @@
       width: calc(100% - 1.4rem);
       margin: 0 0.7rem 0.45rem;
     }
-    .play-card .play-discard {
+    .play-card.is-discarded { opacity: 0.62; }
+    .play-card .play-discard,
+    .play-card .play-omit {
       display: block;
       width: calc(100% - 1.4rem);
       margin: 0 0.7rem 0.45rem;
@@ -1256,6 +1304,15 @@
       font: inherit;
       font-size: 0.8rem;
       font-weight: 650;
+    }
+    .play-card .play-omit.chosen {
+      border-color: var(--gold);
+      color: var(--ink);
+    }
+    .play-omit-note {
+      margin: -0.15rem 0.7rem 0.45rem;
+      color: var(--muted);
+      font-size: 0.78rem;
     }
     a.view-play {
       display: block;
@@ -1325,6 +1382,71 @@
       margin: -0.35rem 0 1rem;
       color: var(--muted);
       font-size: 0.9rem;
+    }
+    .length-trimmer {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 0.35rem;
+    }
+    .length-trimmer .trimmer-readout {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.6rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .length-trimmer .trimmer-readout .length {
+      color: var(--ink);
+      font-weight: 650;
+    }
+    .length-trimmer .trimmer-track {
+      position: relative;
+      height: 2.4rem;
+      border-radius: 0.55rem;
+      background: rgba(255, 255, 255, 0.08);
+      touch-action: none;
+      cursor: pointer;
+    }
+    .length-trimmer .trimmer-clip {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.16);
+      pointer-events: none;
+    }
+    .length-trimmer .trimmer-range {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      background: rgba(255, 214, 10, 0.28);
+      border-block: 2px solid var(--gold);
+    }
+    .length-trimmer .trimmer-playhead {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: #fff;
+      pointer-events: none;
+    }
+    .length-trimmer .trimmer-handle {
+      position: absolute;
+      top: -3px;
+      bottom: -3px;
+      width: 14px;
+      margin-left: -7px;
+      border: 0;
+      border-radius: 4px;
+      background: var(--gold);
+      cursor: ew-resize;
+      padding: 0;
+    }
+    .length-trimmer .trimmer-handle:focus-visible {
+      outline: 2px solid #fff;
+      outline-offset: 2px;
     }
     #results .play-length, #reviews .play-length { color: var(--muted); font-size: 0.8rem; }
     .review-actions {
@@ -1585,6 +1707,7 @@
       background: #14161a;
     }
     .team-shots {
+      position: relative;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 0.45rem;
@@ -1701,9 +1824,19 @@
       font-weight: 650;
     }
     .team-card .team-refresh:hover:not(:disabled) { filter: none; color: #409cff; }
-    .team-card.refreshing .team-shots {
-      opacity: 0.55;
-      filter: saturate(0.7);
+    .team-card.refreshing .team-shots img {
+      filter: blur(5px) saturate(0.55);
+    }
+    .team-card.refreshing .team-shots::after {
+      content: "Finding a player";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(8, 10, 14, 0.62);
+      color: var(--ink);
+      font-size: 0.85rem;
+      font-weight: 650;
     }
     #teams-error { color: #ff9f0a; }
     #teams-meter {
@@ -1714,10 +1847,25 @@
     #teams-meter[hidden] { display: none; }
     #teams-meter .stages { margin: 0; }
     #teams-track {
+      position: relative;
       height: 0.3rem;
       border-radius: 999px;
       background: rgba(255, 255, 255, 0.12);
       overflow: hidden;
+    }
+    #teams-track.moving::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 38%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+      animation: teams-sheen 1.15s ease-in-out infinite;
+    }
+    @keyframes teams-sheen {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(320%); }
     }
     #teams-fill {
       height: 100%;
@@ -1733,6 +1881,108 @@
     }
     #teams-status[data-tone="error"] { color: #ff9f0a; }
     #teams-status[data-tone="working"] { color: var(--ink); }
+    .team-reset-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 0.75rem;
+    }
+    #team-reset {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.55rem 0.95rem;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+      font-size: 0.9rem;
+    }
+    #team-reset:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.28); }
+    #learning-log { list-style: none; padding: 0; margin: 0.6rem 0; display: grid; gap: 0.45rem; }
+    #learning-log li {
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 0.7rem;
+    }
+    #learning-log .when { color: var(--muted); font-size: 0.78rem; }
+    #learning-guidance { white-space: pre-wrap; }
+    #learning-run {
+      margin-top: 0.35rem;
+      padding: 0.55rem 0.95rem;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+      font-size: 0.9rem;
+    }
+    #team-reset .spin {
+      width: 0.8rem;
+      height: 0.8rem;
+      border: 2px solid rgba(255, 255, 255, 0.22);
+      border-top-color: var(--ink);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    #team-reset .spin[hidden] { display: none; }
+    #team-reset-meter {
+      display: grid;
+      gap: 0.55rem;
+      margin: 0.85rem 0 0.35rem;
+    }
+    #team-reset-meter[hidden] { display: none; }
+    #team-reset-meter .stages { margin: 0; }
+    #team-reset-track {
+      height: 0.3rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+    #team-reset-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--gold);
+      transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    #team-reset-status {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    #team-reset-status[data-tone="error"] { color: #ff9f0a; }
+    #team-reset-status[data-tone="working"] { color: var(--ink); }
+    #team-reset-films {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.35rem;
+    }
+    #team-reset-films[hidden] { display: none; }
+    #team-reset-films li {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "title pct" "note note";
+      gap: 0.2rem 0.75rem;
+      padding: 0.45rem 0.55rem;
+      border: 1px solid var(--line);
+      border-radius: 0.55rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    #team-reset-films li strong {
+      grid-area: title;
+      color: var(--ink);
+      font-weight: 650;
+    }
+    #team-reset-films li .pct {
+      grid-area: pct;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    #team-reset-films li span:not(.pct) { grid-area: note; }
+    #team-reset-films li[data-status="ready"] { border-color: rgba(255, 214, 10, 0.28); }
+    #team-reset-films li[data-status="failed"] { border-color: rgba(255, 159, 10, 0.45); color: #ff9f0a; }
+    #team-reset-films li[data-status="running"] { color: var(--ink); }
     @media (max-width: 700px) {
       .team-row { grid-template-columns: 1fr; }
     }
@@ -1858,16 +2108,43 @@
         <li><strong>Read</strong><span>Each stretch is a play, junk, or not clear yet. On Cloudflare, more workers read at once.</span></li>
         <li><strong>Cut</strong><span>A play is clipped only after the film up to that point has settled, so the clips stay in order.</span></li>
         <li><strong>Check</strong><span>A stretch that is still unclear gets one more look. What remains waits for you to mark it.</span></li>
-        <li><strong>Your team</strong><span>You choose which uniform is yours. The next read is told that, so a white jersey that is defending is your defense and the other team is on offense.</span></li>
+        <li><strong>Who to scout</strong><span>You choose which team to scout. The next read is told that, so a white jersey that is defending is that team's defense and the other side is on offense.</span></li>
         <li><strong>Chart</strong><span>That read names a scrimmage play as a run or a pass, and whether the opponent is on offense or defense. A special-teams play is the kick, punt, or return from your side.</span></li>
-        <li><strong>Formation</strong><span>Experimental, and last. For the opponent's offensive plays, it names the formation they are lined up in.</span></li>
+        <li><strong>Formation</strong><span>Experimental, and last. After run or pass is known, it plots 11 players on each side and names the formation from that plot.</span></li>
       </ol>
       <label class="formation-toggle" for="formation-reads">
         <input id="formation-reads" type="checkbox">
         Read offensive formations
       </label>
-      <p class="lead" id="formation-note">Experimental, and last. Off until you turn it on. The scouting report includes it when this is on.</p>
+      <p class="lead" id="formation-note">Experimental, and last. Off until you turn it on. After run or pass is charted, it plots both teams (always 11, with low-confidence guesses filled in) and names the formation. Turn this on so scouting report charting includes it. On each play you can detect again, override, or clear the guess.</p>
       <p class="lead">Charting a play comes later, after its clip is final.</p>
+      <h3>Coach edits</h3>
+      <p class="lead">Cuts and tags you change are kept here. Send them when you want the next read to follow what you fixed.</p>
+      <p class="lead" id="learning-guidance" hidden></p>
+      <ul id="learning-log"></ul>
+      <p class="lead" id="learning-note">No coach edits yet.</p>
+      <button id="learning-run" type="button" disabled>Send edits to improve the read</button>
+      <h3>Team photos</h3>
+      <p class="lead">Clear the saved player cards on every ready film, then find a fresh player from each team.</p>
+      <div id="team-reset-meter" hidden>
+        <ol id="team-reset-steps" class="stages" aria-label="Team photo reset steps">
+          <li data-step="queue">Queue films</li>
+          <li data-step="reset">Reset photos</li>
+          <li data-step="rebuild">Rebuild cards</li>
+        </ol>
+        <div id="team-reset-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Team photo reset progress">
+          <div id="team-reset-fill"></div>
+        </div>
+        <p id="team-reset-status"></p>
+        <ul id="team-reset-films" hidden></ul>
+      </div>
+      <div class="team-reset-actions">
+        <button id="team-reset" type="button">
+          <span class="spin" hidden></span>
+          <span class="label">Reset team photos for all films</span>
+        </button>
+        <button id="team-reset-retry" class="retry" type="button" hidden>Try failed films again</button>
+      </div>
     </section>
     <section id="review" hidden>
       <img id="film-thumb" alt="" hidden>
@@ -1918,7 +2195,7 @@
           </li>
           <li data-step="teams">
             <a href="/projects" data-screen="select-teams">
-              <span class="step-label">Your team</span>
+              <span class="step-label">Who to scout</span>
               <span class="step-state"></span>
             </a>
           </li>
@@ -1951,8 +2228,8 @@
           <ul id="reviews"></ul>
         </div>
         <section id="teams" hidden>
-          <h2 id="teams-heading">Your team</h2>
-          <p id="teams-note" class="lead" hidden>Choose the full-body shot of your team.</p>
+          <h2 id="teams-heading">Which team do you want to scout?</h2>
+          <p id="teams-note" class="lead" hidden>Choose the team you want the report on.</p>
           <div id="teams-meter" hidden>
             <ol id="teams-steps" class="stages" aria-label="Team image steps">
               <li data-step="read">Read film</li>
@@ -1964,7 +2241,7 @@
             </div>
             <p id="teams-status"></p>
           </div>
-          <button id="select-team" type="button">Select team</button>
+          <button id="select-team" type="button">Choose who to scout</button>
           <div id="teams-building" class="team-row" hidden>
             <article class="team-card ghost" aria-hidden="true">
               <p class="team-kicker">Home</p>
@@ -1975,7 +2252,7 @@
               <div class="player-ghost"></div>
             </article>
           </div>
-          <p id="mine-ask" class="mine-ask" hidden>Which player is your team?</p>
+          <p id="mine-ask" class="mine-ask" hidden>Which team do you want to scout?</p>
           <div class="team-row" role="radiogroup" aria-labelledby="teams-heading" hidden>
             <article class="team-card" data-side="left">
             <p id="team-left-kicker" class="team-kicker">Home</p>
@@ -1991,7 +2268,7 @@
             </div>
               <p id="team-left-uniform" class="team-uniform" hidden></p>
               <img id="team-left-still" alt="" hidden>
-              <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">This is my team</button>
+              <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">Scout this team</button>
               <button class="team-refresh" type="button" data-side="left" hidden>New photo</button>
               <label for="team-left-name">Team name
                 <input id="team-left-name" maxlength="40" autocomplete="off">
@@ -2011,7 +2288,7 @@
             </div>
               <p id="team-right-uniform" class="team-uniform" hidden></p>
               <img id="team-right-still" alt="" hidden>
-              <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">This is my team</button>
+              <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">Scout this team</button>
               <button class="team-refresh" type="button" data-side="right" hidden>New photo</button>
               <label for="team-right-name">Team name
                 <input id="team-right-name" maxlength="40" autocomplete="off">
@@ -2045,6 +2322,9 @@
           <section id="report-live" hidden>
             <h3>Scouting analysis</h3>
             <p id="report-live-note" class="lead"></p>
+            <div id="report-live-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Scouting report progress">
+              <div id="report-live-fill"></div>
+            </div>
             <div id="report-live-tendency"></div>
             <table id="report-analysis-table" class="plays">
               <thead>
@@ -2080,6 +2360,20 @@
       <ol id="play-tracker" class="play-tracker" aria-label="Reviewed plays" hidden></ol>
       <video id="play-video" controls playsinline preload="metadata" muted></video>
       <div id="play-trim" hidden>
+        <div id="play-length-trimmer" class="length-trimmer">
+          <div class="trimmer-readout">
+            <span class="trimmer-start">0:00</span>
+            <span class="length">Length 0s</span>
+            <span class="trimmer-end">0:00</span>
+          </div>
+          <div class="trimmer-track">
+            <div class="trimmer-clip"></div>
+            <div class="trimmer-range"></div>
+            <div class="trimmer-playhead"></div>
+            <button type="button" class="trimmer-handle" data-edge="in" aria-label="Trim start"></button>
+            <button type="button" class="trimmer-handle" data-edge="out" aria-label="Trim end"></button>
+          </div>
+        </div>
         <button id="play-trim-in" type="button">Start here</button>
         <button id="play-trim-out" type="button">End here</button>
         <button id="play-trim-save" class="trim-save" type="button" disabled>Save trim</button>
@@ -2118,6 +2412,17 @@
     const teamsFill = document.querySelector("#teams-fill");
     const teamsStatus = document.querySelector("#teams-status");
     const TEAM_STEP_ORDER = ["read", "find", "save"];
+    const teamResetButton = document.querySelector("#team-reset");
+    const teamResetLabel = teamResetButton.querySelector(".label");
+    const teamResetSpin = teamResetButton.querySelector(".spin");
+    const teamResetRetry = document.querySelector("#team-reset-retry");
+    const teamResetMeter = document.querySelector("#team-reset-meter");
+    const teamResetSteps = document.querySelector("#team-reset-steps");
+    const teamResetTrack = document.querySelector("#team-reset-track");
+    const teamResetFill = document.querySelector("#team-reset-fill");
+    const teamResetStatus = document.querySelector("#team-reset-status");
+    const teamResetFilms = document.querySelector("#team-reset-films");
+    let teamResetWatch = 0;
     const reportBox = document.querySelector("#report");
     const reportNote = document.querySelector("#report-note");
     const reportGenerate = document.querySelector("#report-generate");
@@ -2125,6 +2430,8 @@
     const reportView = document.querySelector("#report-view");
     const reportLive = document.querySelector("#report-live");
     const reportLiveNote = document.querySelector("#report-live-note");
+    const reportLiveTrack = document.querySelector("#report-live-track");
+    const reportLiveFill = document.querySelector("#report-live-fill");
     const reportLiveTendency = document.querySelector("#report-live-tendency");
     const reportAnalysisTable = document.querySelector("#report-analysis-table");
     const reportDownloads = document.querySelector("#report-downloads");
@@ -2373,7 +2680,7 @@
     function titleForStage(stage) {
       const names = {
         review: "Review plays",
-        teams: "Select team",
+        teams: "Who to scout",
         report: "Scouting report",
       };
       const film = projectName.textContent.trim();
@@ -2479,10 +2786,14 @@
       const rows = [
         ["Film", playLink(play.film, play.name || "Film")],
         ["Type", kindLabel(play)],
-        ...(play.formation ? [["Formation", play.formation]] : []),
+        ...(play.formation || play.formation_plot
+          ? [["Formation", play.formation || "Needs a look"]]
+          : []),
+        ...(play.formation_plot ? [["Plot", formationPlot(play.formation_plot)]] : []),
         ["Your team", play.unit === "defense" ? "Defense" : play.unit === "offense" ? "Offense" : "Not tagged"],
         ["In the film", `${clock(play.start)} – ${clock(play.end)}`],
         ["Length", playLength(play.end - play.start)],
+        ...(play.discarded ? [["Report", "Left out"]] : []),
       ];
       if (play.channel) rows.splice(1, 0, ["Channel", play.channel]);
       for (const [term, value] of rows) {
@@ -2513,11 +2824,14 @@
       playTrimNote.textContent = "";
       playSection.dataset.start = String(play.start);
       playSection.dataset.end = String(play.end);
+      playSection.dataset.roomStart = String(play.room_start ?? play.start);
+      playSection.dataset.roomEnd = String(play.room_end ?? play.end);
       delete playSection.dataset.trimIn;
       delete playSection.dataset.trimOut;
       playTrimSave.disabled = true;
       playTrimIn.disabled = !play.video;
       playTrimOut.disabled = !play.video;
+      playLengthTrimmer.sync();
     }
 
     function skipButton(play) {
@@ -2533,7 +2847,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "skip";
-      button.textContent = "Choose your team";
+      button.textContent = "Choose who to scout";
       button.addEventListener("click", () => {
         const film = play.film || playSection.dataset.film || "/projects";
         const id = (String(film).match(/\/projects\/(\d+)/) || [])[1];
@@ -2598,6 +2912,15 @@
         if (match) return match[1];
       }
       return value;
+    }
+
+    function formationPlot(href) {
+      const image = document.createElement("img");
+      image.src = endpoint(href);
+      image.alt = "Formation plot";
+      image.className = "formation-plot";
+      image.loading = "lazy";
+      return image;
     }
 
     function kindLabel(play) {
@@ -2701,12 +3024,135 @@
           playTypes.append(group);
         }
       }
+      if (chosenFamily === "scrimmage" && (play.play_type === "run" || play.play_type === "pass")) {
+        playTypes.append(formationControls(play));
+      }
+      const omit = document.createElement("button");
+      omit.type = "button";
+      omit.className = "discard play-omit";
+      omit.textContent = play.discarded ? "Include" : "Discard";
+      omit.classList.toggle("chosen", Boolean(play.discarded));
+      omit.addEventListener("click", () => setDiscarded(play.uid, !play.discarded, omit));
       const discard = document.createElement("button");
       discard.type = "button";
       discard.className = "discard";
       discard.textContent = "Not a play";
       discard.addEventListener("click", () => relabelPlay(play.uid, "junk", discard));
-      playTypes.append(discard);
+      playTypes.append(omit, discard);
+    }
+
+    function formationControls(play) {
+      const group = document.createElement("div");
+      group.className = "formation-controls";
+      const heading = document.createElement("p");
+      heading.className = "type-label";
+      heading.textContent = "Formation";
+      const note = document.createElement("p");
+      note.className = "formation-note";
+      note.textContent = play.formation
+        ? "AI guess below. Tap another look to override it."
+        : "Detect a guess from the plot, or pick the look yourself.";
+      if (play.formation_plot) {
+        const plot = formationPlot(play.formation_plot);
+        plot.classList.add("formation-plot-edit");
+        group.append(heading, note, plot);
+      } else {
+        group.append(heading, note);
+      }
+      const tools = document.createElement("div");
+      tools.className = "review-actions formation-tools";
+      const detect = document.createElement("button");
+      detect.type = "button";
+      detect.textContent = play.formation_plot ? "Detect again" : "Detect formation";
+      detect.addEventListener("click", () => detectFormation(play.uid, detect));
+      tools.append(detect);
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.textContent = "Clear";
+      clear.classList.toggle("chosen", !play.formation_key && !play.formation);
+      clear.addEventListener("click", () => {
+        if (!play.formation_key && !play.formation) return;
+        setFormation(play.uid, null, clear);
+      });
+      tools.append(clear);
+      group.append(tools);
+      const actions = document.createElement("div");
+      actions.className = "review-actions formation-choices";
+      const choices = play.formation_choices || [];
+      const current = play.formation_key || "";
+      for (const choice of choices) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = choice.label || choice.key;
+        button.classList.toggle("chosen", current === choice.key);
+        button.addEventListener("click", () => {
+          if (button.classList.contains("chosen")) return;
+          setFormation(play.uid, choice.key, button);
+        });
+        actions.append(button);
+      }
+      if (actions.childElementCount) group.append(actions);
+      return group;
+    }
+
+    async function setFormation(uid, key, control) {
+      const buttons = control
+        ? [control, ...playTypes.querySelectorAll(".formation-controls button")]
+        : [...playTypes.querySelectorAll(".formation-controls button")];
+      for (const button of buttons) button.disabled = true;
+      try {
+        const body = key == null ? { clear_formation: true } : { formation: key };
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not save that formation.";
+          return;
+        }
+        status.className = "";
+        status.textContent = "";
+        showPlayUpdate(payload);
+      } finally {
+        for (const button of buttons) {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+    }
+
+    async function detectFormation(uid, control) {
+      const buttons = control
+        ? [control, ...playTypes.querySelectorAll(".formation-controls button")]
+        : [...playTypes.querySelectorAll(".formation-controls button")];
+      for (const button of buttons) button.disabled = true;
+      if (control) control.textContent = "Detecting…";
+      try {
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/formation`, {
+          method: "POST",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not read that formation.";
+          return;
+        }
+        status.className = "";
+        status.textContent = payload.formation
+          ? `Formation set to ${payload.formation}.`
+          : "Plot ready. Pick the formation if the guess is blank.";
+        showPlayUpdate(payload);
+      } finally {
+        for (const button of buttons) {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
     }
 
     async function tagPlayCard(card, tag, control) {
@@ -2821,6 +3267,171 @@
     playTrimIn.addEventListener("click", () => markDetailTrim("in"));
     playTrimOut.addEventListener("click", () => markDetailTrim("out"));
     playTrimSave.addEventListener("click", () => saveDetailTrim());
+    const playLengthTrimmer = bindLengthTrimmer(
+      document.querySelector("#play-length-trimmer"),
+      playVideo,
+      playSection,
+      (nextStart, nextEnd) => {
+        playSection.dataset.trimIn = String(nextStart);
+        playSection.dataset.trimOut = String(nextEnd);
+        const start = Number(playSection.dataset.start || 0);
+        const end = Number(playSection.dataset.end || 0);
+        playTrimSave.disabled = !trimWindowChanged(nextStart, nextEnd, start, end);
+        playTrimNote.hidden = false;
+        playTrimNote.textContent = trimLengthNote(nextStart, nextEnd);
+      },
+    );
+
+    function trimLengthNote(start, end) {
+      return `Trim to ${clock(start)} – ${clock(end)}. Length ${playLength(end - start)}.`;
+    }
+
+    function trimWindowChanged(nextStart, nextEnd, start, end) {
+      return nextEnd - nextStart >= 0.5
+        && (Math.abs(nextStart - start) > 0.04 || Math.abs(nextEnd - end) > 0.04);
+    }
+
+    function createLengthTrimmer(video, holder, onWindow) {
+      const root = document.createElement("div");
+      root.className = "length-trimmer";
+      const readout = document.createElement("div");
+      readout.className = "trimmer-readout";
+      const startLabel = document.createElement("span");
+      startLabel.className = "trimmer-start";
+      const lengthLabel = document.createElement("span");
+      lengthLabel.className = "length";
+      const endLabel = document.createElement("span");
+      endLabel.className = "trimmer-end";
+      readout.append(startLabel, lengthLabel, endLabel);
+      const track = document.createElement("div");
+      track.className = "trimmer-track";
+      const clipMark = document.createElement("div");
+      clipMark.className = "trimmer-clip";
+      const range = document.createElement("div");
+      range.className = "trimmer-range";
+      const head = document.createElement("div");
+      head.className = "trimmer-playhead";
+      const startHandle = document.createElement("button");
+      startHandle.type = "button";
+      startHandle.className = "trimmer-handle";
+      startHandle.dataset.edge = "in";
+      startHandle.setAttribute("aria-label", "Trim start");
+      const endHandle = document.createElement("button");
+      endHandle.type = "button";
+      endHandle.className = "trimmer-handle";
+      endHandle.dataset.edge = "out";
+      endHandle.setAttribute("aria-label", "Trim end");
+      track.append(clipMark, range, head, startHandle, endHandle);
+      root.append(readout, track);
+      return bindLengthTrimmer(root, video, holder, onWindow);
+    }
+
+    function bindLengthTrimmer(root, video, holder, onWindow) {
+      const track = root.querySelector(".trimmer-track");
+      const clipMark = root.querySelector(".trimmer-clip");
+      const range = root.querySelector(".trimmer-range");
+      const head = root.querySelector(".trimmer-playhead");
+      const startLabel = root.querySelector(".trimmer-start");
+      const endLabel = root.querySelector(".trimmer-end");
+      const lengthLabel = root.querySelector(".length");
+      const startHandle = root.querySelector('[data-edge="in"]');
+      const endHandle = root.querySelector('[data-edge="out"]');
+      let drag = "";
+
+      function bounds() {
+        const start = Number(holder.dataset.start || 0);
+        const end = Number(holder.dataset.end || start);
+        const roomStart = Math.min(start, Number(holder.dataset.roomStart ?? start));
+        const roomEnd = Math.max(end, Number(holder.dataset.roomEnd ?? end));
+        const length = Math.max(0.1, roomEnd - roomStart);
+        const trimIn = holder.dataset.trimIn == null ? start : Number(holder.dataset.trimIn);
+        const trimOut = holder.dataset.trimOut == null ? end : Number(holder.dataset.trimOut);
+        return {
+          start,
+          end,
+          roomStart,
+          roomEnd,
+          length,
+          trimIn: Math.min(Math.max(trimIn, roomStart), roomEnd),
+          trimOut: Math.max(Math.min(trimOut, roomEnd), roomStart),
+        };
+      }
+
+      function paint() {
+        const box = bounds();
+        const inPct = ((box.trimIn - box.roomStart) / box.length) * 100;
+        const outPct = ((box.trimOut - box.roomStart) / box.length) * 100;
+        const clipLeft = ((box.start - box.roomStart) / box.length) * 100;
+        const clipWidth = ((box.end - box.start) / box.length) * 100;
+        if (clipMark) {
+          clipMark.style.left = `${clipLeft}%`;
+          clipMark.style.width = `${Math.max(0, clipWidth)}%`;
+        }
+        range.style.left = `${inPct}%`;
+        range.style.width = `${Math.max(0, outPct - inPct)}%`;
+        startHandle.style.left = `${inPct}%`;
+        endHandle.style.left = `${outPct}%`;
+        const at = box.start + (Number.isFinite(video.currentTime) ? video.currentTime : 0);
+        head.style.left = `${Math.min(100, Math.max(0, ((at - box.roomStart) / box.length) * 100))}%`;
+        startLabel.textContent = clock(box.trimIn);
+        endLabel.textContent = clock(box.trimOut);
+        lengthLabel.textContent = `Length ${playLength(box.trimOut - box.trimIn)}`;
+      }
+
+      function filmAt(clientX) {
+        const rect = track.getBoundingClientRect();
+        const box = bounds();
+        const ratio = rect.width ? Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) : 0;
+        return box.roomStart + ratio * box.length;
+      }
+
+      function move(edge, clientX) {
+        const box = bounds();
+        const at = filmAt(clientX);
+        let trimIn = box.trimIn;
+        let trimOut = box.trimOut;
+        if (edge === "in") trimIn = Math.min(at, trimOut - 0.5);
+        else trimOut = Math.max(at, trimIn + 0.5);
+        trimIn = Math.max(box.roomStart, trimIn);
+        trimOut = Math.min(box.roomEnd, trimOut);
+        if (trimOut - trimIn < 0.5) return;
+        onWindow(trimIn, trimOut);
+        paint();
+      }
+
+      function grab(handle, event) {
+        event.preventDefault();
+        event.stopPropagation();
+        drag = handle.dataset.edge;
+        handle.setPointerCapture(event.pointerId);
+      }
+
+      startHandle.addEventListener("pointerdown", (event) => grab(startHandle, event));
+      endHandle.addEventListener("pointerdown", (event) => grab(endHandle, event));
+      for (const handle of [startHandle, endHandle]) {
+        handle.addEventListener("pointermove", (event) => {
+          if (drag !== handle.dataset.edge) return;
+          move(drag, event.clientX);
+        });
+        handle.addEventListener("pointerup", () => { drag = ""; });
+        handle.addEventListener("pointercancel", () => { drag = ""; });
+      }
+      track.addEventListener("pointerdown", (event) => {
+        if (event.target.closest(".trimmer-handle")) return;
+        const box = bounds();
+        const film = filmAt(event.clientX);
+        if (film < box.start || film > box.end) return;
+        const local = film - box.start;
+        const limit = Number.isFinite(video.duration) ? video.duration : box.end - box.start;
+        video.currentTime = Math.min(limit, Math.max(0, local));
+      });
+      video.addEventListener("timeupdate", paint);
+      video.addEventListener("seeked", paint);
+      video.addEventListener("loadedmetadata", paint);
+      root.sync = paint;
+      paint();
+      return root;
+    }
 
     function markDetailTrim(edge) {
       const start = Number(playSection.dataset.start || 0);
@@ -2831,12 +3442,10 @@
       else playSection.dataset.trimOut = String(film);
       const nextStart = Number(playSection.dataset.trimIn || start);
       const nextEnd = Number(playSection.dataset.trimOut || end);
-      playTrimSave.disabled = !(
-        nextEnd - nextStart >= 0.5
-        && (nextStart > start + 0.04 || nextEnd < end - 0.04)
-      );
+      playTrimSave.disabled = !trimWindowChanged(nextStart, nextEnd, start, end);
       playTrimNote.hidden = false;
-      playTrimNote.textContent = `Trim to ${clock(nextStart)} – ${clock(nextEnd)}.`;
+      playTrimNote.textContent = trimLengthNote(nextStart, nextEnd);
+      playLengthTrimmer.sync();
     }
 
     async function saveDetailTrim() {
@@ -3638,6 +4247,158 @@
       route();
     }
 
+    function paintTeamReset(progress) {
+      if (!progress) {
+        teamResetMeter.hidden = true;
+        teamResetRetry.hidden = true;
+        teamResetButton.disabled = false;
+        teamResetSpin.hidden = true;
+        teamResetLabel.textContent = "Reset team photos for all films";
+        return;
+      }
+      const running = Boolean(progress.running);
+      const failed = Number(progress.failed || 0);
+      const total = Number(progress.total || 0);
+      const done = Number(progress.done || 0);
+      const percent = Number(progress.percent || 0);
+      const films = Array.isArray(progress.films) ? progress.films : [];
+      teamResetMeter.hidden = total === 0 && !running && !progress.detail;
+      teamResetButton.disabled = running;
+      teamResetSpin.hidden = !running;
+      teamResetLabel.textContent = running
+        ? "Resetting team photos…"
+        : "Reset team photos for all films";
+      teamResetRetry.hidden = running || failed < 1;
+      const order = ["queue", "reset", "rebuild"];
+      const currentFilm = films.find((row) => row.status === "running");
+      const active = running
+        ? (done < 1 && !currentFilm
+          ? "queue"
+          : currentFilm && (currentFilm.step === "reset" || /Clearing/.test(currentFilm.detail || ""))
+            ? "reset"
+            : "rebuild")
+        : "rebuild";
+      for (const item of teamResetSteps.querySelectorAll("li")) {
+        const index = order.indexOf(item.dataset.step);
+        const now = item.dataset.step === active;
+        item.classList.toggle("now", running && now);
+        item.classList.toggle("done", !running || index < order.indexOf(active));
+        item.classList.toggle("stopped", !running && failed > 0 && item.dataset.step === "rebuild");
+      }
+      teamResetFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      teamResetTrack.setAttribute("aria-valuenow", String(Math.max(0, Math.min(100, percent))));
+      const attempt = Number(progress.attempt || 1);
+      const detail = progress.detail
+        || (running ? "Resetting team photos." : "Team photos are ready.");
+      const counted = total > 0 ? `${done} of ${total}. ` : "";
+      teamResetStatus.textContent = attempt > 1
+        ? `Try ${attempt}. ${counted}${detail}`
+        : `${counted}${detail}`;
+      teamResetStatus.dataset.tone = failed && !running ? "error" : running ? "working" : "";
+      teamResetTrack.setAttribute("aria-valuetext", teamResetStatus.textContent);
+      teamResetFilms.replaceChildren();
+      for (const film of films) {
+        const item = document.createElement("li");
+        item.dataset.status = film.status || "queued";
+        if (film.step) item.dataset.step = film.step;
+        const title = document.createElement("strong");
+        title.textContent = film.name || `Film ${film.project}`;
+        const pct = document.createElement("span");
+        pct.className = "pct";
+        const filmPct = Math.max(0, Math.min(100, Number(film.percent || 0)));
+        pct.textContent = film.status === "queued" && filmPct < 1
+          ? "Queued"
+          : `${filmPct}%`;
+        const note = document.createElement("span");
+        note.textContent = film.detail || film.status || "";
+        item.append(title, pct, note);
+        teamResetFilms.append(item);
+      }
+      teamResetFilms.hidden = films.length === 0;
+    }
+
+    async function watchTeamReset(token) {
+      for (let attempt = 0; attempt < 3600; attempt += 1) {
+        if (token !== teamResetWatch) return;
+        if (settingsSection.hidden) return;
+        let response;
+        try {
+          response = await fetch("/api/teams/reset");
+        } catch {
+          await new Promise((resolve) => window.setTimeout(resolve, 700));
+          continue;
+        }
+        const payload = await response.json().catch(() => null);
+        if (!payload || token !== teamResetWatch) return;
+        paintTeamReset(payload);
+        if (!payload.running) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
+      }
+    }
+
+    async function startTeamReset(failedOnly = false) {
+      const token = ++teamResetWatch;
+      teamResetButton.disabled = true;
+      teamResetRetry.disabled = true;
+      teamResetSpin.hidden = false;
+      teamResetLabel.textContent = failedOnly ? "Retrying failed films…" : "Resetting team photos…";
+      paintTeamReset({
+        running: true,
+        attempt: 1,
+        total: 0,
+        done: 0,
+        failed: 0,
+        percent: 4,
+        detail: failedOnly ? "Retrying the films that failed." : "Queueing ready films.",
+        films: [],
+      });
+      let response;
+      try {
+        const query = failedOnly ? "?failed=true" : "";
+        response = await fetch(`/api/teams/reset${query}`, { method: "POST" });
+      } catch {
+        teamResetButton.disabled = false;
+        teamResetRetry.disabled = false;
+        teamResetSpin.hidden = true;
+        teamResetLabel.textContent = "Reset team photos for all films";
+        paintTeamReset({
+          running: false,
+          attempt: 1,
+          total: 0,
+          done: 0,
+          failed: 1,
+          percent: 100,
+          detail: "Could not start the team photo reset.",
+          films: [],
+        });
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        teamResetButton.disabled = false;
+        teamResetRetry.disabled = false;
+        teamResetSpin.hidden = true;
+        teamResetLabel.textContent = "Reset team photos for all films";
+        paintTeamReset({
+          running: false,
+          attempt: 1,
+          total: 0,
+          done: 0,
+          failed: 1,
+          percent: 100,
+          detail: typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not start the team photo reset.",
+          films: [],
+        });
+        return;
+      }
+      paintTeamReset(payload);
+      teamResetRetry.disabled = false;
+      if (payload.running) await watchTeamReset(token);
+      else paintTeamReset(payload);
+    }
+
     async function showSettings() {
       ++watch;
       document.title = "Settings · Film analysis";
@@ -3671,10 +4432,91 @@
       status.className = "";
       status.textContent = "";
       paintRun(payload);
+      try {
+        const reset = await fetch("/api/teams/reset");
+        if (reset.ok) {
+          const body = await reset.json();
+          paintTeamReset(body);
+          if (body.running) watchTeamReset(++teamResetWatch);
+        }
+      } catch {
+        /* Settings still open without the reset meter. */
+      }
+      paintLearning();
     }
+
+    async function paintLearning() {
+      const log = document.querySelector("#learning-log");
+      const note = document.querySelector("#learning-note");
+      const guidance = document.querySelector("#learning-guidance");
+      const button = document.querySelector("#learning-run");
+      if (!log || !note || !guidance || !button) return;
+      let response;
+      try {
+        response = await fetch("/api/learning");
+      } catch {
+        note.textContent = "Couldn't read coach edits.";
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        note.textContent = typeof payload.detail === "string"
+          ? payload.detail
+          : "Couldn't read coach edits.";
+        return;
+      }
+      const edits = payload.edits || [];
+      log.replaceChildren();
+      for (const edit of edits) {
+        const item = document.createElement("li");
+        const when = document.createElement("p");
+        when.className = "when";
+        const play = edit.play ? ` · play ${edit.play}` : "";
+        when.textContent = `${edit.film || "Film"}${play}${edit.learned ? " · learned" : ""}`;
+        const change = document.createElement("p");
+        change.textContent = `${edit.before} ${edit.after}`;
+        item.append(when, change);
+        log.append(item);
+      }
+      guidance.hidden = !payload.guidance;
+      guidance.textContent = payload.guidance
+        ? `The next read follows: ${payload.guidance}`
+        : "";
+      const pending = Number(payload.pending || 0);
+      button.disabled = pending < 1;
+      note.textContent = edits.length
+        ? pending
+          ? `${pending} edit${pending === 1 ? "" : "s"} waiting to be sent.`
+          : "These edits are already in the next read."
+        : "No coach edits yet. Trim a play or change a tag and it will show up here.";
+    }
+
+    document.querySelector("#learning-run").addEventListener("click", async () => {
+      const button = document.querySelector("#learning-run");
+      const note = document.querySelector("#learning-note");
+      button.disabled = true;
+      note.textContent = "Sending the edits…";
+      try {
+        const response = await fetch("/api/learning", { method: "POST" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          note.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not learn from those edits.";
+          button.disabled = false;
+          return;
+        }
+        await paintLearning();
+      } catch {
+        note.textContent = "Could not learn from those edits.";
+        button.disabled = false;
+      }
+    });
 
     workersInput.addEventListener("change", () => saveWorkers());
     document.querySelector("#formation-reads").addEventListener("change", () => saveFormations());
+    teamResetButton.addEventListener("click", () => startTeamReset(false));
+    teamResetRetry.addEventListener("click", () => startTeamReset(true));
     activityRetry.addEventListener("click", () => {
       if (!activityLoaded) beginActivityLoad();
       paintActivity(watch);
@@ -4836,7 +5678,7 @@
       const building = teamsSection.dataset.loading === String(project.project);
       selectTeamButton.hidden = false;
       selectTeamButton.disabled = building;
-      selectTeamButton.textContent = building ? "Building players…" : "Select team";
+      selectTeamButton.textContent = building ? "Finding both teams…" : "Choose who to scout";
       if (pictured) {
         fillTeams(project.project, teams);
         showTeamChoices(true);
@@ -4918,8 +5760,8 @@
       }
       paintMineChoice();
       teamsNote.textContent = teams.left_player && teams.right_player
-        ? "A full-body shot of each team."
-        : "Finding a full-body shot of each team.";
+        ? "One player from each team. Pick which team to scout."
+        : "Finding one player from each team.";
     }
 
     function paintMineChoice() {
@@ -4933,12 +5775,16 @@
         const name = document.querySelector(`#team-${button.dataset.side}-name`).value.trim();
         const who = name || (button.dataset.side === "left" ? "Home" : "Away");
         document.querySelector(`#team-${button.dataset.side}-kicker`).textContent = who;
-        if (!chosen) button.textContent = "This is my team";
-        else if (selected) button.textContent = "Your team";
-        else button.textContent = "Opponent";
+        if (!chosen) button.textContent = "Scout this team";
+        else if (selected) button.textContent = "Scouting";
+        else button.textContent = "Other team";
         button.setAttribute(
           "aria-label",
-          selected ? `${who}, your team` : chosen ? `${who}, the opponent` : `Choose ${who} as your team`,
+          selected
+            ? `${who}, the team you are scouting`
+            : chosen
+              ? `${who}, not the team you are scouting`
+              : `Scout ${who}`,
         );
       }
     }
@@ -4971,6 +5817,7 @@
       }
       teamsFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
       teamsTrack.setAttribute("aria-valuenow", String(Math.max(0, Math.min(100, percent))));
+      teamsTrack.classList.toggle("moving", Boolean(progress.running) && !failed && percent < 100);
       const attempt = Number(progress.attempt) || 1;
       const detail = progress.detail || (failed ? "Could not build the team cards." : "Working on the team cards.");
       const line = attempt > 1 ? `Try ${attempt}. ${detail}` : detail;
@@ -4982,6 +5829,7 @@
     function hideTeamsProgress() {
       if (!teamsMeter) return;
       teamsMeter.hidden = true;
+      teamsTrack.classList.remove("moving");
       teamsFill.style.width = "0";
       teamsStatus.textContent = "";
       delete teamsStatus.dataset.tone;
@@ -5022,21 +5870,21 @@
       teamsSection.dataset.loading = String(projectId);
       if (again) teamsSection.dataset.refreshing = "1";
       selectTeamButton.disabled = true;
-      selectTeamButton.textContent = showing ? "Select team" : "Building players…";
+      selectTeamButton.textContent = showing ? "Choose who to scout" : "Finding both teams…";
       teamsNote.textContent = again
-        ? (side ? "Finding another photo for that team." : "Finding different photos for each team.")
-        : "Finding a full-body shot of each team.";
+        ? (side ? "Finding another player for that team." : "Finding another player from each team.")
+        : "Finding one player from each team.";
       teamsError.hidden = true;
       teamsRetry.disabled = true;
       teamsRetrySpin.hidden = false;
-      teamsRetryLabel.textContent = again ? "Finding photos…" : "Building photos…";
+      teamsRetryLabel.textContent = again ? "Finding players…" : "Finding both teams…";
       paintTeamsProgress(
         {
           step: "read",
           percent: 4,
           detail: again
-            ? (side ? "Starting another photo for that team." : "Starting different photos for each team.")
-            : "Starting the team cards.",
+            ? (side ? "Looking for another player for that team." : "Looking for another player from each team.")
+            : "Looking for one player from each team.",
           attempt: Number(teamsSection.dataset.attempt || 0) + 1,
           running: true,
         },
@@ -5101,7 +5949,7 @@
         }, 900);
       } catch (error) {
         if (results.dataset.project !== String(projectId)) return;
-        teamsNote.textContent = "A full-body shot of each team could not be found.";
+        teamsNote.textContent = "Could not find a player from each team in the film.";
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not read a lineup.";
         paintTeamsProgress(
@@ -5121,19 +5969,44 @@
         if (teamsSection.dataset.loading === String(projectId)) delete teamsSection.dataset.loading;
         delete teamsSection.dataset.refreshing;
         selectTeamButton.disabled = false;
-        selectTeamButton.textContent = "Select team";
+        selectTeamButton.textContent = "Choose who to scout";
         teamsRetry.disabled = false;
         teamsRetrySpin.hidden = true;
         if (teamsError.hidden) teamsRetryLabel.textContent = "Try different photos";
         for (const button of teamsSection.querySelectorAll(".team-refresh")) {
           button.disabled = false;
           button.textContent = "New photo";
-          button.closest(".team-card").classList.remove("refreshing");
         }
+        releaseTeamRefresh();
         if (!playersReady()) showTeamChoices(false);
         else if (studio.dataset.stage === "teams") showTeamChoices(true);
         if (studio.dataset.stage === "teams") paintStageCopy("teams");
         paintDock();
+      }
+    }
+
+    function releaseTeamRefresh() {
+      const cards = [...teamsSection.querySelectorAll(".team-card.refreshing")];
+      const pending = cards.flatMap((card) =>
+        [...card.querySelectorAll("img.player")].filter((img) => img.getAttribute("src") && !img.complete),
+      );
+      const clear = () => {
+        for (const card of teamsSection.querySelectorAll(".team-card.refreshing")) {
+          card.classList.remove("refreshing");
+        }
+      };
+      if (!pending.length) {
+        clear();
+        return;
+      }
+      let left = pending.length;
+      const done = () => {
+        left -= 1;
+        if (left <= 0) clear();
+      };
+      for (const img of pending) {
+        img.addEventListener("load", done, { once: true });
+        img.addEventListener("error", done, { once: true });
       }
     }
 
@@ -5239,7 +6112,7 @@
       const redraw = options.redraw !== false;
       teamsSave.disabled = true;
       teamsError.hidden = true;
-      if (redraw) teamsNote.textContent = "Finding a full-body shot of each team.";
+      if (redraw) teamsNote.textContent = "Finding one player from each team.";
       try {
         const response = await fetch(`/api/projects/${projectId}/teams`, {
           method: "POST",
@@ -5261,7 +6134,7 @@
       } catch (error) {
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
-        teamsNote.textContent = "A full-body shot of each team.";
+        teamsNote.textContent = "One player from each team. Pick which team to scout.";
         if (!redraw) reportNote.textContent = error.message || "Could not save that team.";
       } finally {
         teamsSave.disabled = false;
@@ -5485,6 +6358,22 @@
       trimLabel.textContent = "Trim";
       const trim = document.createElement("div");
       trim.className = "play-trim";
+      const cardVideo = item.querySelector("video");
+      if (cardVideo) trim.append(createLengthTrimmer(cardVideo, item, (nextStart, nextEnd) => {
+        item.dataset.trimIn = String(nextStart);
+        item.dataset.trimOut = String(nextEnd);
+        const save = item.querySelector(".trim-save");
+        const note = item.querySelector(".play-trim-note");
+        if (save) {
+          save.disabled = !trimWindowChanged(
+            nextStart,
+            nextEnd,
+            Number(item.dataset.start || 0),
+            Number(item.dataset.end || 0),
+          );
+        }
+        if (note) note.textContent = trimLengthNote(nextStart, nextEnd);
+      }));
       const trimIn = document.createElement("button");
       trimIn.type = "button";
       trimIn.className = "trim-in";
@@ -5504,12 +6393,19 @@
       const trimNote = document.createElement("p");
       trimNote.className = "play-trim-note";
       trim.append(trimIn, trimOut, trimSave, trimNote);
+      const omit = document.createElement("button");
+      omit.type = "button";
+      omit.className = "play-omit";
+      omit.addEventListener("click", () => setDiscarded(item.dataset.uid, item.dataset.discarded !== "1", omit));
+      const omitNote = document.createElement("p");
+      omitNote.className = "play-omit-note";
+      omitNote.hidden = true;
       const discard = document.createElement("button");
       discard.type = "button";
       discard.className = "play-discard";
       discard.textContent = "Not a play";
       discard.addEventListener("click", () => relabelPlay(item.dataset.uid, "junk", discard));
-      item.append(badge, meta, tagLabel, unitRow, trimLabel, trim, discard, view);
+      item.append(badge, meta, tagLabel, unitRow, trimLabel, trim, omit, omitNote, discard, view);
       syncPlayCard(play, item);
       return item;
     }
@@ -5521,8 +6417,12 @@
       item.dataset.family = play.family || "";
       item.dataset.unit = play.unit || "";
       item.dataset.reviewed = play.reviewed ? "1" : "0";
+      item.dataset.discarded = play.discarded ? "1" : "0";
+      item.classList.toggle("is-discarded", Boolean(play.discarded));
       item.dataset.start = String(play.start);
       item.dataset.end = String(play.end);
+      item.dataset.roomStart = String(play.room_start ?? play.start);
+      item.dataset.roomEnd = String(play.room_end ?? play.end);
       delete item.dataset.trimIn;
       delete item.dataset.trimOut;
       const tag = playFamily(play);
@@ -5551,9 +6451,57 @@
       }
       const trimSave = item.querySelector(".trim-save");
       if (trimSave) trimSave.disabled = true;
+      const trimmer = item.querySelector(".length-trimmer");
+      if (trimmer && trimmer.sync) trimmer.sync();
       const trimNote = item.querySelector(".play-trim-note");
       if (trimNote) {
-        trimNote.textContent = "Pause where the play starts and ends, then save the trim.";
+        trimNote.textContent = "Drag the ends to set the length. Pull outward if the cut was too short.";
+      }
+      const omit = item.querySelector(".play-omit");
+      if (omit) {
+        omit.textContent = play.discarded ? "Include" : "Discard";
+        omit.classList.toggle("chosen", Boolean(play.discarded));
+        omit.setAttribute("aria-pressed", play.discarded ? "true" : "false");
+      }
+      const omitNote = item.querySelector(".play-omit-note");
+      if (omitNote) omitNote.hidden = !play.discarded;
+      if (omitNote) omitNote.textContent = "Left out of the scouting report.";
+    }
+
+    async function setDiscarded(uid, discarded, control) {
+      if (!uid) return;
+      if (control) control.disabled = true;
+      try {
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ discarded }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not update that play.";
+          return;
+        }
+        status.className = "";
+        status.textContent = "";
+        showPlayUpdate(payload);
+        const projectId = payload.project || results.dataset.project;
+        if (projectId && reportBox.dataset.ready === String(projectId)) {
+          const sections = (reportBox.dataset.sections || "").split(",").filter(Boolean);
+          try {
+            await loadFinishedReport(projectId, sections);
+          } catch {
+            /* the next generate reads the plays that are still included */
+          }
+        }
+      } catch {
+        status.className = "error";
+        status.textContent = "Could not update that play.";
+      } finally {
+        if (control && control.isConnected) control.disabled = false;
       }
     }
 
@@ -5570,10 +6518,10 @@
       else card.dataset.trimOut = String(film);
       const nextStart = Number(card.dataset.trimIn || start);
       const nextEnd = Number(card.dataset.trimOut || end);
-      if (save) save.disabled = !(nextEnd - nextStart >= 0.5 && (nextStart > start + 0.04 || nextEnd < end - 0.04));
-      if (note) {
-        note.textContent = `Trim to ${clock(nextStart)} – ${clock(nextEnd)}.`;
-      }
+      if (save) save.disabled = !trimWindowChanged(nextStart, nextEnd, start, end);
+      if (note) note.textContent = trimLengthNote(nextStart, nextEnd);
+      const trimmer = card.querySelector(".length-trimmer");
+      if (trimmer && trimmer.sync) trimmer.sync();
     }
 
     async function saveCardTrim(card, button) {
@@ -5712,13 +6660,13 @@
         }
         chartNote.textContent = mine
           ? (teamName
-            ? `${teamName} is your team. Try different photos if the shot is off.`
-            : "Your team is set. Try different photos if the shot is off.")
-          : "Choose your team, or try different photos.";
+            ? `Scouting ${teamName}. Try different photos if the shot is off.`
+            : "That team is set to scout. Try different photos if the shot is off.")
+          : "Which team do you want to scout? Or try different photos.";
         return;
       }
       if (stage === "review") {
-        chartNote.textContent = "Trim each clip and tag it as offense / defense or special teams.";
+        chartNote.textContent = "Trim each clip and tag it. Discard a play to leave it out of the report.";
       }
     }
 
@@ -5745,7 +6693,7 @@
             : `${held} stretches still need a look.`;
         stageStatus.textContent = [reviewLine, heldLine].filter(Boolean).join(" ");
         stageNext.disabled = false;
-        stageNext.textContent = "Choose your team";
+        stageNext.textContent = "Choose who to scout";
         stageNext.dataset.action = "teams";
         return;
       }
@@ -5755,18 +6703,18 @@
       if (!playersReady()) {
         stageStatus.textContent = building ? "Reading uniforms from the film." : "Both teams will appear here.";
         stageNext.disabled = true;
-        stageNext.textContent = building ? "Building players…" : "Continue";
+        stageNext.textContent = building ? "Finding both teams…" : "Continue";
         stageNext.dataset.action = "teams";
         return;
       }
       if (!mine) {
-        stageStatus.textContent = "Choose the player wearing your uniform.";
+        stageStatus.textContent = "Which team do you want to scout?";
         stageNext.disabled = true;
         stageNext.textContent = "Continue";
         stageNext.dataset.action = "report";
         return;
       }
-      stageStatus.textContent = teamName ? `${teamName} is your team.` : "Your team is selected.";
+      stageStatus.textContent = teamName ? `Scouting ${teamName}.` : "A team is set to scout.";
       stageNext.disabled = false;
       stageNext.textContent = "Continue to scout report";
       stageNext.dataset.action = "report";
@@ -5917,7 +6865,7 @@
         ? "The scouting report is on this page."
         : teamsDone
           ? "Generate the scouting report next."
-          : "Choose your team next.";
+          : "Choose who to scout next.";
       chartTrack.setAttribute("aria-valuetext", `${reviewText} ${nextText}`);
       paintDock();
     }
@@ -6004,20 +6952,25 @@
         resumeReportProgress(project.project);
       }
       if (busy || (live && !haveReport)) {
-        reportLive.hidden = false;
-        reportView.hidden = true;
         reportDownloads.hidden = true;
+        const keepFinished = haveReport
+          && reportView.childNodes.length > 0
+          && reportBox.dataset.replaced !== "1";
+        reportView.hidden = !keepFinished;
+        reportLive.hidden = false;
         return;
       }
-      reportLive.hidden = true;
+      const hasAnalysis = reportAnalysisTable.querySelector("tbody").children.length > 0;
+      reportLive.hidden = !(haveReport && hasAnalysis);
+      if (haveReport) reportLiveTrack.hidden = true;
       reportView.hidden = !haveReport;
       reportDownloads.hidden = !haveReport;
       reportNote.textContent = haveReport
-        ? "The report is below. Generate again, or download it."
+        ? "The report is below. Click a play number to open the clip and check the tag."
         : canResume
           ? "Reading stopped partway. Continue to finish the leftover plays."
           : !labeled
-            ? "Select your team, then choose what the report should include."
+            ? "Choose which team to scout, then choose what the report should include."
             : picked.length
               ? "Generate the scouting report. You can leave and come back while it reads."
               : "Choose at least one part of the report.";
@@ -6077,15 +7030,24 @@
       reportGenerate.textContent = "Reading each play…";
       reportBox.dataset.live = "1";
       delete reportBox.dataset.resume;
+      delete reportBox.dataset.replaced;
       reportBox.dataset.sections = sections.join(",");
+      const keepFinished = clearTable && reportView.childNodes.length > 0;
       reportLive.hidden = false;
-      reportView.hidden = true;
+      reportLiveTrack.hidden = false;
+      reportView.hidden = !keepFinished;
       reportDownloads.hidden = true;
+      paintReportProgress(0, 0);
       if (clearTable) {
-        reportNote.textContent = "Reading the first play.";
-        reportLiveNote.textContent = "Starting the scouting analysis.";
+        reportNote.textContent = keepFinished
+          ? "Reading the film again. This report stays up until the new one is ready."
+          : "Reading the first play.";
+        reportLiveNote.textContent = keepFinished
+          ? "Starting over. Plays will fill in below as they are read."
+          : "Starting the scouting analysis.";
         reportLiveTendency.replaceChildren();
         reportAnalysisTable.querySelector("tbody").replaceChildren();
+        if (!keepFinished) seedWaitingPlays();
       }
       reportAnalysisTable.dataset.formation = sections.includes("formations") ? "1" : "0";
       startReportPoll(projectId, sections);
@@ -6198,11 +7160,27 @@
       reportBox.dataset.sections = sections.join(",");
       reportBox.dataset.plays = String(payload.plays || 0);
       reportBox.dataset.tendencies = payload.tendencies || "";
-      reportLive.hidden = true;
+      delete reportBox.dataset.replaced;
+      paintReportProgress(0, 0);
+      reportLiveTrack.hidden = true;
+      reportLive.hidden = false;
+      reportLiveNote.textContent = "Click a play number to open the clip and check the tag.";
       renderReport(payload.blocks || []);
       reportView.hidden = false;
       reportDownloads.hidden = false;
-      reportNote.textContent = "The report is below. Generate again, or download it.";
+      reportNote.textContent = "The report is below. Click a play number to open the clip and check the tag.";
+      const query = sections.length ? `?sections=${encodeURIComponent(sections.join(","))}` : "";
+      try {
+        const analysis = await fetch(`/api/projects/${projectId}/report/analysis${query}`);
+        if (analysis.ok) {
+          const body = await analysis.json();
+          const rows = body.analysis || [];
+          paintAnalysisTable(rows, sections.includes("formations"));
+          if (body.snapshot && body.snapshot.tendency) paintLiveTendency(body.snapshot);
+        }
+      } catch {
+        /* keep the written report */
+      }
       const fresh = await fetch(`/api/projects/${projectId}`);
       if (fresh.ok) showReview(await fresh.json());
       else {
@@ -6220,7 +7198,7 @@
       reportStep.querySelector(".step-state").textContent = "Done";
       chartFill.style.width = "100%";
       chartTrack.setAttribute("aria-valuenow", "100");
-      const done = "The scouting report is on this page. Generate again, or download it.";
+      const done = "The scouting report is on this page. Click a play number to check a tag.";
       chartNote.textContent = done;
       chartTrack.setAttribute("aria-valuetext", done);
     }
@@ -6247,18 +7225,40 @@
       reportPoll = 0;
     }
 
+    function paintReportProgress(done, total) {
+      const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((done / total) * 100))) : 0;
+      reportLiveFill.style.width = `${percent}%`;
+      reportLiveTrack.setAttribute("aria-valuenow", String(percent));
+      reportLiveTrack.setAttribute(
+        "aria-valuetext",
+        total > 0 ? `${done} of ${total} plays` : "Starting",
+      );
+    }
+
+    function seedWaitingPlays() {
+      const plays = [...results.querySelectorAll("li[data-play]")].map((item) => ({
+        play: Number(item.dataset.play),
+        status: "pending",
+      }));
+      if (plays.length) paintAnalysisTable(plays, false);
+    }
+
     function paintAnalysis(payload) {
       if (reportBox.dataset.live !== "1" && reportBox.dataset.resume !== "1") return;
       const snapshot = payload.snapshot || payload;
       const analysis = payload.analysis || snapshot.analysis || [];
       reportLive.hidden = false;
-      reportView.hidden = true;
-      if (snapshot.tendency) paintLiveTendency(snapshot);
-      paintAnalysisTable(analysis, Boolean(snapshot.formation));
       const done = Number(payload.done != null ? payload.done : snapshot.done || 0);
       const total = Number(
         payload.total != null ? payload.total : snapshot.total || analysis.length || 0,
       );
+      if (done > 0) {
+        reportView.hidden = true;
+        reportBox.dataset.replaced = "1";
+      }
+      if (snapshot.tendency) paintLiveTendency(snapshot);
+      if (analysis.length) paintAnalysisTable(analysis, Boolean(snapshot.formation));
+      paintReportProgress(done, total);
       const workers = Number(
         payload.workers != null ? payload.workers : snapshot.workers || 0,
       );
@@ -6270,7 +7270,15 @@
           : `Read ${done} of ${total} plays.${pace}`
         : "Reading the plays.";
       reportLiveNote.textContent = line;
-      if (reportBox.dataset.live === "1") reportNote.textContent = line;
+      if (reportBox.dataset.live === "1") {
+        const keeping = reportBox.dataset.replaced !== "1" && !reportView.hidden;
+        reportNote.textContent = keeping
+          ? `${line} The current report stays up until this one replaces it.`
+          : line;
+      }
+      if (reportGenerate.dataset.busy === "1" && total) {
+        reportGenerate.textContent = `Reading ${done} of ${total}`;
+      }
     }
 
     function reportOnPage() {
@@ -6353,11 +7361,24 @@
       reportAnalysisTable.dataset.formation = showFormation ? "1" : "0";
       const body = reportAnalysisTable.querySelector("tbody");
       body.replaceChildren();
+      const projectId = reportBox.dataset.project || results.dataset.project || "";
       for (const row of rows || []) {
         const line = document.createElement("tr");
         const status = row.status || "";
         const pending = status === "pending" || status === "reading";
-        appendLiveCell(line, String(row.play || ""), false);
+        const playCell = document.createElement("td");
+        const playNumber = Number(row.play || 0);
+        const uid = row.uid || (projectId && playNumber ? `${projectId}-${playNumber}` : "");
+        if (uid && !pending) {
+          playCell.append(playLink(`/play/${uid}`, String(playNumber || row.play || "")));
+        } else if (uid) {
+          const link = playLink(`/play/${uid}`, String(playNumber || row.play || ""));
+          link.classList.add("pending");
+          playCell.append(link);
+        } else {
+          playCell.textContent = String(row.play || "");
+        }
+        line.append(playCell);
         appendLiveCell(line, sideLabel(row.side), pending && !row.side);
         appendLiveCell(line, callLabel(row.call), pending && !row.call);
         appendLiveCell(line, row.formation || "", pending && showFormation && !row.formation);
@@ -6414,6 +7435,7 @@
 
     function renderReport(blocks) {
       reportView.replaceChildren();
+      const projectId = reportBox.dataset.project || results.dataset.project || "";
       for (const block of blocks) {
         if (block.kind === "table") {
           reportView.append(reportTable(block.text || ""));
@@ -6421,9 +7443,30 @@
         }
         const node = document.createElement(block.kind === "title" || block.kind === "heading" ? "h3" : "p");
         if (block.kind === "row") node.className = "report-row";
-        node.textContent = block.text || "";
+        if (block.kind === "row" || block.kind === "body") {
+          fillWithPlayLinks(node, block.text || "", projectId);
+        } else {
+          node.textContent = block.text || "";
+        }
         reportView.append(node);
       }
+    }
+
+    function fillWithPlayLinks(node, text, projectId) {
+      const pattern = /Play (\d+)\b/g;
+      let last = 0;
+      let match = pattern.exec(text);
+      if (!match || !projectId) {
+        node.textContent = text;
+        return;
+      }
+      while (match) {
+        if (match.index > last) node.append(text.slice(last, match.index));
+        node.append(playLink(`/play/${projectId}-${match[1]}`, match[0]));
+        last = match.index + match[0].length;
+        match = pattern.exec(text);
+      }
+      if (last < text.length) node.append(text.slice(last));
     }
 
     function reportTable(text) {

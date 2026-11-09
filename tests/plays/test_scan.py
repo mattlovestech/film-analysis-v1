@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from film_analysis.agents.scan import (
+from film_analysis.plays.scan import (
     MAX_WORKERS,
     WorkerLimit,
     family_at,
@@ -18,7 +18,7 @@ from film_analysis.agents.scan import (
     stable_through,
     window_bounds,
 )
-from film_analysis.agents.segments import FilmSpan
+from film_analysis.plays.segments import FilmSpan
 
 
 def test_windows_cover_a_long_film_with_overlap() -> None:

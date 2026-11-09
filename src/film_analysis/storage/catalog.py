@@ -30,6 +30,9 @@ TEAM_IMAGE_KINDS = frozenset(
 )
 
 
+PLAY_IMAGE_KINDS = frozenset({"formation"})
+
+
 def team_media(kind: str, suffix: str) -> tuple[str, str]:
     """Return a stored suffix and content type, or raise when the image is not one we keep."""
 
@@ -40,6 +43,13 @@ def team_media(kind: str, suffix: str) -> tuple[str, str]:
         raise CatalogError("Could not store that team image.")
     content = "image/svg+xml" if cleaned == ".svg" else "image/jpeg"
     return cleaned, content
+
+
+def _play_image_kind(kind: str) -> str:
+    cleaned = (kind or "").strip().lower()
+    if cleaned not in PLAY_IMAGE_KINDS:
+        raise CatalogError("Could not store that play image.")
+    return cleaned
 
 
 @dataclass(frozen=True)
@@ -62,6 +72,21 @@ class ActivityRecord:
     running: bool
     updated_at: str
     steps: tuple[ActivityStep, ...] = ()
+
+
+@dataclass(frozen=True)
+class CoachEdit:
+    """One coach correction of a cut or a tag, kept so a later read can learn from it."""
+
+    edit_id: int
+    project_id: int
+    play_number: int | None
+    film: str
+    action: str
+    before: str
+    after: str
+    at: str
+    learned: bool = False
 
 
 def advance_activity_steps(
@@ -203,6 +228,7 @@ class PlayRecord:
     reviewed: bool = False
     unit: str | None = None
     formation: str | None = None
+    discarded: bool = False
 
 
 @dataclass(frozen=True)
@@ -333,6 +359,9 @@ class Catalog(Protocol):
     def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> None:
         """Store a lineup still or roster portrait for one side."""
 
+    def clear_team_image(self, project_id: int, kind: str) -> None:
+        """Remove a stored lineup still or roster portrait for one side."""
+
     def team_image(self, project_id: int, kind: str) -> Path | None:
         """Return a lineup still or roster portrait, when it has been stored."""
 
@@ -434,6 +463,9 @@ class Catalog(Protocol):
     def set_reviewed(self, project_id: int, play_number: int, reviewed: bool) -> None:
         """Remember whether this play has been checked."""
 
+    def set_discarded(self, project_id: int, play_number: int, discarded: bool) -> None:
+        """Leave a play out of the scouting report, or put it back. The play stays."""
+
     def set_play_unit(
         self, project_id: int, play_number: int, unit: str, *, mark_reviewed: bool = True
     ) -> None:
@@ -451,6 +483,29 @@ class Catalog(Protocol):
         clip: Path,
     ) -> None:
         """Recut one play to a tighter window and keep the new clip."""
+
+    def add_coach_edit(
+        self,
+        project_id: int,
+        play_number: int | None,
+        film: str,
+        action: str,
+        before: str,
+        after: str,
+    ) -> CoachEdit:
+        """Remember a coach correction of a cut or a tag."""
+
+    def list_coach_edits(self, limit: int = 80) -> list[CoachEdit]:
+        """Return recent coach corrections, newest first."""
+
+    def mark_coach_edits_learned(self, edit_ids: list[int]) -> None:
+        """Mark corrections that have already been sent to improve the next read."""
+
+    def coach_guidance(self) -> str:
+        """The notes the next cut and tag should follow."""
+
+    def set_coach_guidance(self, text: str) -> None:
+        """Store the notes learned from coach corrections."""
 
     def drop_play(self, project_id: int, play_number: int) -> None:
         """Remove a play the user has marked as not a play."""
@@ -475,6 +530,14 @@ class Catalog(Protocol):
 
     def clip_file(self, project_id: int, play_number: int) -> Path | None:
         """Return the play clip, when it is still on disk."""
+
+    def save_play_image(
+        self, project_id: int, play_number: int, kind: str, data: bytes
+    ) -> None:
+        """Store a still for one play, such as a formation plot."""
+
+    def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
+        """Return a still for one play, when it has been stored."""
 
     def save_poster(self, project_id: int, data: bytes) -> None:
         """Store the action still used as this film's thumbnail."""
@@ -501,11 +564,22 @@ class ClipStore(Protocol):
     def play_path(self, project_id: int, play_number: int) -> Path:
         """Return a local file for that play, downloading it when needed."""
 
+    def save_play_image(
+        self, project_id: int, play_number: int, kind: str, data: bytes
+    ) -> str:
+        """Store a still for one play and return its key."""
+
+    def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
+        """Return a still for one play, when one exists."""
+
     def remove(self, project_id: int) -> None:
         """Delete every object for a project."""
 
     def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> str:
         """Store a lineup still or roster portrait and return its key."""
+
+    def clear_team_image(self, project_id: int, kind: str) -> None:
+        """Remove a stored lineup still or roster portrait."""
 
     def team_image(self, project_id: int, kind: str) -> Path | None:
         """Return a local file for a team image, when one exists."""
@@ -538,6 +612,22 @@ class ClipDirectory:
     def play_path(self, project_id: int, play_number: int) -> Path:
         return self._project(project_id) / "plays" / f"{play_number}.mp4"
 
+    def save_play_image(
+        self, project_id: int, play_number: int, kind: str, data: bytes
+    ) -> str:
+        cleaned = _play_image_kind(kind)
+        dest = self._project(project_id) / "plays" / f"{play_number}-{cleaned}.jpg"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        return dest.relative_to(self.root).as_posix()
+
+    def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
+        cleaned = _play_image_kind(kind)
+        path = self._project(project_id) / "plays" / f"{play_number}-{cleaned}.jpg"
+        if path.is_file() and path.stat().st_size:
+            return path
+        return None
+
     def source_path(self, project_id: int) -> Path:
         return self._project(project_id) / "source.mp4"
 
@@ -559,6 +649,21 @@ class ClipDirectory:
         dest = folder / f"{kind}{cleaned}"
         dest.write_bytes(data)
         return dest.relative_to(self.root).as_posix()
+
+    def clear_team_image(self, project_id: int, kind: str) -> None:
+        if kind not in TEAM_IMAGE_KINDS:
+            raise CatalogError("Could not store that team image.")
+        folder = self._project(project_id) / "teams"
+        if not folder.is_dir():
+            return
+        for old in folder.glob(f"{kind}.*"):
+            old.unlink(missing_ok=True)
+        marker = folder / ".player-crops"
+        if kind.endswith("-player") and marker.is_file():
+            left = any(folder.glob("left-player.*"))
+            right = any(folder.glob("right-player.*"))
+            if not left and not right:
+                marker.unlink(missing_ok=True)
 
     def team_image(self, project_id: int, kind: str) -> Path | None:
         if kind not in TEAM_IMAGE_KINDS:
@@ -602,6 +707,9 @@ class MemoryCatalog:
         self._teams: dict[int, FilmTeams] = {}
         self._reads: dict[int, list[ReadNote]] = {}
         self._report: dict[int, dict[int, ReportAnalysis]] = {}
+        self._edits: list[CoachEdit] = []
+        self._guidance = ""
+        self._edit_next = 1
         self._next = 1
         self._lock = threading.Lock()
 
@@ -677,6 +785,11 @@ class MemoryCatalog:
         with self._lock:
             self._require(project_id)
         self._clips.save_team_image(project_id, kind, data, suffix)
+
+    def clear_team_image(self, project_id: int, kind: str) -> None:
+        with self._lock:
+            self._require(project_id)
+        self._clips.clear_team_image(project_id, kind)
 
     def team_image(self, project_id: int, kind: str) -> Path | None:
         return self._clips.team_image(project_id, kind)
@@ -871,7 +984,7 @@ class MemoryCatalog:
             self._reads.pop(project_id, None)
 
     def read_spend(self) -> dict[int, tuple[float, int, int, str]]:
-        from film_analysis.agents.cost import summarize_reads
+        from film_analysis.ingest.cost import summarize_reads
 
         with self._lock:
             rows = [
@@ -903,7 +1016,7 @@ class MemoryCatalog:
         return notes
 
     def report_spend(self) -> dict[int, tuple[float, int, int, str]]:
-        from film_analysis.agents.cost import summarize_reads
+        from film_analysis.ingest.cost import summarize_reads
 
         with self._lock:
             rows = [
@@ -920,7 +1033,7 @@ class MemoryCatalog:
         return summarize_reads(rows)
 
     def play_read_costs(self) -> dict[int, list[tuple[int, float]]]:
-        from film_analysis.agents.cost import cost_per_play
+        from film_analysis.ingest.cost import cost_per_play
 
         with self._lock:
             projects = list(self._projects)
@@ -989,6 +1102,14 @@ class MemoryCatalog:
                 raise CatalogError("That play is no longer available.")
             self._replace(project_id, replace(current, plays=updated))
 
+    def set_discarded(self, project_id: int, play_number: int, discarded: bool) -> None:
+        with self._lock:
+            current = self._require(project_id)
+            updated = _mark_discarded(current.plays, play_number, discarded)
+            if updated is None:
+                raise CatalogError("That play is no longer available.")
+            self._replace(project_id, replace(current, plays=updated))
+
     def set_play_unit(
         self, project_id: int, play_number: int, unit: str, *, mark_reviewed: bool = True
     ) -> None:
@@ -1024,6 +1145,52 @@ class MemoryCatalog:
             if updated is None:
                 raise CatalogError("That play is no longer available.")
             self._replace(project_id, replace(current, plays=updated))
+
+    def add_coach_edit(
+        self,
+        project_id: int,
+        play_number: int | None,
+        film: str,
+        action: str,
+        before: str,
+        after: str,
+    ) -> CoachEdit:
+        with self._lock:
+            edit = CoachEdit(
+                self._edit_next,
+                project_id,
+                play_number,
+                film,
+                action,
+                before,
+                after,
+                datetime.now(UTC).isoformat(),
+            )
+            self._edit_next += 1
+            self._edits.append(edit)
+            return edit
+
+    def list_coach_edits(self, limit: int = 80) -> list[CoachEdit]:
+        with self._lock:
+            rows = list(self._edits)
+        rows.reverse()
+        return rows[:limit]
+
+    def mark_coach_edits_learned(self, edit_ids: list[int]) -> None:
+        wanted = set(edit_ids)
+        with self._lock:
+            self._edits = [
+                replace(edit, learned=True) if edit.edit_id in wanted else edit
+                for edit in self._edits
+            ]
+
+    def coach_guidance(self) -> str:
+        with self._lock:
+            return self._guidance
+
+    def set_coach_guidance(self, text: str) -> None:
+        with self._lock:
+            self._guidance = text.strip()
 
     def drop_play(self, project_id: int, play_number: int) -> None:
         with self._lock:
@@ -1088,6 +1255,7 @@ class MemoryCatalog:
             self._teams.pop(project_id, None)
             self._reads.pop(project_id, None)
             self._report.pop(project_id, None)
+            self._edits = [edit for edit in self._edits if edit.project_id != project_id]
         self._clips.remove(project_id)
 
     def clip_file(self, project_id: int, play_number: int) -> Path | None:
@@ -1095,6 +1263,17 @@ class MemoryCatalog:
         if path.is_file():
             return path
         return None
+
+    def save_play_image(
+        self, project_id: int, play_number: int, kind: str, data: bytes
+    ) -> None:
+        self._require(project_id)
+        self._clips.save_play_image(project_id, play_number, kind, data)
+
+    def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
+        if self._find(project_id) is None:
+            return None
+        return self._clips.play_image(project_id, play_number, kind)
 
     def _replace(self, project_id: int, updated: ProjectDetail) -> None:
         self._projects = [
@@ -1183,7 +1362,7 @@ class D1Catalog:
             """
         plays_sql = """
             select play_number, start_seconds, end_seconds, family, play_type, reviewed, unit,
-                   formation
+                   formation, discarded
             from plays
             where project_id = ?
             order by play_number
@@ -1390,6 +1569,11 @@ class D1Catalog:
             raise CatalogError("That analysis is no longer available.")
         self._clips.save_team_image(project_id, kind, data, suffix)
 
+    def clear_team_image(self, project_id: int, kind: str) -> None:
+        if self.get_project(project_id) is None:
+            raise CatalogError("That analysis is no longer available.")
+        self._clips.clear_team_image(project_id, kind)
+
     def team_image(self, project_id: int, kind: str) -> Path | None:
         return self._clips.team_image(project_id, kind)
 
@@ -1540,7 +1724,7 @@ class D1Catalog:
             set formation = ?
             where project_id = ? and play_number = ?
             """,
-            [formation, project_id, play_number],
+            [formation or None, project_id, play_number],
         )
         if not _changed(result):
             raise CatalogError("That play is no longer available.")
@@ -1566,6 +1750,62 @@ class D1Catalog:
         if not _changed(result):
             raise CatalogError("That play is no longer available.")
 
+    def add_coach_edit(
+        self,
+        project_id: int,
+        play_number: int | None,
+        film: str,
+        action: str,
+        before: str,
+        after: str,
+    ) -> CoachEdit:
+        stamp = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            insert into coach_edits (
+                project_id, play_number, film, action, before_text, after_text, at, learned
+            )
+            values (?, ?, ?, ?, ?, ?, ?, 0)
+            """,
+            [project_id, play_number, film, action, before, after, stamp],
+        )
+        rows = self._query("select max(id) as id from coach_edits")
+        edit_id = int(rows[0]["id"]) if rows else 0
+        return CoachEdit(
+            edit_id, project_id, play_number, film, action, before, after, stamp
+        )
+
+    def list_coach_edits(self, limit: int = 80) -> list[CoachEdit]:
+        rows = self._query(
+            """
+            select id, project_id, play_number, film, action, before_text, after_text, at, learned
+            from coach_edits
+            order by id desc
+            limit ?
+            """,
+            [limit],
+        )
+        return [_coach_edit(row) for row in rows]
+
+    def mark_coach_edits_learned(self, edit_ids: list[int]) -> None:
+        for edit_id in edit_ids:
+            self._execute("update coach_edits set learned = 1 where id = ?", [edit_id])
+
+    def coach_guidance(self) -> str:
+        rows = self._query("select value from settings where key = 'coach_guidance'")
+        if not rows:
+            return ""
+        return str(rows[0].get("value") or "")
+
+    def set_coach_guidance(self, text: str) -> None:
+        self._execute(
+            """
+            insert into settings (key, value) values ('coach_guidance', ?)
+            on conflict(key) do update set value = excluded.value
+            """,
+            [text.strip()],
+        )
+
     def set_reviewed(self, project_id: int, play_number: int, reviewed: bool) -> None:
         result = self._execute(
             """
@@ -1574,6 +1814,18 @@ class D1Catalog:
             where project_id = ? and play_number = ?
             """,
             [1 if reviewed else 0, project_id, play_number],
+        )
+        if not _changed(result):
+            raise CatalogError("That play is no longer available.")
+
+    def set_discarded(self, project_id: int, play_number: int, discarded: bool) -> None:
+        result = self._execute(
+            """
+            update plays
+            set discarded = ?
+            where project_id = ? and play_number = ?
+            """,
+            [1 if discarded else 0, project_id, play_number],
         )
         if not _changed(result):
             raise CatalogError("That play is no longer available.")
@@ -1679,7 +1931,7 @@ class D1Catalog:
         return [_read_note(row) for row in rows]
 
     def read_spend(self) -> dict[int, tuple[float, int, int, str]]:
-        from film_analysis.agents.cost import summarize_reads
+        from film_analysis.ingest.cost import summarize_reads
 
         rows = self._query(
             """
@@ -1701,7 +1953,7 @@ class D1Catalog:
         )
 
     def play_read_costs(self) -> dict[int, list[tuple[int, float]]]:
-        from film_analysis.agents.cost import cost_per_play
+        from film_analysis.ingest.cost import cost_per_play
 
         read_rows = self._query(
             """
@@ -1796,7 +2048,7 @@ class D1Catalog:
         return [_report_analysis(row) for row in rows]
 
     def report_spend(self) -> dict[int, tuple[float, int, int, str]]:
-        from film_analysis.agents.cost import summarize_reads
+        from film_analysis.ingest.cost import summarize_reads
 
         rows = self._query(
             """
@@ -1824,6 +2076,7 @@ class D1Catalog:
         self._execute("delete from spans where project_id = ?", [project_id])
         self._execute("delete from plays where project_id = ?", [project_id])
         self._execute("delete from teams where project_id = ?", [project_id])
+        self._execute("delete from coach_edits where project_id = ?", [project_id])
         self._execute("delete from projects where id = ?", [project_id])
         self._clips.remove(project_id)
 
@@ -1832,6 +2085,18 @@ class D1Catalog:
         if path.is_file():
             return path
         return None
+
+    def save_play_image(
+        self, project_id: int, play_number: int, kind: str, data: bytes
+    ) -> None:
+        if self.get_project(project_id) is None:
+            raise CatalogError(f"Project {project_id} was not found.")
+        self._clips.save_play_image(project_id, play_number, kind, data)
+
+    def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
+        if self.get_project(project_id) is None:
+            return None
+        return self._clips.play_image(project_id, play_number, kind)
 
     def _query(self, sql: str, params: list[object] | None = None) -> list[dict[str, object]]:
         result = self._execute(sql, params)
@@ -1887,6 +2152,7 @@ class D1Catalog:
             "alter table plays add column reviewed integer not null default 0",
             "alter table plays add column unit text",
             "alter table plays add column formation text",
+            "alter table plays add column discarded integer not null default 0",
             """
             create table if not exists spans (
                 project_id integer not null,
@@ -1908,6 +2174,19 @@ class D1Catalog:
             create table if not exists settings (
                 key text primary key,
                 value text not null
+            )
+            """,
+            """
+            create table if not exists coach_edits (
+                id integer primary key,
+                project_id integer not null,
+                play_number integer,
+                film text not null,
+                action text not null,
+                before_text text not null,
+                after_text text not null,
+                at text not null,
+                learned integer not null default 0
             )
             """,
             """
@@ -2018,6 +2297,21 @@ def _report_analysis(row: dict[str, object]) -> ReportAnalysis:
     )
 
 
+def _coach_edit(row: dict[str, object]) -> CoachEdit:
+    number = row.get("play_number")
+    return CoachEdit(
+        int(row.get("id") or 0),
+        int(row.get("project_id") or 0),
+        None if number in {None, ""} else int(number),
+        str(row.get("film") or ""),
+        str(row.get("action") or ""),
+        str(row.get("before_text") or ""),
+        str(row.get("after_text") or ""),
+        str(row.get("at") or ""),
+        learned=bool(row.get("learned")),
+    )
+
+
 def _optional_text(value: object) -> str | None:
     if value is None or value == "":
         return None
@@ -2046,6 +2340,7 @@ def _play_record(play: dict[str, object]) -> PlayRecord:
         reviewed=bool(play.get("reviewed")),
         unit=_play_unit(play.get("unit")),
         formation=_optional_text(play.get("formation")),
+        discarded=bool(play.get("discarded")),
     )
 
 
@@ -2096,7 +2391,7 @@ def _mark_formation(
     for play in plays:
         if play.play_number == play_number:
             found = True
-            updated.append(replace(play, formation=formation))
+            updated.append(replace(play, formation=formation or None))
         else:
             updated.append(play)
     if not found:
@@ -2152,6 +2447,24 @@ def _retitle(
                     reviewed=True,
                 )
             )
+        else:
+            updated.append(play)
+    if not found:
+        return None
+    return tuple(updated)
+
+
+def _mark_discarded(
+    plays: tuple[PlayRecord, ...],
+    play_number: int,
+    discarded: bool,
+) -> tuple[PlayRecord, ...] | None:
+    found = False
+    updated: list[PlayRecord] = []
+    for play in plays:
+        if play.play_number == play_number:
+            found = True
+            updated.append(replace(play, discarded=discarded))
         else:
             updated.append(play)
     if not found:

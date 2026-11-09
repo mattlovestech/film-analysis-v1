@@ -10,8 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from film_analysis.agents.errors import VideoAnalysisError
-from film_analysis.agents.scan import (
+from film_analysis.ingest.errors import VideoAnalysisError
+from film_analysis.plays.scan import (
     MAX_WORKERS,
     WorkerLimit,
     clamp_workers,
@@ -24,7 +24,7 @@ from film_analysis.agents.scan import (
     stable_through,
     window_bounds,
 )
-from film_analysis.agents.segments import FilmSpan
+from film_analysis.plays.segments import FilmSpan
 from film_analysis.storage.catalog import Catalog, CatalogError, ReadNote, catalog_from_env
 from film_analysis.web.app import _job_error, _load_dotenv, _progress, _store_action_poster
 

@@ -5,8 +5,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from film_analysis.agents.errors import VideoAnalysisError
-from film_analysis.agents.frames import FRAME_FILTER, FRAME_INTERVAL, FRAME_QUALITY
+from film_analysis.ingest.errors import VideoAnalysisError
+from film_analysis.ingest.frames import FRAME_FILTER, FRAME_INTERVAL, FRAME_QUALITY
 
 
 def extract_window_url(url: str, start: float, seconds: float) -> list[tuple[float, bytes]]:

@@ -8,7 +8,12 @@ from pathlib import Path
 
 from botocore.exceptions import ClientError
 
-from film_analysis.storage.catalog import TEAM_IMAGE_KINDS, CatalogError, team_media
+from film_analysis.storage.catalog import (
+    PLAY_IMAGE_KINDS,
+    TEAM_IMAGE_KINDS,
+    CatalogError,
+    team_media,
+)
 
 
 class R2Clips:
@@ -36,6 +41,27 @@ class R2Clips:
 
     def play_path(self, project_id: int, play_number: int) -> Path:
         return self._local(f"projects/{project_id}/plays/{play_number}.mp4")
+
+    def save_play_image(
+        self, project_id: int, play_number: int, kind: str, data: bytes
+    ) -> str:
+        cleaned = (kind or "").strip().lower()
+        if cleaned not in PLAY_IMAGE_KINDS:
+            raise CatalogError("Could not store that play image.")
+        key = f"projects/{project_id}/plays/{play_number}-{cleaned}.jpg"
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp:
+            tmp.write(data)
+            tmp.flush()
+            return self._put(Path(tmp.name), key, "image/jpeg")
+
+    def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
+        cleaned = (kind or "").strip().lower()
+        if cleaned not in PLAY_IMAGE_KINDS:
+            return None
+        path = self._local(f"projects/{project_id}/plays/{play_number}-{cleaned}.jpg")
+        if path.is_file() and path.stat().st_size:
+            return path
+        return None
 
     def source_path(self, project_id: int) -> Path:
         return self._local(f"projects/{project_id}/source.mp4")
@@ -106,6 +132,29 @@ class R2Clips:
             tmp.write(data)
             tmp.flush()
             return self._put(Path(tmp.name), key, content_type)
+
+    def clear_team_image(self, project_id: int, kind: str) -> None:
+        from film_analysis.storage.catalog import TEAM_IMAGE_KINDS, CatalogError
+
+        if kind not in TEAM_IMAGE_KINDS:
+            raise CatalogError("Could not store that team image.")
+        for suffix in (".jpg", ".svg"):
+            key = f"projects/{project_id}/teams/{kind}{suffix}"
+            with contextlib.suppress(ClientError):
+                self._client.delete_object(Bucket=self.bucket, Key=key)
+            (self.cache / key).unlink(missing_ok=True)
+        if kind.endswith("-player"):
+            marker = self.cache / f"projects/{project_id}/teams/.player-crops"
+            left = any(
+                (self.cache / f"projects/{project_id}/teams/left-player{suffix}").is_file()
+                for suffix in (".jpg", ".svg")
+            )
+            right = any(
+                (self.cache / f"projects/{project_id}/teams/right-player{suffix}").is_file()
+                for suffix in (".jpg", ".svg")
+            )
+            if not left and not right:
+                marker.unlink(missing_ok=True)
 
     def team_image(self, project_id: int, kind: str) -> Path | None:
         if kind not in TEAM_IMAGE_KINDS:

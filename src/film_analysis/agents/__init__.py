@@ -1,17 +1,6 @@
-"""Film-reading agents.
+"""Compatibility exports for the film-reading packages.
 
-`PlayBoundaryAgent` watches an uploaded video or a public YouTube link and returns play timestamps.
-`FilmAgent` reads plays that are already charted.
+Prefer `film_analysis.ingest` and `film_analysis.plays` for new code.
+Import concrete helpers from those packages (or from the shim modules
+under this package) instead of relying on package-level re-exports.
 """
-
-from film_analysis.agents.play_boundaries import PlayBoundaryAgent
-from film_analysis.agents.protocol import AgentFinding, FilmAgent, FilmContext
-from film_analysis.agents.segments import PlaySegment
-
-__all__ = [
-    "AgentFinding",
-    "FilmAgent",
-    "FilmContext",
-    "PlayBoundaryAgent",
-    "PlaySegment",
-]

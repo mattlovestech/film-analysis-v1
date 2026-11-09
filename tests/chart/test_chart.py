@@ -1,7 +1,7 @@
 """Run or pass on offense and defense, and the return when your team receives."""
 
-from film_analysis.web.chart import chart_prompt, parse_play_call, parse_play_side
-from film_analysis.web.teams import Uniform
+from film_analysis.chart.call import chart_prompt, parse_play_call, parse_play_side
+from film_analysis.teams.uniforms import Uniform
 
 _MINE = Uniform("Home", "white", "white", "white", jersey_hex="#f4f1ea")
 _OTHER = Uniform("Away", "red", "white", "red", jersey_hex="#b42318")

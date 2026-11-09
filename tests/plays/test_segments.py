@@ -1,6 +1,6 @@
 import pytest
 
-from film_analysis.agents.segments import format_play, parse_film_spans, parse_play_segments
+from film_analysis.plays.segments import format_play, parse_film_spans, parse_play_segments
 
 
 def test_play_line_matches_the_clock_format() -> None:

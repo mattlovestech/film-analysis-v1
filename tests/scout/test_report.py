@@ -4,9 +4,26 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from film_analysis.scout.report import scouting_blocks, untagged_plays
 from film_analysis.storage.catalog import FilmTeams, MemoryCatalog, PlayRecord
 from film_analysis.web.app import create_app
-from film_analysis.web.report import scouting_blocks, untagged_plays
+
+
+def test_a_discarded_play_is_left_out_of_the_report() -> None:
+    plays = (
+        PlayRecord(1, 10, 16, "scrimmage", "run", unit="offense"),
+        PlayRecord(2, 20, 28, "scrimmage", "pass", unit="defense", discarded=True),
+        PlayRecord(3, 40, 47, "scrimmage", "run", unit="defense"),
+    )
+    teams = FilmTeams("North", "South", "left")
+
+    text = "\n".join(line for _, line in scouting_blocks("Friday night", teams, plays))
+
+    assert "Read from 2 plays: 1 South defense, 1 South offense." in text
+    assert "Play 2" not in text
+    assert "1 pass" not in text
+    assert "Play 1  0:10-0:16  South defense  Run  6s" in text
+    assert "Play 3  0:40-0:47  South offense  Run  7s" in text
 
 
 def test_the_report_counts_offense_and_defense() -> None:
@@ -29,6 +46,7 @@ def test_the_report_counts_offense_and_defense() -> None:
     assert "Run\t1\t100%" in text
     assert "Pass\t0\t0%" in text
     assert "Offense\t1\t" in text
+    assert "Run: Play 1" in text
     assert "South ran 1 offensive snap." in text
     assert "1 run (100%) and 0 passes (0%)" in text
     assert "South defended 2 snaps." in text
@@ -83,7 +101,7 @@ def test_generating_the_report_reads_each_play(tmp_path: Path) -> None:
 
 
 def test_generating_the_report_charts_run_and_pass(tmp_path: Path) -> None:
-    from film_analysis.web.teams import Uniform
+    from film_analysis.teams.uniforms import Uniform
 
     store = _ready_film(tmp_path)
     clip = tmp_path / "kick.mp4"
@@ -169,7 +187,7 @@ def test_the_csv_lists_each_play(tmp_path: Path) -> None:
 def test_the_live_report_fills_a_row_as_each_play_is_read(tmp_path: Path) -> None:
     import json
 
-    from film_analysis.web.chart import ChartedPlay
+    from film_analysis.chart.call import ChartedPlay
 
     store = _ready_film(tmp_path)
     store.set_film_teams(1, FilmTeams("North", "South", "left"))
@@ -275,28 +293,154 @@ def test_special_teams_can_be_the_only_section(tmp_path: Path) -> None:
     assert len(rows) == 2
 
 
-def test_formations_are_read_for_the_opponents_offense(tmp_path: Path) -> None:
-    from film_analysis.web.chart import ChartedPlay
-
+def test_formation_waits_until_the_call_is_known(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     store.set_play_unit(1, 2, "defense")
     store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
-    seen: list[str] = []
+    called: list[str] = []
 
-    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> None:
         del frames, mine, other, kind
-        return ChartedPlay("pass", "offense")
+        return None
 
-    def name(frames: list[bytes], mine: object, other: object) -> str:
-        del frames, other
-        seen.append(getattr(mine, "jersey", ""))
+    def name(frames: list[bytes], mine: object, other: object, call: str = "") -> str:
+        del frames, mine, other
+        called.append(call)
         return "shotgun"
 
     client = TestClient(create_app(store=store, chart=chart, formations=name))
     created = client.post("/api/projects/1/report", json={"sections": ["formations"]})
 
     assert created.status_code == 200
-    assert seen == ["dark blue"]
+    assert called == []
+    assert store.get_project(1).plays[1].formation is None
+
+
+def test_charted_tags_are_stored_on_the_play(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
+
+    store = _ready_film(tmp_path)
+    store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other, kind
+        return ChartedPlay("pass", "defense")
+
+    client = TestClient(create_app(store=store, chart=chart))
+    created = client.post("/api/projects/1/report", json={"sections": ["calls"]})
+
+    assert created.status_code == 200
+    play = store.get_project(1).plays[1]
+    assert play.play_type == "pass"
+    assert play.unit == "defense"
+    detail = client.get("/api/plays/1-2")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["play_type"] == "pass"
+    assert body["unit"] == "defense"
+    analysis = client.get("/api/projects/1/report/analysis?sections=calls")
+    assert analysis.status_code == 200
+    rows = analysis.json()["analysis"]
+    tagged = next(row for row in rows if row["play"] == 2)
+    assert tagged["uid"] == "1-2"
+    assert tagged["call"] == "pass"
+    assert tagged["side"] == "defense"
+
+
+def test_formation_setting_runs_during_call_charting(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
+    from film_analysis.chart.formation import FormationRead
+
+    store = _ready_film(tmp_path)
+    store.set_play_unit(1, 2, "defense")
+    store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
+    store.set_formation_reads(True)
+    plot = (
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        b"\xff\xd9"
+    )
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other, kind
+        return ChartedPlay("pass", "offense")
+
+    def name(frames: list[bytes], mine: object, other: object, call: str = "") -> FormationRead:
+        del frames, mine, other
+        return FormationRead("trips", plot=plot)
+
+    client = TestClient(create_app(store=store, chart=chart, formations=name))
+    created = client.post("/api/projects/1/report", json={"sections": ["calls"]})
+
+    assert created.status_code == 200
+    assert store.get_project(1).plays[1].formation == "trips"
+    image = client.get("/projects/1/plays/2/formation.jpg")
+    assert image.status_code == 200
+
+
+def test_a_person_can_override_the_formation(tmp_path: Path) -> None:
+    from film_analysis.chart.formation import FormationRead
+
+    store = _ready_film(tmp_path)
+    store.set_play_type(1, 2, "pass", "scrimmage")
+    store.set_play_unit(1, 2, "defense")
+    store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
+    plot = (
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        b"\xff\xd9"
+    )
+
+    def name(frames: list[bytes], mine: object, other: object, call: str = "") -> FormationRead:
+        del frames, mine, other, call
+        return FormationRead("shotgun", plot=plot)
+
+    client = TestClient(create_app(store=store, formations=name))
+    detected = client.post("/api/plays/1-2/formation")
+    assert detected.status_code == 200
+    assert detected.json()["formation"] == "Shotgun"
+    assert detected.json()["formation_key"] == "shotgun"
+    assert detected.json()["formation_plot"]
+
+    changed = client.post("/api/plays/1-2", json={"formation": "trips"})
+    assert changed.status_code == 200
+    assert changed.json()["formation"] == "Trips"
+    assert changed.json()["formation_key"] == "trips"
+    assert store.get_project(1).plays[1].formation == "trips"
+
+    cleared = client.post("/api/plays/1-2", json={"clear_formation": True})
+    assert cleared.status_code == 200
+    assert cleared.json()["formation"] is None
+    assert store.get_project(1).plays[1].formation is None
+    still = client.get("/projects/1/plays/2/formation.jpg")
+    assert still.status_code == 200
+
+
+def test_formations_are_read_for_the_opponents_offense(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
+    from film_analysis.chart.formation import FormationRead
+
+    store = _ready_film(tmp_path)
+    store.set_play_unit(1, 2, "defense")
+    store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
+    seen: list[tuple[str, str]] = []
+    plot = (
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        b"\xff\xd9"
+    )
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other, kind
+        return ChartedPlay("pass", "offense")
+
+    def name(frames: list[bytes], mine: object, other: object, call: str = "") -> FormationRead:
+        del frames, other
+        seen.append((getattr(mine, "jersey", ""), call))
+        return FormationRead("shotgun", plot=plot)
+
+    client = TestClient(create_app(store=store, chart=chart, formations=name))
+    created = client.post("/api/projects/1/report", json={"sections": ["formations"]})
+
+    assert created.status_code == 200
+    assert seen == [("dark blue", "pass")]
     text = "\n".join(block["text"] for block in created.json()["blocks"])
     assert "Formations" in text
     assert "Away offense: 1 Shotgun." in text
@@ -306,6 +450,9 @@ def test_formations_are_read_for_the_opponents_offense(tmp_path: Path) -> None:
     assert plays[0].unit == "offense"
     assert plays[1].formation == "shotgun"
     assert plays[1].unit == "defense"
+    image = client.get("/projects/1/plays/2/formation.jpg")
+    assert image.status_code == 200
+    assert image.content.startswith(b"\xff\xd8\xff")
     sheet = client.get("/api/projects/1/report.csv?sections=formations")
     rows = sheet.content.decode().splitlines()
     assert rows[0].split(",")[-1] == "formation"
@@ -313,7 +460,7 @@ def test_formations_are_read_for_the_opponents_offense(tmp_path: Path) -> None:
 
 
 def test_an_untagged_play_learns_your_side(tmp_path: Path) -> None:
-    from film_analysis.web.chart import ChartedPlay
+    from film_analysis.chart.call import ChartedPlay
 
     store = _ready_film(tmp_path)
     store.set_reviewed(1, 1, False)
@@ -357,7 +504,7 @@ def test_report_progress_survives_leaving_the_stream(tmp_path: Path) -> None:
     import threading
     import time
 
-    from film_analysis.web.chart import ChartedPlay
+    from film_analysis.chart.call import ChartedPlay
 
     store = _ready_film(tmp_path)
     store.set_film_teams(1, FilmTeams("North", "South", "left"))
@@ -412,8 +559,8 @@ def test_report_progress_survives_leaving_the_stream(tmp_path: Path) -> None:
 
 
 def test_unfinished_report_rows_can_be_retried(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
     from film_analysis.storage.catalog import ReportAnalysis
-    from film_analysis.web.chart import ChartedPlay
 
     store = _ready_film(tmp_path)
     store.set_film_teams(1, FilmTeams("North", "South", "left"))

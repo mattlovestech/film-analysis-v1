@@ -30,20 +30,20 @@ from fastapi.responses import (
 )
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from film_analysis.agents.cost import read_cost
-from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
-from film_analysis.agents.frames import extract_window, video_duration
-from film_analysis.agents.play_boundaries import PlayBoundaryAgent, agent_from_env, bind_read_note
-from film_analysis.agents.scan import (
-    MAX_WORKERS,
-    FilmWindowError,
-    WorkerLimit,
-    clamp_workers,
-    processing_percent,
-    scan_film,
+from film_analysis.chart.call import SPECIAL_CALLS, ChartedPlay, chart_play
+from film_analysis.chart.formation import (
+    FORMATIONS,
+    FormationRead,
+    formation_label,
+    read_formation,
 )
-from film_analysis.agents.segments import FilmSpan, format_play
-from film_analysis.agents.youtube import (
+
+_FORMATION_KEYS = frozenset(FORMATIONS)
+from film_analysis.domain.models import PlayType
+from film_analysis.ingest.cost import read_cost
+from film_analysis.ingest.errors import MissingApiKeyError, VideoAnalysisError
+from film_analysis.ingest.frames import extract_window, video_duration
+from film_analysis.ingest.youtube import (
     FilmInfo,
     canonical_youtube_url,
     detach_progress,
@@ -51,13 +51,34 @@ from film_analysis.agents.youtube import (
     thumbnail_url,
     youtube_details,
 )
-from film_analysis.domain.models import PlayType
+from film_analysis.learning import propose_guidance, publish_guidance
+from film_analysis.plays.boundaries import PlayBoundaryAgent, agent_from_env, bind_read_note
+from film_analysis.plays.scan import (
+    MAX_WORKERS,
+    FilmWindowError,
+    WorkerLimit,
+    clamp_workers,
+    processing_percent,
+    scan_film,
+)
+from film_analysis.plays.segments import FilmSpan, format_play
+from film_analysis.scout.report import (
+    chart_kinds,
+    live_snapshot,
+    play_reads,
+    report_sections,
+    scouting_blocks,
+    scouting_csv,
+    scouting_pdf,
+    tendency_lines,
+)
 from film_analysis.storage.catalog import (
     TEAM_IMAGE_KINDS,
     ActivityRecord,
     ActivityStep,
     Catalog,
     CatalogError,
+    CoachEdit,
     FilmTeams,
     MemoryCatalog,
     PlayRecord,
@@ -68,26 +89,7 @@ from film_analysis.storage.catalog import (
     SpanRecord,
     catalog_from_env,
 )
-from film_analysis.web.chart import SPECIAL_CALLS, ChartedPlay, chart_play
-from film_analysis.web.cloud import cloud_target
-from film_analysis.web.formation import (
-    FORMATIONS,
-    FormationRead,
-    formation_label,
-    read_formation,
-)
-from film_analysis.web.playback import cut_clip
-from film_analysis.web.report import (
-    chart_kinds,
-    live_snapshot,
-    play_reads,
-    report_sections,
-    scouting_blocks,
-    scouting_csv,
-    scouting_pdf,
-    tendency_lines,
-)
-from film_analysis.web.teams import (
+from film_analysis.teams.uniforms import (
     Uniform,
     action_moments,
     choose_action_shot,
@@ -97,10 +99,10 @@ from film_analysis.web.teams import (
     focus_player,
     label_home_away,
     lineup_moment,
-    make_portrait,
     play_frames,
+    player_action_frames,
     player_frames,
-    player_picture,
+    player_photo,
     portrait_uniform,
     reference_for_model,
     split_lineup,
@@ -109,6 +111,8 @@ from film_analysis.web.teams import (
     team_cards,
     uniform_line,
 )
+from film_analysis.web.cloud import cloud_target
+from film_analysis.web.playback import cut_clip
 
 _PAGE = Path(__file__).with_name("index.html")
 _DEFAULT_MAX_BYTES = 500 * 1024 * 1024
@@ -218,6 +222,9 @@ class _PlayLabel(BaseModel):
     play_type: str | None = None
     reviewed: bool | None = None
     unit: str | None = None
+    discarded: bool | None = None
+    formation: str | None = None
+    clear_formation: bool = False
 
     @field_validator("play_type")
     @classmethod
@@ -237,10 +244,30 @@ class _PlayLabel(BaseModel):
             raise ValueError("Mark the play as offense or defense.")
         return value
 
+    @field_validator("formation")
+    @classmethod
+    def _known_formation(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        key = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if key not in _FORMATION_KEYS:
+            raise ValueError("Choose a known formation.")
+        return key
+
     @model_validator(mode="after")
     def _has_change(self) -> "_PlayLabel":
-        if self.play_type is None and self.reviewed is None and self.unit is None:
-            raise ValueError("Choose a play type, mark the review, or tag offense or defense.")
+        if (
+            self.play_type is None
+            and self.reviewed is None
+            and self.unit is None
+            and self.discarded is None
+            and self.formation is None
+            and not self.clear_formation
+        ):
+            raise ValueError(
+                "Choose a play type, mark the review, tag offense or defense, "
+                "set a formation, or discard the play."
+            )
         return self
 
 
@@ -277,6 +304,12 @@ _MIME_SUFFIX = {
 }
 
 
+def _film_player(*_args: object, **_kwargs: object) -> tuple[bytes, str]:
+    """Player cards are frames from the film. Nothing is generated."""
+
+    return b"", ""
+
+
 def create_app(
     agent: PlayBoundaryAgent | None = None,
     max_bytes: int | None = None,
@@ -294,9 +327,10 @@ def create_app(
         Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None] | None
     ) = None,
     formations: (
-        Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None] | None
+        Callable[..., FormationRead | str | None] | None
     ) = None,
     still: _Still | None = None,
+    learner: Callable[[str, Sequence[CoachEdit]], str] | None = None,
 ) -> FastAPI:
     """Build the upload app. Pass an agent in tests; otherwise read it from the environment."""
 
@@ -313,7 +347,7 @@ def create_app(
     pool = 4 if workers is None else workers
     lookup = youtube_details if details is None else details
     draw_lineup = split_lineup if lineup is None else lineup
-    draw_portrait = make_portrait if portrait is None else portrait
+    draw_portrait = _film_player if portrait is None else portrait
     read_play = chart_play if chart is None else chart
     read_formation_play = read_formation if formations is None else formations
     grab = still_frame if still is None else still
@@ -324,6 +358,8 @@ def create_app(
         storage = None
         catalog = store
     _stop_orphans(catalog)
+    with contextlib.suppress(CatalogError):
+        publish_guidance(catalog.coach_guidance())
     slots = WorkerLimit(pool)
     if workers is None:
         with contextlib.suppress(CatalogError):
@@ -503,6 +539,56 @@ def create_app(
     def read_settings(request: Request) -> dict[str, object]:
         return _run_payload(catalog, slots, request)
 
+    @app.get("/api/learning")
+    def read_learning() -> dict[str, object]:
+        """Coach corrections, and the notes the next cut and tag already follow."""
+
+        try:
+            edits = catalog.list_coach_edits()
+            guidance = catalog.coach_guidance()
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        return {
+            "guidance": guidance,
+            "pending": sum(1 for edit in edits if not edit.learned),
+            "edits": [_edit_view(edit) for edit in edits],
+        }
+
+    @app.post("/api/learning")
+    def learn_from_coaches() -> dict[str, object]:
+        """Send new coach corrections to the model and store the notes it writes."""
+
+        try:
+            pending = [edit for edit in catalog.list_coach_edits(limit=200) if not edit.learned]
+            guidance = catalog.coach_guidance()
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        batch = pending[:40]
+        if not batch:
+            raise HTTPException(status_code=400, detail="No new coach edits to learn from.")
+        if learner is None and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Add an API key before sending coach edits.",
+            )
+        ask = learner or propose_guidance
+        try:
+            notes = ask(guidance, batch)
+        except Exception as error:
+            raise HTTPException(
+                status_code=502,
+                detail="Could not learn from those edits.",
+            ) from error
+        if not str(notes).strip():
+            raise HTTPException(status_code=502, detail="Could not learn from those edits.")
+        try:
+            catalog.set_coach_guidance(str(notes).strip())
+            catalog.mark_coach_edits_learned([edit.edit_id for edit in batch])
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        publish_guidance(str(notes).strip())
+        return {"guidance": str(notes).strip(), "learned": len(batch)}
+
     @app.post("/api/settings")
     def update_settings(body: _WorkerSetting, request: Request) -> dict[str, object]:
         here = _request_place(request)
@@ -522,6 +608,25 @@ def create_app(
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
         return _run_payload(catalog, slots, request)
+
+    @app.get("/api/teams/reset")
+    def team_reset_status() -> dict[str, object]:
+        return _team_reset_view()
+
+    @app.post("/api/teams/reset")
+    def team_reset_all(failed: bool = False) -> dict[str, object]:
+        started = _start_team_reset(
+            catalog,
+            draw_lineup,
+            draw_portrait,
+            failed_only=failed,
+        )
+        if not started:
+            current = _team_reset_view()
+            if current.get("running"):
+                return current
+            raise HTTPException(status_code=400, detail="No ready films need new team photos.")
+        return _team_reset_view()
 
     @app.get("/api/projects/{project_id}")
     def project(project_id: int) -> dict[str, object]:
@@ -658,7 +763,7 @@ def create_app(
         finally:
             _release(running, running_lock, project_id)
         saved = _require_project(catalog, project_id)
-        return _report_payload(saved, teams, _ordered_plays(saved), chosen)
+        return _report_payload(saved, teams, _report_plays(saved), chosen)
 
     @app.post("/api/projects/{project_id}/report/live")
     def live_scouting_report(
@@ -727,7 +832,12 @@ def create_app(
         stored = report_choice.get(project_id)
         chosen = _report_sections(sections) or stored or report_sections(None)
         try:
-            rows = catalog.list_report_analysis(project_id)
+            kept = {play.play_number for play in plays}
+            rows = [
+                row
+                for row in catalog.list_report_analysis(project_id)
+                if row.play_number in kept
+            ]
             activity = catalog.get_activity(project_id)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
@@ -749,7 +859,7 @@ def create_app(
             "workers": workers if workers is not None else slots.get(),
             "sections": sorted(chosen),
             "can_resume": (not live) and unfinished > 0,
-            "analysis": [_analysis_view(row) for row in rows],
+            "analysis": [_analysis_view(row, project_id) for row in rows],
             "snapshot": live_snapshot(teams, plays, chosen),
         }
 
@@ -933,6 +1043,19 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(error)) from error
         if saved is None:
             raise HTTPException(status_code=502, detail="Could not save that analysis.")
+        marked = {
+            "scrimmage": "Marked as a scrimmage play.",
+            "special_teams": "Marked as special teams.",
+            "junk": "Marked as not a play.",
+        }.get(decision.decision, "Marked.")
+        _remember_edit(
+            catalog,
+            saved,
+            None,
+            "mark",
+            f"Uncertain stretch {span.start_seconds:.1f}s–{span.end_seconds:.1f}s.",
+            marked,
+        )
         return _project_payload(
             saved,
             running=_running(running, running_lock, project_id),
@@ -952,7 +1075,7 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(error)) from error
         if saved is None:
             raise HTTPException(status_code=404, detail="That play is no longer available.")
-        payload = _play_payload(saved, play_number)
+        payload = _play_payload(saved, play_number, catalog)
         if payload is None:
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         return payload
@@ -967,10 +1090,21 @@ def create_app(
             saved = catalog.get_project(project_id)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
-        if saved is None or not any(play.play_number == play_number for play in saved.plays):
+        if saved is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        play = next((item for item in saved.plays if item.play_number == play_number), None)
+        if play is None:
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         try:
             if choice.play_type == "junk":
+                _remember_edit(
+                    catalog,
+                    saved,
+                    play.play_number,
+                    "drop",
+                    _play_edit_line(play),
+                    "Removed. A coach marked this as not a play.",
+                )
                 catalog.drop_play(project_id, play_number)
                 return {
                     "removed": True,
@@ -982,22 +1116,117 @@ def create_app(
                 catalog.set_play_type(project_id, play_number, play_type, family)
             elif choice.unit is not None:
                 catalog.set_play_unit(project_id, play_number, choice.unit)
+            elif choice.clear_formation:
+                catalog.set_play_formation(project_id, play_number, "")
+            elif choice.formation is not None:
+                catalog.set_play_formation(project_id, play_number, choice.formation)
             elif choice.reviewed is not None:
                 catalog.set_reviewed(project_id, play_number, choice.reviewed)
+            elif choice.discarded is not None:
+                catalog.set_discarded(project_id, play_number, choice.discarded)
+                _remember_edit(
+                    catalog,
+                    saved,
+                    play.play_number,
+                    "discard",
+                    "In the scouting report." if not play.discarded else "Left out of the scouting report.",
+                    "Left out of the scouting report." if choice.discarded else "Put back in the scouting report.",
+                )
             saved = catalog.get_project(project_id)
+            updated = None if saved is None else _play_by_number(saved, play_number)
+            if saved is not None and choice.play_type not in {None, "junk"} and updated is not None:
+                _remember_edit(
+                    catalog,
+                    saved,
+                    play.play_number,
+                    "retag",
+                    f"Tagged {_tag_line(play)}.",
+                    f"Tagged {_tag_line(updated)}.",
+                )
+            elif saved is not None and (choice.formation is not None or choice.clear_formation):
+                before = formation_label(play.formation) or "Not set"
+                after = (
+                    "Not set"
+                    if choice.clear_formation or updated is None or not updated.formation
+                    else formation_label(updated.formation) or updated.formation
+                )
+                _remember_edit(
+                    catalog,
+                    saved,
+                    play.play_number,
+                    "formation",
+                    f"Formation {before}.",
+                    f"Formation {after}.",
+                )
+            elif saved is not None and choice.unit is not None:
+                _remember_edit(
+                    catalog,
+                    saved,
+                    play.play_number,
+                    "unit",
+                    f"Your team was on {play.unit or 'an untagged side'}.",
+                    f"Your team is on {choice.unit}.",
+                )
         except CatalogError as error:
             status = 404 if str(error) == "That play is no longer available." else 502
             raise HTTPException(status_code=status, detail=str(error)) from error
         if saved is None:
             raise HTTPException(status_code=502, detail="Could not save that play.")
-        payload = _play_payload(saved, play_number)
+        payload = _play_payload(saved, play_number, catalog)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        return payload
+
+    @app.post("/api/plays/{uid}/formation")
+    def detect_play_formation(uid: str) -> dict[str, object]:
+        """Plot both teams and guess the formation. A person can still override it."""
+
+        parsed = _parse_play_uid(uid)
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        project_id, play_number = parsed
+        try:
+            saved = catalog.get_project(project_id)
+            teams = catalog.film_teams(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        if teams is None or teams.mine not in {"left", "right"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Label your team before reading formations.",
+            )
+        play = _play_by_number(saved, play_number)
+        if play is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        if play.family == "special_teams":
+            raise HTTPException(status_code=400, detail="Formations are for scrimmage plays.")
+        call = (play.play_type or "").strip().lower()
+        if call not in {"run", "pass"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Chart the play as a run or pass before reading the formation.",
+            )
+        mine, other = _team_uniforms(teams)
+        _chart_formation_play(
+            catalog,
+            saved,
+            play,
+            mine,
+            other,
+            read_formation_play,
+            force=True,
+        )
+        saved = _require_project(catalog, project_id)
+        payload = _play_payload(saved, play_number, catalog)
         if payload is None:
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         return payload
 
     @app.post("/api/plays/{uid}/trim")
     def trim_play(uid: str, choice: _PlayTrim) -> dict[str, object]:
-        """Cut a tighter window so later reads look at the live play only."""
+        """Recut the play. The window may reach past the cut when the film was cut too soon."""
 
         parsed = _parse_play_uid(uid)
         if parsed is None:
@@ -1014,27 +1243,34 @@ def create_app(
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         start = round(choice.start, 3)
         end = round(choice.end, 3)
-        if start < play.start_seconds - 0.05 or end > play.end_seconds + 0.05:
+        earliest, latest = _trim_room(saved, play)
+        if start < earliest - 0.05 or end > latest + 0.05:
             raise HTTPException(
                 status_code=400,
-                detail="Trim stays inside the current play.",
+                detail="Keep the new length beside this play.",
             )
-        start = max(play.start_seconds, start)
-        end = min(play.end_seconds, end)
+        start = max(earliest, start)
+        end = min(latest, end)
         if end - start < 0.5:
             raise HTTPException(
                 status_code=400,
                 detail="Keep at least half a second of the play.",
             )
         if abs(start - play.start_seconds) < 0.05 and abs(end - play.end_seconds) < 0.05:
-            payload = _play_payload(saved, play_number)
+            payload = _play_payload(saved, play_number, catalog)
             if payload is None:
                 raise HTTPException(status_code=404, detail="That play is no longer available.")
             return payload
         film = catalog.source_file(project_id)
         clip = catalog.clip_file(project_id, play_number)
+        extends = start < play.start_seconds - 0.05 or end > play.end_seconds + 0.05
         if film is None and clip is None:
             raise HTTPException(status_code=400, detail="That film is no longer available.")
+        if extends and film is None:
+            raise HTTPException(
+                status_code=400,
+                detail="The full film is needed to lengthen this play.",
+            )
         folder = Path(tempfile.mkdtemp(prefix="film-trim-"))
         dest = folder / "clip.mp4"
         try:
@@ -1053,7 +1289,18 @@ def create_app(
             shutil.rmtree(folder, ignore_errors=True)
         if saved is None:
             raise HTTPException(status_code=502, detail="Could not save that play.")
-        payload = _play_payload(saved, play_number)
+        longer = (end - start) > (play.end_seconds - play.start_seconds) + 0.2
+        shorter = (end - start) < (play.end_seconds - play.start_seconds) - 0.2
+        verb = "Lengthened" if longer else "Shortened" if shorter else "Moved"
+        _remember_edit(
+            catalog,
+            saved,
+            play.play_number,
+            "trim",
+            f"Cut from {play.start_seconds:.1f}s to {play.end_seconds:.1f}s.",
+            f"{verb} to {start:.1f}s–{end:.1f}s.",
+        )
+        payload = _play_payload(saved, play_number, catalog)
         if payload is None:
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         return payload
@@ -1064,6 +1311,13 @@ def create_app(
         if path is None:
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         return FileResponse(path, media_type="video/mp4", content_disposition_type="inline")
+
+    @app.get("/projects/{project_id}/plays/{play_number}/formation.jpg")
+    def formation_plot(project_id: int, play_number: int) -> FileResponse:
+        path = catalog.play_image(project_id, play_number, "formation")
+        if path is None:
+            raise HTTPException(status_code=404, detail="That formation plot is not ready.")
+        return FileResponse(path, media_type="image/jpeg", content_disposition_type="inline")
 
     @app.get("/api/downloads")
     def downloads() -> list[dict[str, object]]:
@@ -1343,7 +1597,7 @@ def _watch_film(
     upload_path: Path | None,
     details: _Details,
     lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
-    portrait: Callable[..., tuple[bytes, str]] = make_portrait,
+    portrait: Callable[..., tuple[bytes, str]] = _film_player,
     still: _Still = still_frame,
     resume_scan: bool = False,
     resume_at: float = 0.0,
@@ -2106,23 +2360,124 @@ def _ordered_plays(project: ProjectDetail) -> list[PlayRecord]:
     return sorted(project.plays, key=lambda play: (play.start_seconds, play.play_number))
 
 
-def _play_summary(project_id: int, play: PlayRecord) -> dict[str, object]:
+def _report_plays(project: ProjectDetail) -> list[PlayRecord]:
+    """Plays the scouting report should read. Discarded plays stay on the film."""
+
+    return [play for play in _ordered_plays(project) if not play.discarded]
+
+
+def _remember_edit(
+    catalog: Catalog,
+    project: ProjectDetail,
+    play_number: int | None,
+    action: str,
+    before: str,
+    after: str,
+) -> None:
+    if before == after:
+        return
+    with contextlib.suppress(CatalogError):
+        catalog.add_coach_edit(project.project, play_number, project.name, action, before, after)
+
+
+def _tag_line(play: PlayRecord) -> str:
+    side = f", {play.unit}" if play.unit else ""
+    return f"{play.play_type or play.family}{side}"
+
+
+def _play_edit_line(play: PlayRecord) -> str:
+    return (
+        f"Play {play.play_number}, {_tag_line(play)}, "
+        f"{play.start_seconds:.1f}s–{play.end_seconds:.1f}s."
+    )
+
+
+def _edit_view(edit: CoachEdit) -> dict[str, object]:
     return {
-        "uid": _play_uid(project_id, play.play_number),
+        "id": edit.edit_id,
+        "project": edit.project_id,
+        "play": edit.play_number,
+        "film": edit.film,
+        "action": edit.action,
+        "before": edit.before,
+        "after": edit.after,
+        "at": edit.at,
+        "learned": edit.learned,
+    }
+
+
+_TRIM_PAD = 12.0
+
+
+def _trim_room(project: ProjectDetail, play: PlayRecord) -> tuple[float, float]:
+    """How far a play can be pulled open around its current cut.
+
+    Twelve seconds on either side, stopping at the film edges and at the
+    next or previous play so two clips do not cover the same moment.
+    """
+
+    ordered = _ordered_plays(project)
+    index = next(
+        (place for place, item in enumerate(ordered) if item.play_number == play.play_number),
+        None,
+    )
+    previous_end = 0.0 if index in {None, 0} else ordered[index - 1].end_seconds
+    next_start = (
+        None if index is None or index + 1 >= len(ordered) else ordered[index + 1].start_seconds
+    )
+    earliest = min(play.start_seconds, max(previous_end, play.start_seconds - _TRIM_PAD, 0.0))
+    latest = play.end_seconds + _TRIM_PAD
+    if project.duration_seconds and project.duration_seconds > play.end_seconds:
+        latest = min(latest, project.duration_seconds)
+    if next_start is not None:
+        latest = min(latest, next_start)
+    latest = max(latest, play.end_seconds)
+    return round(earliest, 3), round(latest, 3)
+
+
+def _play_summary(
+    project: ProjectDetail,
+    play: PlayRecord,
+    catalog: Catalog | None = None,
+) -> dict[str, object]:
+    named = formation_label(play.formation) or None
+    room_start, room_end = _trim_room(project, play)
+    has_plot = False
+    if catalog is not None:
+        with contextlib.suppress(CatalogError):
+            has_plot = catalog.play_image(project.project, play.play_number, "formation") is not None
+    return {
+        "uid": _play_uid(project.project, play.play_number),
         "play_number": play.play_number,
         "label": format_play(play.play_number, play.start_seconds, play.end_seconds),
         "start": play.start_seconds,
         "end": play.end_seconds,
+        "room_start": room_start,
+        "room_end": room_end,
         "family": play.family,
         "play_type": play.play_type,
         "unit": play.unit,
-        "formation": formation_label(play.formation) or None,
+        "formation": named,
+        "formation_key": play.formation,
+        "formation_plot": (
+            f"/projects/{project.project}/plays/{play.play_number}/formation.jpg"
+            if has_plot or named
+            else None
+        ),
+        "formation_choices": [
+            {"key": key, "label": label} for key, label in FORMATIONS.items()
+        ],
         "reviewed": play.reviewed,
-        "video": f"/projects/{project_id}/plays/{play.play_number}",
+        "discarded": play.discarded,
+        "video": f"/projects/{project.project}/plays/{play.play_number}",
     }
 
 
-def _play_payload(project: ProjectDetail, play_number: int) -> dict[str, object] | None:
+def _play_payload(
+    project: ProjectDetail,
+    play_number: int,
+    catalog: Catalog | None = None,
+) -> dict[str, object] | None:
     ordered = _ordered_plays(project)
     index = next(
         (position for position, play in enumerate(ordered) if play.play_number == play_number),
@@ -2134,7 +2489,7 @@ def _play_payload(project: ProjectDetail, play_number: int) -> dict[str, object]
     previous_play = ordered[index - 1] if index else None
     next_play = ordered[index + 1] if index + 1 < len(ordered) else None
     return {
-        **_play_summary(project.project, play),
+        **_play_summary(project, play, catalog),
         "project": project.project,
         "name": project.name,
         "channel": project.channel,
@@ -2252,32 +2607,70 @@ def _chart_formation_play(
     play: PlayRecord,
     mine: Uniform,
     other: Uniform,
-    reader: Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None],
+    reader: Callable[..., FormationRead | str | None],
+    *,
+    force: bool = False,
 ) -> tuple[int, int, str]:
-    if play.family == "special_teams" or play.unit != "defense" or play.formation:
+    """Plot the snap and name the formation after the run/pass call is known.
+
+    When the user is on defense, the opponent has the ball. A forced re-read can
+    also chart the user's own offense so a person can correct either side.
+    """
+
+    call = (play.play_type or "").strip().lower()
+    if play.family == "special_teams" or call not in {"run", "pass"}:
         return 0, 0, ""
-    named, incoming, outgoing, model = _formation_answer(
-        reader(_scrimmage_frames(catalog, project, play), other, mine)
-    )
-    if named not in FORMATIONS:
-        return incoming, outgoing, model
+    if not force:
+        if play.unit != "defense" or play.formation:
+            return 0, 0, ""
+    frames = _scrimmage_frames(catalog, project, play)
+    offense, defense = (other, mine) if play.unit != "offense" else (mine, other)
+    answer = _call_formation_reader(reader, frames, offense, defense, call)
+    named, incoming, outgoing, model, plot = _formation_answer(answer)
     try:
-        catalog.set_play_formation(project.project, play.play_number, named)
+        if plot:
+            catalog.save_play_image(project.project, play.play_number, "formation", plot)
+        if named in FORMATIONS:
+            catalog.set_play_formation(project.project, play.play_number, named)
+        elif force and not named:
+            # Keep an empty guess so the UI shows the plot for a human pick.
+            catalog.set_play_formation(project.project, play.play_number, "")
     except CatalogError:
         return incoming, outgoing, model
     return incoming, outgoing, model
 
 
-def _formation_answer(value: object) -> tuple[str | None, int, int, str]:
+def _call_formation_reader(
+    reader: Callable[..., FormationRead | str | None],
+    frames: Sequence[bytes],
+    offense: Uniform,
+    defense: Uniform,
+    call: str,
+) -> FormationRead | str | None:
+    try:
+        signature = inspect.signature(reader)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is not None and len(signature.parameters) >= 4:
+        return reader(frames, offense, defense, call)
+    return reader(frames, offense, defense)
+
+
+def _formation_answer(
+    value: object,
+) -> tuple[str | None, int, int, str, bytes]:
     if isinstance(value, str):
-        return value, 0, 0, ""
+        return value, 0, 0, "", b""
     named = getattr(value, "formation", None)
     incoming = int(getattr(value, "input_tokens", 0) or 0)
     outgoing = int(getattr(value, "output_tokens", 0) or 0)
     model = str(getattr(value, "model", "") or "")
+    plot = getattr(value, "plot", b"")
+    if not isinstance(plot, (bytes, bytearray)):
+        plot = b""
     if not isinstance(named, str):
-        return None, incoming, outgoing, model
-    return named, incoming, outgoing, model
+        return None, incoming, outgoing, model, bytes(plot)
+    return named, incoming, outgoing, model, bytes(plot)
 
 
 def _team_uniforms(teams: FilmTeams) -> tuple[Uniform, Uniform]:
@@ -2346,7 +2739,7 @@ def _live_lines(
     teams: FilmTeams,
     chosen: frozenset[str],
     reader: Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None],
-    formations: Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None],
+    formations: Callable[..., FormationRead | str | None],
     slots: WorkerLimit,
     *,
     restart: bool = True,
@@ -2355,7 +2748,7 @@ def _live_lines(
 
     kinds = chart_kinds(chosen)
     project_id = saved.project
-    ordered = [play for play in _ordered_plays(saved) if _play_kind(play) in kinds]
+    ordered = [play for play in _report_plays(saved) if _play_kind(play) in kinds]
     workers = slots.get()
     try:
         todo = _seed_report_plays(catalog, project_id, ordered, restart=restart)
@@ -2371,7 +2764,7 @@ def _live_lines(
     if not todo:
         with contextlib.suppress(CatalogError):
             catalog.record_activity(project_id, "ready", running=False)
-        yield json.dumps(_report_payload(current, teams, _ordered_plays(current), chosen)) + "\n"
+        yield json.dumps(_report_payload(current, teams, _report_plays(current), chosen)) + "\n"
         return
 
     mine, other = _team_uniforms(teams)
@@ -2423,7 +2816,12 @@ def _live_lines(
                     current,
                     teams,
                     chosen,
-                    sum(1 for row in rows if row.status in {"ready", "missed"}),
+                    sum(
+                        1
+                        for row in rows
+                        if row.status in {"ready", "missed"}
+                        and any(play.play_number == row.play_number for play in ordered)
+                    ),
                     total,
                     slots.get(),
                 )
@@ -2432,7 +2830,7 @@ def _live_lines(
         with contextlib.suppress(CatalogError):
             catalog.record_activity(project_id, "ready", running=False)
         current = _require_project(catalog, project_id)
-        yield json.dumps(_report_payload(current, teams, _ordered_plays(current), chosen)) + "\n"
+        yield json.dumps(_report_payload(current, teams, _report_plays(current), chosen)) + "\n"
     except Exception:
         with contextlib.suppress(CatalogError):
             catalog.record_activity(project_id, "stopped", running=False)
@@ -2463,16 +2861,21 @@ def _follow_report(
     last = ""
     for _ in range(100):
         try:
-            rows = catalog.list_report_analysis(project_id)
-            activity = catalog.get_activity(project_id)
             current = _require_project(catalog, project_id)
+            kept = {play.play_number for play in _report_plays(current)}
+            rows = [
+                row
+                for row in catalog.list_report_analysis(project_id)
+                if row.play_number in kept
+            ]
+            activity = catalog.get_activity(project_id)
         except (CatalogError, HTTPException):
             return
         done = sum(1 for row in rows if row.status in {"ready", "missed"})
         total = len(rows) or len(
             [
                 play
-                for play in _ordered_plays(current)
+                for play in _report_plays(current)
                 if _play_kind(play) in chart_kinds(chosen)
             ]
         )
@@ -2491,12 +2894,12 @@ def _follow_report(
         unfinished = any(row.status in {"pending", "reading"} for row in rows)
         if not live and not unfinished:
             yield json.dumps(
-                _report_payload(current, teams, _ordered_plays(current), chosen)
+                _report_payload(current, teams, _report_plays(current), chosen)
             ) + "\n"
             return
         if not live:
             yield json.dumps(
-                _report_payload(current, teams, _ordered_plays(current), chosen)
+                _report_payload(current, teams, _report_plays(current), chosen)
             ) + "\n"
             return
         time.sleep(0.1)
@@ -2509,7 +2912,7 @@ def _analyze_report_play(
     mine: Uniform,
     other: Uniform,
     reader: Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None],
-    formations: Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None],
+    formations: Callable[..., FormationRead | str | None],
     kinds: frozenset[str],
     chosen: frozenset[str],
 ) -> None:
@@ -2523,7 +2926,11 @@ def _analyze_report_play(
         )
         project = _require_project(catalog, project_id)
         latest = _play_by_number(project, play.play_number) or latest
-        if "formations" in chosen:
+        want_formation = "formations" in chosen
+        if not want_formation:
+            with contextlib.suppress(CatalogError):
+                want_formation = catalog.formation_reads()
+        if want_formation:
             more_in, more_out, formed_model = _chart_formation_play(
                 catalog, project, latest, mine, other, formations
             )
@@ -2568,20 +2975,28 @@ def _live_event(
     total: int,
     workers: int = 1,
 ) -> str:
-    snapshot = live_snapshot(teams, _ordered_plays(project), chosen)
+    kept_plays = _report_plays(project)
+    kept = {play.play_number for play in kept_plays}
+    snapshot = live_snapshot(teams, kept_plays, chosen)
     snapshot["done"] = done
     snapshot["total"] = total
     snapshot["workers"] = workers
     analysis: list[dict[str, object]] = []
     with contextlib.suppress(CatalogError):
-        analysis = [_analysis_view(row) for row in catalog.list_report_analysis(project.project)]
+        analysis = [
+            _analysis_view(row, project.project)
+            for row in catalog.list_report_analysis(project.project)
+            if row.play_number in kept
+        ]
     snapshot["analysis"] = analysis
     return json.dumps(snapshot) + "\n"
 
 
-def _analysis_view(note: ReportAnalysis) -> dict[str, object]:
+def _analysis_view(note: ReportAnalysis, project_id: int | None = None) -> dict[str, object]:
+    play = note.play_number
     return {
-        "play": note.play_number,
+        "play": play,
+        "uid": _play_uid(project_id, play) if project_id is not None else None,
         "status": note.status,
         "call": note.call,
         "side": note.side,
@@ -2680,7 +3095,7 @@ def _report_film(
             status_code=400,
             detail="Label your team before the scouting report.",
         )
-    return saved, teams, _ordered_plays(saved)
+    return saved, teams, _report_plays(saved)
 
 
 def _require_project(catalog: Catalog, project_id: int) -> ProjectDetail:
@@ -2719,7 +3134,7 @@ def start_team_analysis(
     catalog: Catalog,
     project_id: int,
     lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
-    portrait: Callable[..., tuple[bytes, str]] = make_portrait,
+    portrait: Callable[..., tuple[bytes, str]] = _film_player,
 ) -> None:
     """Name the two teams once the plays exist. A miss here leaves the plays in place."""
 
@@ -2745,7 +3160,7 @@ def run_team_analysis(
     side: str | None = None,
     attempt: int = 1,
 ) -> None:
-    """Read the lineup, name both sides, and draw each player."""
+    """Read the lineup, name both sides, and keep one player from each team in view."""
 
     if not project.plays:
         return
@@ -2760,9 +3175,8 @@ def run_team_analysis(
         detail="Reading the film for both uniforms.",
         attempt=attempt,
     )
-    # Re-grab both lineup stills when regenerating the full pair so a bad half
-    # can change. A single-side retry keeps the current lineup crop.
-    if missing_lineup or (force and side not in {"left", "right"}):
+    # Re-grab the lineup when regenerating so each side can get a fresh film photo.
+    if missing_lineup or force:
         _store_lineup(catalog, project, lineup)
     _remember_team_names(catalog, project)
     redraw = (
@@ -3017,6 +3431,8 @@ def _start_team_build(
 
     def work() -> None:
         try:
+            if force:
+                _reset_team_photos(catalog, project_id, side=side)
             run_team_analysis(
                 catalog,
                 project,
@@ -3049,22 +3465,302 @@ def _start_team_build(
                 running=False,
                 error=detail,
             )
-        except Exception:
+        except Exception as error:
             _LOG.warning("team cards failed for film %s", project_id, exc_info=True)
+            detail = str(error).strip()[:180] or "Could not build the team cards."
             _set_team_progress(
                 project_id,
                 step="save",
                 percent=100,
-                detail="Could not build the team cards.",
+                detail=detail,
                 attempt=attempt,
                 running=False,
-                error="Could not build the team cards.",
+                error=detail,
             )
 
     if wait:
         work()
         return
     threading.Thread(target=work, name=f"team-cards-{project_id}", daemon=True).start()
+
+
+_team_reset: dict[str, object] = {
+    "running": False,
+    "attempt": 0,
+    "total": 0,
+    "done": 0,
+    "failed": 0,
+    "percent": 0,
+    "detail": "",
+    "current": None,
+    "films": [],
+}
+_team_reset_lock = threading.Lock()
+
+
+def _team_reset_view() -> dict[str, object]:
+    with _team_reset_lock:
+        return {
+            "running": bool(_team_reset["running"]),
+            "attempt": int(_team_reset["attempt"] or 0),
+            "total": int(_team_reset["total"] or 0),
+            "done": int(_team_reset["done"] or 0),
+            "failed": int(_team_reset["failed"] or 0),
+            "percent": int(_team_reset["percent"] or 0),
+            "detail": str(_team_reset["detail"] or ""),
+            "current": _team_reset["current"],
+            "films": [dict(row) for row in (_team_reset["films"] or [])],  # type: ignore[union-attr]
+            "steps": [
+                {"id": "queue", "label": "Queue films"},
+                {"id": "reset", "label": "Reset photos"},
+                {"id": "rebuild", "label": "Rebuild cards"},
+            ],
+        }
+
+
+def _set_team_reset(**fields: object) -> None:
+    with _team_reset_lock:
+        _team_reset.update(fields)
+
+
+def _update_team_reset_film(project_id: int, **fields: object) -> None:
+    with _team_reset_lock:
+        films = list(_team_reset["films"] or [])  # type: ignore[arg-type]
+        for index, row in enumerate(films):
+            if int(row["project"]) == project_id:  # type: ignore[index]
+                films[index] = {**row, **fields}  # type: ignore[arg-type]
+                break
+        _team_reset["films"] = films
+
+
+def _team_reset_error_detail(error: BaseException) -> str:
+    if isinstance(error, HTTPException):
+        return (
+            error.detail
+            if isinstance(error.detail, str)
+            else "Could not rebuild the team cards."
+        )
+    text = str(error).strip()
+    return text[:180] if text else "Could not rebuild the team cards."
+
+
+def _mirror_team_reset_film(
+    project_id: int,
+    name: str,
+    index: int,
+    total: int,
+    stop: threading.Event,
+) -> None:
+    """Copy live card-build progress onto the global reset film row."""
+
+    while not stop.wait(0.35):
+        progress = _team_progress_view(project_id) or {}
+        if not progress:
+            continue
+        build_pct = max(0, min(100, int(progress.get("percent") or 0)))
+        detail = str(progress.get("detail") or "Finding a player from each team.")
+        film_pct = 15 + round(build_pct * 0.8)
+        overall = (
+            round(((index + (build_pct / 100.0)) / total) * 100) if total else 100
+        )
+        _update_team_reset_film(
+            project_id,
+            status="running",
+            detail=detail,
+            percent=film_pct,
+            step=str(progress.get("step") or "find"),
+        )
+        _set_team_reset(
+            detail=f"{name}: {detail}",
+            percent=max(0, min(99, overall)),
+        )
+
+
+def _ready_team_films(catalog: Catalog) -> list[ProjectDetail]:
+    try:
+        rows = catalog.list_projects()
+    except CatalogError:
+        return []
+    films: list[ProjectDetail] = []
+    for row in rows:
+        if row.status != "ready" or row.play_count < 1 or row.archived:
+            continue
+        try:
+            project = catalog.get_project(row.project)
+        except CatalogError:
+            continue
+        if project is None or not project.plays:
+            continue
+        films.append(project)
+    return films
+
+
+def _start_team_reset(
+    catalog: Catalog,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]],
+    portrait: Callable[..., tuple[bytes, str]],
+    *,
+    failed_only: bool = False,
+) -> bool:
+    """Clear and rebuild team photos for every ready film, with live progress."""
+
+    with _team_reset_lock:
+        if _team_reset["running"]:
+            return False
+        attempt = int(_team_reset["attempt"] or 0) + 1
+    films = _ready_team_films(catalog)
+    if failed_only:
+        with _team_reset_lock:
+            failed_ids = {
+                int(row["project"])  # type: ignore[index]
+                for row in (_team_reset["films"] or [])  # type: ignore[union-attr]
+                if row.get("status") == "failed"  # type: ignore[union-attr]
+            }
+        films = [film for film in films if film.project in failed_ids]
+    if not films:
+        return False
+    queue = [
+        {
+            "project": film.project,
+            "name": film.name,
+            "status": "queued",
+            "detail": "Waiting.",
+            "percent": 0,
+            "step": "queue",
+        }
+        for film in films
+    ]
+    _set_team_reset(
+        running=True,
+        attempt=attempt,
+        total=len(films),
+        done=0,
+        failed=0,
+        percent=0,
+        detail=f"Resetting team photos for {len(films)} films.",
+        current=None,
+        films=queue,
+    )
+
+    def work() -> None:
+        done = 0
+        failed = 0
+        total = len(films)
+        for index, film in enumerate(films):
+            _set_team_reset(
+                current={"project": film.project, "name": film.name},
+                detail=f"Resetting {film.name}.",
+                percent=round((index / total) * 100) if total else 100,
+            )
+            _update_team_reset_film(
+                film.project,
+                status="running",
+                detail="Clearing the old team photos.",
+                percent=5,
+                step="reset",
+            )
+            stop = threading.Event()
+            mirror = threading.Thread(
+                target=_mirror_team_reset_film,
+                args=(film.project, film.name, index, total, stop),
+                name=f"team-reset-mirror-{film.project}",
+                daemon=True,
+            )
+            try:
+                _reset_team_photos(catalog, film.project)
+                _update_team_reset_film(
+                    film.project,
+                    status="running",
+                    detail="Finding a player from each team.",
+                    percent=20,
+                    step="rebuild",
+                )
+                mirror.start()
+                run_team_analysis(
+                    catalog,
+                    film,
+                    lineup,
+                    portrait,
+                    force=True,
+                    attempt=attempt,
+                )
+                progress = _team_progress_view(film.project) or {}
+                if progress.get("error"):
+                    raise RuntimeError(str(progress["error"]))
+                done += 1
+                _update_team_reset_film(
+                    film.project,
+                    status="ready",
+                    detail="Team cards are ready.",
+                    percent=100,
+                    step="rebuild",
+                )
+            except Exception as error:
+                failed += 1
+                detail = _team_reset_error_detail(error)
+                _LOG.warning(
+                    "team photo reset failed for film %s",
+                    film.project,
+                    exc_info=True,
+                )
+                _update_team_reset_film(
+                    film.project,
+                    status="failed",
+                    detail=detail,
+                    percent=100,
+                    step="rebuild",
+                )
+            finally:
+                stop.set()
+                if mirror.ident is not None:
+                    mirror.join(timeout=1.0)
+            _set_team_reset(
+                done=done,
+                failed=failed,
+                percent=round(((index + 1) / total) * 100) if total else 100,
+            )
+        detail = (
+            f"Reset {done} of {total} films."
+            if failed == 0
+            else f"Reset {done} of {total} films. {failed} need another try."
+        )
+        _set_team_reset(
+            running=False,
+            current=None,
+            detail=detail,
+            percent=100,
+            done=done,
+            failed=failed,
+        )
+
+    threading.Thread(target=work, name="team-photo-reset", daemon=True).start()
+    return True
+
+
+def _reset_team_photos(
+    catalog: Catalog,
+    project_id: int,
+    *,
+    side: str | None = None,
+) -> None:
+    """Remove stored player photos so the next build starts clean."""
+
+    sides = (side,) if side in {"left", "right"} else ("left", "right")
+    kinds: list[str] = []
+    for chosen in sides:
+        kinds.extend(
+            (
+                f"{chosen}-player",
+                f"{chosen}-reference",
+                chosen,
+            )
+        )
+    for kind in kinds:
+        try:
+            catalog.clear_team_image(project_id, kind)
+        except CatalogError:
+            continue
+    _clear_crops_checked(catalog, project_id)
 
 
 def _schedule_portrait_refresh(
@@ -3222,7 +3918,10 @@ def _player_search_frames(catalog: Catalog, project_id: int) -> list[bytes]:
         video, _at = _lineup_video(catalog, project)
     except HTTPException:
         return []
-    return player_frames(video, project.plays)
+    frames = player_action_frames(video, project.plays)
+    if len(frames) >= 4:
+        return frames
+    return [*frames, *player_frames(video, project.plays, limit=8)]
 
 
 def _crops_checked(catalog: Catalog, project_id: int) -> bool:
@@ -3302,68 +4001,67 @@ def _store_portraits(
         project_id,
         step="read",
         percent=20,
-        detail="Pulling clear frames from the plays.",
+        detail="Looking through live plays for both teams.",
         attempt=attempt,
     )
     search_frames = _player_search_frames(catalog, project_id)
     _set_team_progress(
         project_id,
         step="find",
-        percent=45,
-        detail="Finding one player from each team.",
+        percent=55,
+        detail="Picking the clearest player from each team.",
         attempt=attempt,
     )
-    cards = team_cards(search_frames, wearing[0], wearing[1])
-    frames = _team_frames(catalog, project_id)
+    avoid: list[bytes] = []
+    if not keep_current:
+        for side in ("left", "right"):
+            if side not in chosen:
+                continue
+            current_shot = _still_bytes(catalog, project_id, f"{side}-player")
+            if current_shot:
+                avoid.append(current_shot)
+    cards = team_cards(search_frames, wearing[0], wearing[1], avoid)
+    del draw  # A film photo of each team is enough to choose who to scout.
     try:
-        for index, (side, uniform) in enumerate(zip(("left", "right"), wearing, strict=True)):
+        for index, side in enumerate(("left", "right")):
             if side not in chosen:
                 continue
             label = teams.left_name if side == "left" else teams.right_name
             who = label or ("Home" if side == "left" else "Away")
             shot = cards[index]
-            if shot is not None:
-                _set_team_progress(
-                    project_id,
-                    step="save",
-                    percent=70 + index * 12,
-                    detail=f"Saving the {who} player.",
-                    attempt=attempt,
-                )
-                catalog.save_team_image(project_id, f"{side}-player", shot, ".jpg")
-                catalog.save_team_image(project_id, f"{side}-reference", shot, ".jpg")
-                continue
+            if not shot:
+                other = wearing[1 - index]
+                shot = player_photo(search_frames, wearing[index], other) or b""
+            if not shot:
+                still = _still_bytes(catalog, project_id, side) or b""
+                shot = focus_player(still, side) if still else b""
             current = _still_bytes(catalog, project_id, f"{side}-player")
-            if keep_current and current is not None and not _portrait_should_replace(current):
+            if not shot:
+                if keep_current and current is not None and not _portrait_should_replace(current):
+                    continue
                 continue
-            _set_team_progress(
-                project_id,
-                step="find",
-                percent=60 + index * 8,
-                detail=f"No clear crop for {who}. Drawing that player.",
-                attempt=attempt,
-            )
-            other = wearing[1 - index]
-            still = _still_bytes(catalog, project_id, side) or b""
-            focused = focus_player(still, side)
-            photos = [focused, still, *frames]
-            _clear_reference(draw)
-            image, suffix = player_picture(photos, uniform, other, draw)
+            if (
+                keep_current
+                and current is not None
+                and not _portrait_should_replace(current)
+                and cards[index] is None
+            ):
+                continue
             _set_team_progress(
                 project_id,
                 step="save",
-                percent=80 + index * 8,
+                percent=70 + index * 12,
                 detail=f"Saving the {who} player.",
                 attempt=attempt,
             )
-            catalog.save_team_image(project_id, f"{side}-player", image, suffix)
-            _save_reference(catalog, project_id, side, draw, photos, uniform, other)
+            catalog.save_team_image(project_id, f"{side}-player", shot, ".jpg")
+            catalog.save_team_image(project_id, f"{side}-reference", shot, ".jpg")
         _mark_crops_checked(catalog, project_id)
         _set_team_progress(
             project_id,
             step="save",
             percent=100,
-            detail="Team cards are ready.",
+            detail="Both teams are ready to scout.",
             attempt=attempt,
             running=False,
         )
@@ -3532,7 +4230,9 @@ def _project_payload(
             film_teams,
             prepared=prepared,
         ),
-        "plays": [_play_summary(project.project, play) for play in _ordered_plays(project)],
+        "plays": [
+            _play_summary(project, play, catalog) for play in _ordered_plays(project)
+        ],
         "reads": []
         if catalog is None
         else _read_views(catalog, project.project, read_notes if prepared else None),
@@ -3665,7 +4365,7 @@ def _analyze_saved(
     cloud: tuple[str, str] | None,
     request: Request,
     lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
-    portrait: Callable[..., tuple[bytes, str]] = make_portrait,
+    portrait: Callable[..., tuple[bytes, str]] = _film_player,
     still: _Still = still_frame,
 ) -> dict[str, object] | JSONResponse:
     """Start a new analysis from a film that is already stored."""

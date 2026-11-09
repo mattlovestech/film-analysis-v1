@@ -16,4 +16,4 @@ You choose which uniform is yours. The next read is told that. A white jersey th
 That read names a scrimmage play as a run or a pass, and a special-teams play as the kick, punt, or return from your side.
 
 ### Step 4 - Formation, experimental
-Last. For your offensive plays only, name the formation the offense is lined up in. It shows on the play, in the scouting report, and can be turned on in Settings.
+Last, after Step 3 has named run or pass. Plot both teams (always 11 a side; missing spots are guessed and marked low confidence), then name the formation with that plot and the known call. Turn it on in Settings so report charting includes it. The play page shows the plot and guess, and a person can override or clear the formation there.

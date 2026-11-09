@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
-from film_analysis.agents.frames import extract_frames
-from film_analysis.agents.play_boundaries import AnthropicPlayAgent, agent_from_env
+from film_analysis.ingest.errors import MissingApiKeyError, VideoAnalysisError
+from film_analysis.ingest.frames import extract_frames
+from film_analysis.plays.boundaries import AnthropicPlayAgent, agent_from_env
 
 
 class _Messages:

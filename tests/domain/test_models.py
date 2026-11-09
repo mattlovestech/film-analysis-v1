@@ -1,11 +1,11 @@
 import pytest
 from pydantic import ValidationError
 
-from film_analysis.agents.protocol import AgentFinding, FilmAgent, FilmContext
-from film_analysis.analysis.tendencies import count_by_personnel, success_rate
 from film_analysis.domain.models import Game, Hash, Play, PlayType, clock_to_seconds
 from film_analysis.domain.personnel import personnel_from_label
 from film_analysis.domain.situations import DownDistanceBucket
+from film_analysis.plays.protocol import AgentFinding, FilmAgent, FilmContext
+from film_analysis.scout.tendencies import count_by_personnel, success_rate
 
 
 def _game() -> Game:

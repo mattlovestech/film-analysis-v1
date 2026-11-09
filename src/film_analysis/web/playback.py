@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from film_analysis.agents.errors import VideoAnalysisError, tool_failure
+from film_analysis.ingest.errors import VideoAnalysisError, tool_failure
 
 
 def prepare_playback(source: Path) -> Path:

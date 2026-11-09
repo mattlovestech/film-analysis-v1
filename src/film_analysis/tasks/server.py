@@ -9,12 +9,12 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from film_analysis.agents.cost import read_cost
-from film_analysis.agents.errors import VideoAnalysisError
-from film_analysis.agents.frames import video_duration
-from film_analysis.agents.play_boundaries import agent_from_env
-from film_analysis.agents.segments import FilmSpan
-from film_analysis.agents.youtube import detach_progress, download_youtube, youtube_details
+from film_analysis.ingest.cost import read_cost
+from film_analysis.ingest.errors import VideoAnalysisError
+from film_analysis.ingest.frames import video_duration
+from film_analysis.ingest.youtube import detach_progress, download_youtube, youtube_details
+from film_analysis.plays.boundaries import agent_from_env
+from film_analysis.plays.segments import FilmSpan
 from film_analysis.storage.catalog import Catalog, CatalogError, catalog_from_env
 from film_analysis.storage.r2 import source_url
 from film_analysis.tasks.media import cut_url, extract_window_url

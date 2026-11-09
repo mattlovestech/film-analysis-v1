@@ -1,6 +1,6 @@
 """Model-read prices and how a read is shared across the plays it covered."""
 
-from film_analysis.agents.cost import cost_per_play, read_cost
+from film_analysis.ingest.cost import cost_per_play, read_cost
 
 
 def test_sonnet_list_price_uses_input_and_output_tokens() -> None:

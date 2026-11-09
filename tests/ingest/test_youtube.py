@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from film_analysis.agents.youtube import (
+from film_analysis.ingest.youtube import (
     _PART_FLOOR,
     _PARTS,
     FilmInfo,
