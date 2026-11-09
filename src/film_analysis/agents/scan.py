@@ -34,7 +34,8 @@ class WorkerLimit:
 
     def __init__(self, count: int) -> None:
         self._count = clamp_workers(count)
-        self._active = 0
+        self._used: set[int] = set()
+        self._held = threading.local()
         self._waiting = threading.Condition()
 
     def get(self) -> int:
@@ -47,15 +48,26 @@ class WorkerLimit:
             self._waiting.notify_all()
             return self._count
 
-    def __enter__(self) -> None:
+    def __enter__(self) -> int:
         with self._waiting:
-            while self._active >= self._count:
+            while True:
+                free = next((slot for slot in range(self._count) if slot not in self._used), None)
+                if free is not None:
+                    self._used.add(free)
+                    held = getattr(self._held, "slots", None)
+                    if held is None:
+                        held = []
+                        self._held.slots = held
+                    held.append(free)
+                    return free
                 self._waiting.wait()
-            self._active += 1
 
     def __exit__(self, *_args: object) -> None:
+        held = getattr(self._held, "slots", None) or []
+        slot = held.pop() if held else None
         with self._waiting:
-            self._active -= 1
+            if slot is not None:
+                self._used.discard(slot)
             self._waiting.notify_all()
 
 

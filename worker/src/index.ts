@@ -74,7 +74,7 @@ export class Website extends FilmContainer {
 }
 
 export class Cutter extends FilmContainer {
-  sleepAfter = "24h";
+  sleepAfter = "10m";
   entrypoint = ["/app/.venv/bin/film-cutter"];
 }
 
@@ -83,7 +83,7 @@ Cutter.outboundByHost = {
 };
 
 export class Task extends FilmContainer {
-  sleepAfter = "5m";
+  sleepAfter = "30s";
   entrypoint = ["/app/.venv/bin/film-task"];
 }
 

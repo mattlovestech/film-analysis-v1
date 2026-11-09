@@ -227,6 +227,15 @@ def test_raising_the_worker_limit_lets_waiting_labelers_start() -> None:
     assert not job.is_alive()
 
 
+def test_a_finished_worker_slot_is_reused() -> None:
+    slots = WorkerLimit(2)
+
+    with slots as first, slots as second:
+        assert (first, second) == (0, 1)
+    with slots as again:
+        assert again == 0
+
+
 def test_resume_starts_at_the_first_unfinished_window() -> None:
     bounds = window_bounds(100)
 

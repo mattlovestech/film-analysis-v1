@@ -63,13 +63,16 @@ from film_analysis.web.teams import (
     detect_uniforms,
     encode_uniforms,
     focus_player,
+    label_home_away,
     lineup_moment,
     make_portrait,
-    portrait_uniform,
     play_frames,
+    player_photos,
+    portrait_uniform,
     split_lineup,
     suggest_team_names,
     uniform_line,
+    uniforms_collapsed,
 )
 
 _PAGE = Path(__file__).with_name("index.html")
@@ -433,10 +436,10 @@ def create_app(
         )
 
     @app.post("/api/projects/{project_id}/teams/stills")
-    def team_stills(project_id: int) -> dict[str, object]:
+    def team_stills(project_id: int, again: bool = False) -> dict[str, object]:
         saved = _require_project(catalog, project_id)
         _require_identified(saved)
-        run_team_analysis(catalog, saved, draw_lineup, draw_portrait)
+        run_team_analysis(catalog, saved, draw_lineup, draw_portrait, force=again)
         return _project_payload(
             saved,
             running=_running(running, running_lock, project_id),
@@ -1131,6 +1134,7 @@ def _watch_film(
             on_review=mark_review,
             on_counts=on_counts,
         )
+        start_team_analysis(catalog, project_id, lineup, portrait)
         _progress(catalog, project_id, "ready", length, length, None)
         _save_activity(catalog, project_id, "ready", running=False)
     except (Exception, SystemExit) as error:
@@ -1747,6 +1751,7 @@ def run_team_analysis(
     project: ProjectDetail,
     lineup: Callable[[Path, float], tuple[bytes, bytes]],
     portrait: Callable[..., tuple[bytes, str]],
+    force: bool = False,
 ) -> None:
     """Read the lineup, name both sides, and draw each player."""
 
@@ -1757,8 +1762,13 @@ def run_team_analysis(
         catalog, project_id, "right"
     ) is None:
         _store_lineup(catalog, project, lineup)
+    try:
+        current = catalog.film_teams(project_id)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    stale = current is None or uniforms_collapsed(current.uniforms)
     _remember_team_names(catalog, project)
-    if _still_bytes(catalog, project_id, "left-player") is None or _still_bytes(
+    if force or stale or _still_bytes(catalog, project_id, "left-player") is None or _still_bytes(
         catalog, project_id, "right-player"
     ) is None:
         try:
@@ -1797,7 +1807,9 @@ def _remember_team_names(catalog: Catalog, project: ProjectDetail) -> None:
     except CatalogError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     pair = _detected_uniforms(catalog, project)
-    if saved is not None and not _placeholder_names(saved):
+    previous = None if saved is None else decode_uniforms(saved.uniforms)
+    guessed = saved is not None and previous is not None and _names_from_detection(saved, previous)
+    if saved is not None and not _placeholder_names(saved) and not guessed:
         left_name, right_name, mine = saved.left_name, saved.right_name, saved.mine
     else:
         left_name, right_name = pair[0].name, pair[1].name
@@ -1827,6 +1839,15 @@ def _remember_uniforms(catalog: Catalog, project: ProjectDetail) -> None:
 
 def _placeholder_names(teams: FilmTeams) -> bool:
     return {teams.left_name.casefold(), teams.right_name.casefold()} <= {"", "home", "away"}
+
+
+def _names_from_detection(teams: FilmTeams, found: tuple[Uniform, Uniform]) -> bool:
+    """True when the saved names are still the ones read off the uniforms."""
+
+    return (
+        teams.left_name.casefold() == found[0].name.casefold()
+        and teams.right_name.casefold() == found[1].name.casefold()
+    )
 
 
 def _named_sides(catalog: Catalog, project: ProjectDetail, body: _TeamNames) -> FilmTeams:
@@ -1864,6 +1885,22 @@ def _still_bytes(catalog: Catalog, project_id: int, kind: str) -> bytes | None:
         return None
 
 
+def _team_frames(catalog: Catalog, project_id: int) -> list[bytes]:
+    """Play photos used to find each team's players after the uniforms are known."""
+
+    try:
+        project = catalog.get_project(project_id)
+    except CatalogError:
+        return []
+    if project is None or not project.plays:
+        return []
+    try:
+        video, _at = _lineup_video(catalog, project)
+    except HTTPException:
+        return []
+    return play_frames(video, project.plays, limit=6)
+
+
 def _store_portraits(
     catalog: Catalog,
     project_id: int,
@@ -1885,10 +1922,16 @@ def _store_portraits(
         portrait_uniform(pair[0], teams.left_name),
         portrait_uniform(pair[1], teams.right_name),
     )
+    frames = _team_frames(catalog, project_id)
     try:
-        for side, uniform in zip(("left", "right"), wearing, strict=True):
-            still = focus_player(_still_bytes(catalog, project_id, side) or b"", side)
-            image, suffix = draw(uniform, still)
+        for index, (side, uniform) in enumerate(zip(("left", "right"), wearing, strict=True)):
+            other = wearing[1 - index]
+            still = _still_bytes(catalog, project_id, side) or b""
+            focused = focus_player(still, side)
+            photos = player_photos([focused, still, *frames], uniform, other)
+            if not photos and focused.startswith(b"\xff\xd8\xff"):
+                photos = [focused]
+            image, suffix = draw(uniform, photos or still, other)
             catalog.save_team_image(project_id, f"{side}-player", image, suffix)
     except CatalogError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
@@ -1913,10 +1956,17 @@ def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
         project = catalog.get_project(project_id)
     except CatalogError:
         project = None
-    suggested = suggest_team_names("" if project is None else project.name)
-    left_name = suggested[0] if saved is None or not saved.left_name else saved.left_name
-    right_name = suggested[1] if saved is None or not saved.right_name else saved.right_name
     found = decode_uniforms("" if saved is None else saved.uniforms)
+    labeled = None if found is None else label_home_away(*found)
+    guessed = (
+        saved is not None and found is not None and _names_from_detection(saved, found)
+    )
+    if labeled is not None and (saved is None or _placeholder_names(saved) or guessed):
+        left_name, right_name = labeled[0].name, labeled[1].name
+    else:
+        suggested = suggest_team_names("" if project is None else project.name)
+        left_name = suggested[0] if saved is None or not saved.left_name else saved.left_name
+        right_name = suggested[1] if saved is None or not saved.right_name else saved.right_name
     return {
         "left_name": left_name,
         "right_name": right_name,

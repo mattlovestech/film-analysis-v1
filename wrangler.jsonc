@@ -8,19 +8,19 @@
       "class_name": "Website",
       "image": "./Dockerfile",
       "instance_type": "standard-1",
-      "max_instances": 1
+      "max_instances": 2
     },
     {
       "class_name": "Cutter",
       "image": "./Dockerfile",
       "instance_type": "standard-1",
-      "max_instances": 4
+      "max_instances": 12
     },
     {
       "class_name": "Task",
       "image": "./Dockerfile",
       "instance_type": "standard-1",
-      "max_instances": 16
+      "max_instances": 40
     }
   ],
   "durable_objects": {

@@ -16,7 +16,6 @@ from film_analysis.web.teams import (
     focus_player,
     lineup_moment,
     make_portrait,
-    names_from_reply,
     player_prompt,
     split_lineup,
     suggest_team_names,
@@ -80,26 +79,154 @@ def test_colors_fall_back_when_the_frame_is_only_grass() -> None:
 def test_player_prompt_asks_for_a_standing_player() -> None:
     prompt = player_prompt(Uniform("North", "dark blue", "white", "dark blue"))
 
-    assert "standing full length" in prompt
+    assert "The jersey is dark blue" in prompt
     assert "exact clothes" in prompt
-    assert "Image 0 is the reference photo" in prompt
-    assert "representative" in prompt
-    assert "Madden-style" in prompt
+    assert "reference photo" in prompt
+    assert "on the field in the reference photo" in prompt
+    assert "Photoreal" in prompt
     assert "00" in prompt
+    assert "Madden" not in prompt
+    assert "studio" not in prompt.lower() or "not a studio" in prompt
     assert "dark blue jersey" in prompt
     assert "North" not in prompt
 
 
-def test_both_teams_share_one_prompt() -> None:
-    left = player_prompt(Uniform("Kentucky", "white", "white", "white"))
-    right = player_prompt(Uniform("LSU", "purple", "gold", "gold"))
+def test_each_team_keeps_its_own_clothes_in_the_prompt() -> None:
+    white = player_prompt(
+        Uniform(
+            "Home",
+            "white",
+            "white",
+            "white",
+            jersey_hex="#f4f1ea",
+            pants_hex="#f4f1ea",
+            helmet_hex="#f4f1ea",
+        )
+    )
+    red = player_prompt(
+        Uniform(
+            "Away",
+            "red",
+            "white",
+            "red",
+            jersey_hex="#b42318",
+            pants_hex="#f4f1ea",
+            helmet_hex="#b42318",
+        )
+    )
 
-    def shell(prompt: str) -> str:
-        for color in ("white", "purple", "gold"):
-            prompt = prompt.replace(color, "COLOR")
-        return prompt
+    assert "The jersey is white" in white
+    assert "The jersey is red" in red
+    assert "#f4f1ea" not in white
+    assert "#b42318" not in red
+    assert white != red
 
-    assert shell(left) == shell(right)
+
+def test_a_far_color_does_not_repaint_both_teams(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "film_analysis.web.teams._ask_uniforms",
+        lambda frames, title, left_still=None, right_still=None: (
+            Uniform(
+                "Home",
+                "white",
+                "white",
+                "white",
+                jersey_hex="#f4f1ea",
+                pants_hex="#f4f1ea",
+                helmet_hex="#f4f1ea",
+            ),
+            Uniform(
+                "Away",
+                "red",
+                "white",
+                "red",
+                jersey_hex="#b42318",
+                pants_hex="#f4f1ea",
+                helmet_hex="#b42318",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "film_analysis.web.teams._sample_pixels",
+        lambda still: [(64, 128, 128)] * 40,
+    )
+
+    left, right = detect_uniforms([], "Friday night", b"left", b"right")
+
+    assert left.jersey_hex == "#f4f1ea"
+    assert right.jersey_hex == "#b42318"
+
+
+def test_player_photo_uses_the_crop_that_matches_this_team(monkeypatch: pytest.MonkeyPatch) -> None:
+    from film_analysis.web.teams import player_photo
+
+    def crops(frame: bytes, jersey_hex: str, limit: int = 2) -> list[bytes]:
+        del frame, limit
+        if jersey_hex == "#f4f1ea":
+            return [b"\xff\xd8\xffwhite", b"\xff\xd8\xffred"]
+        return []
+
+    def colors(still: bytes) -> tuple[str, str]:
+        if still.endswith(b"white"):
+            return "#f4f1ea", "#f4f1ea"
+        return "#b42318", "#f4f1ea"
+
+    monkeypatch.setattr("film_analysis.web.teams.uniform_crops", crops)
+    monkeypatch.setattr("film_analysis.web.teams.dominant_colors", colors)
+
+    photo = player_photo(
+        [b"\xff\xd8\xffframe"],
+        Uniform("Home", "white", "white", "white", jersey_hex="#f4f1ea"),
+    )
+
+    assert photo == b"\xff\xd8\xffwhite"
+
+
+def test_player_photos_skip_the_other_team(monkeypatch: pytest.MonkeyPatch) -> None:
+    from film_analysis.web.teams import player_photos
+
+    def crops(frame: bytes, jersey_hex: str, limit: int = 2) -> list[bytes]:
+        del frame, limit, jersey_hex
+        return [b"\xff\xd8\xffwhite", b"\xff\xd8\xffred"]
+
+    def colors(still: bytes) -> tuple[str, str]:
+        if still.endswith(b"white"):
+            return "#f4f1ea", "#f4f1ea"
+        return "#b42318", "#f4f1ea"
+
+    monkeypatch.setattr("film_analysis.web.teams.uniform_crops", crops)
+    monkeypatch.setattr("film_analysis.web.teams.dominant_colors", colors)
+
+    photos = player_photos(
+        [b"\xff\xd8\xffframe"],
+        Uniform("Home", "white", "white", "white", jersey_hex="#f4f1ea"),
+        Uniform("Away", "red", "white", "red", jersey_hex="#b42318"),
+    )
+
+    assert photos == [b"\xff\xd8\xffwhite"]
+
+
+def test_each_team_is_told_the_other_uniform() -> None:
+    white = Uniform("Kentucky", "white", "white", "white", jersey_hex="#f4f1ea")
+    purple = Uniform(
+        "LSU",
+        "purple",
+        "gold",
+        "gold",
+        jersey_hex="#5b2a86",
+        pants_hex="#c0a020",
+        helmet_hex="#c0a020",
+    )
+
+    left = player_prompt(white, purple)
+    right = player_prompt(purple, white)
+
+    assert left != right
+    assert "The jersey is white" in left
+    assert "Do not wear a purple jersey" in left
+    assert "purple jersey" in left
+    assert "The jersey is purple" in right
+    assert "Do not wear a white jersey" in right
 
 
 def test_a_model_reply_becomes_two_uniforms() -> None:
@@ -112,7 +239,8 @@ def test_a_model_reply_becomes_two_uniforms() -> None:
 
     left, right = parse_uniforms(reply, "Kentucky vs LSU")
 
-    assert left == Uniform("Kentucky", "white", "white", "white")
+    assert left == Uniform("Away", "white", "white", "white")
+    assert right.name == "Home"
     assert right.jersey == "purple"
     assert right.pants == "gold"
     assert "with a logo" not in player_prompt(right)
@@ -141,9 +269,9 @@ def test_a_uniform_keeps_hex_colors_and_style() -> None:
     assert left.helmet_style == "solid shell"
     assert left.number == "black"
     assert right.helmet_style == "center stripe"
-    assert "#f4f1ea" in prompt
-    assert "solid shell" in prompt
-    assert "black" in prompt
+    assert "The jersey is white" in prompt
+    assert "#f4f1ea" not in prompt
+    assert "black pants" in prompt
     assert "00" in prompt
     assert "Pike" not in prompt
     assert "do not write color codes" in prompt
@@ -211,6 +339,31 @@ def test_a_reference_photo_is_sent_as_image_zero(monkeypatch: pytest.MonkeyPatch
     assert b"\xff\xd8\xffref" in body
     assert b'name="guidance"' in body
     assert b"Match image 0." in body
+
+
+def test_player_photos_from_one_team_are_all_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from film_analysis.web.teams import _render
+
+    sent: list[bytes] = []
+
+    def post(account: str, token: str, model: str, body: bytes, content_type: str) -> bytes:
+        sent.append(body)
+        return b"\xff\xd8\xffok"
+
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "token")
+    monkeypatch.setattr(
+        "film_analysis.web.teams._reference_jpeg",
+        lambda still: still if still.startswith(b"\xff\xd8\xff") else None,
+    )
+    monkeypatch.setattr("film_analysis.web.teams._post_image", post)
+
+    _render("This team wears white.", [b"\xff\xd8\xffone", b"\xff\xd8\xfftwo"])
+
+    assert b'name="input_image_0"' in sent[0]
+    assert b'name="input_image_1"' in sent[0]
+    assert b"\xff\xd8\xffone" in sent[0]
+    assert b"\xff\xd8\xfftwo" in sent[0]
 
 
 def test_a_failed_reference_does_not_drop_the_photo(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,41 +452,63 @@ def test_the_uniform_prompt_keeps_the_json_example() -> None:
     assert "jersey_hex" in text
 
 
+def test_the_reference_crop_stays_under_512(tmp_path: Path) -> None:
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("ffmpeg is not installed")
+    from film_analysis.web.teams import _reference_jpeg
+
+    frame = tmp_path / "wide.jpg"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=white:s=1280x720:d=0.1",
+            "-frames:v",
+            "1",
+            str(frame),
+        ],
+        check=True,
+    )
+
+    data = _reference_jpeg(frame.read_bytes())
+    assert data is not None and data.startswith(b"\xff\xd8\xff")
+    close = tmp_path / "close.jpg"
+    close.write_bytes(data)
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0:s=x",
+            str(close),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    width, height = (int(part) for part in probe.stdout.strip().split("x"))
+
+    assert width < 512
+    assert height < 512
+    assert max(width, height) == 480
+
+
 def test_a_still_without_a_photo_stays_whole() -> None:
     assert focus_player(b"not-a-photo", "left") == b"not-a-photo"
 
 
-def test_a_matchup_title_names_both_sides() -> None:
-    assert suggest_team_names("Pike County vs. Lamar") == ("Pike County", "Lamar")
-
-
-def test_school_and_mascot_come_from_the_lineup(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "film_analysis.web.teams._read_team_names",
-        lambda title, left, right: ("Johns Creek Gladiators", "HF Wildcats"),
-    )
-
-    assert suggest_team_names("Friday night", b"left", b"right") == (
-        "Johns Creek Gladiators",
-        "HF Wildcats",
-    )
-
-
-def test_a_reply_keeps_each_schools_mascot() -> None:
-    reply = '{"left": "Johns Creek Gladiators", "right": "HF Wildcats"}'
-
-    assert names_from_reply(reply) == ("Johns Creek Gladiators", "HF Wildcats")
-
-
-def test_a_lineup_without_a_readable_name_stays_home_and_away(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "film_analysis.web.teams._read_team_names",
-        lambda title, left, right: None,
-    )
-
-    assert suggest_team_names("Friday night", b"left", b"right") == ("Home", "Away")
+def test_a_title_does_not_guess_school_names() -> None:
+    assert suggest_team_names("Pike County vs. Lamar", b"left", b"right") == ("Home", "Away")
 
 
 def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
@@ -342,7 +517,10 @@ def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=lambda uniform, still=b"": (f"<svg>{uniform.name}</svg>".encode(), ".svg"),
+            portrait=lambda uniform, still=b"", other=None: (
+                f"<svg>{uniform.name}</svg>".encode(),
+                ".svg",
+            ),
         )
     )
 

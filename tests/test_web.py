@@ -144,7 +144,7 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="teams"' in response.text
     assert "Select team" in response.text
     assert "This is my team" in response.text
-    assert "A generated player for each school." in response.text
+    assert 'id="teams-note" class="lead" hidden' in response.text
     assert 'id="report"' in response.text
     assert "Scouting report" in response.text
     assert 'id="report-generate"' in response.text
@@ -277,7 +277,10 @@ def test_team_analysis_starts_when_the_plays_are_ready() -> None:
             duration=_duration,
             frames=_frames,
             lineup=lambda video, at: (b"left", b"right"),
-            portrait=lambda uniform, still=None: (f"<svg>{uniform.name}</svg>".encode(), ".svg"),
+            portrait=lambda uniform, still=None, other=None: (
+                f"<svg>{uniform.name}</svg>".encode(),
+                ".svg",
+            ),
         )
     )
 

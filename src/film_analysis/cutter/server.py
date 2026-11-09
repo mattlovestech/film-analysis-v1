@@ -124,17 +124,16 @@ def _label_task(
     worker: str,
     token: str,
     project_id: int,
-    index: int,
+    _index: int,
     start: float,
     end: float,
     review: bool,
 ) -> dict[str, object]:
-    name = "review" if review else "label"
-    with slots:
+    with slots as slot:
         return _task(
             worker,
             token,
-            f"{name}-{project_id}-{index}",
+            f"task-{project_id}-{slot}",
             {
                 "kind": "label",
                 "project_id": project_id,
@@ -227,7 +226,7 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
                     _task(
                         body.worker_url,
                         token,
-                        f"cut-{project_id}-{play_number}",
+                        f"cut-{project_id}",
                         {
                             "kind": "cut",
                             "project_id": project_id,
@@ -334,7 +333,7 @@ def _review(
         _task(
             body.worker_url,
             token,
-            f"cut-{body.project_id}-{play_number}",
+            f"cut-{body.project_id}",
             {
                 "kind": "cut",
                 "project_id": body.project_id,

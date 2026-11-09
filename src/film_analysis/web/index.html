@@ -610,35 +610,69 @@
     #chart-progress { margin-top: 1.6rem; }
     #chart-progress[hidden] { display: none; }
     #chart-progress ol {
+      counter-reset: stage;
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 0.65rem;
-      margin: 0 0 0.55rem;
+      gap: 0.75rem;
+      margin: 0 0 0.7rem;
       padding: 0;
       list-style: none;
     }
+    #chart-progress li { counter-increment: stage; min-width: 0; }
     #chart-progress button {
+      position: relative;
       width: 100%;
-      padding: 0;
+      padding: 0.1rem 0 0.1rem 1.9rem;
       border: 0;
       background: transparent;
       color: var(--muted);
       font: inherit;
-      font-size: 0.78rem;
+      font-size: 0.84rem;
       font-weight: 650;
-      line-height: 1.3;
+      letter-spacing: -0.015em;
+      line-height: 1.25;
       text-align: left;
       cursor: pointer;
     }
+    #chart-progress button::before {
+      content: counter(stage);
+      position: absolute;
+      left: 0;
+      top: 0;
+      display: grid;
+      place-items: center;
+      width: 1.35rem;
+      height: 1.35rem;
+      border-radius: 50%;
+      background: #2c2c2e;
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 650;
+    }
     #chart-progress li.now button { color: var(--gold); }
+    #chart-progress li.now button::before {
+      background: var(--gold);
+      color: #111;
+      box-shadow: 0 0 0 4px rgba(255, 214, 10, 0.16);
+    }
     #chart-progress li.done button { color: var(--ink); }
-    #chart-progress button span {
+    #chart-progress li.done button::before {
+      background: transparent;
+      color: var(--gold);
+      box-shadow: inset 0 0 0 1.5px var(--gold);
+    }
+    #chart-progress button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    #chart-progress .step-label { display: block; }
+    #chart-progress .step-state {
       display: block;
       margin-top: 0.12rem;
       color: var(--muted);
       font-size: 0.66rem;
       font-weight: 650;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.04em;
       text-transform: uppercase;
     }
     #chart-progress .track {
@@ -655,10 +689,64 @@
       transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
     }
     #chart-progress .chart-note {
-      margin: 0.45rem 0 0;
-      color: var(--muted);
-      font-size: 0.85rem;
+      margin: 0.55rem 0 0;
+      color: var(--ink);
+      font-size: 0.95rem;
+      letter-spacing: -0.015em;
     }
+    #review:has(#chart-progress:not([hidden])) #film-thumb {
+      aspect-ratio: auto;
+      height: 9.5rem;
+    }
+    #studio[data-stage="review"],
+    #studio[data-stage="teams"] { padding-bottom: 4.75rem; }
+    #studio { margin-top: 1.15rem; }
+    #studio[hidden] { display: none; }
+    #stage-review[hidden],
+    #stage-dock[hidden] { display: none; }
+    #studio[data-stage="review"] > #stage-review,
+    #studio[data-stage="teams"] > #teams,
+    #studio[data-stage="report"] > #report {
+      animation: stage-in 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    @keyframes stage-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: none; }
+    }
+    #stage-dock {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 4;
+      display: flex;
+      justify-content: center;
+      padding: 0.35rem 1.25rem 0.85rem;
+      background: linear-gradient(180deg, rgba(17, 17, 17, 0), #111 36%);
+      pointer-events: none;
+    }
+    .dock-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      width: min(46rem, 100%);
+      pointer-events: auto;
+    }
+    #stage-status {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    #stage-next {
+      margin-left: auto;
+      padding: 0.7rem 1.15rem;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #111;
+      white-space: nowrap;
+    }
+    #stage-next:disabled { opacity: 0.45; cursor: default; }
     #plays-heading,
     #teams,
     #report { scroll-margin-top: 1rem; }
@@ -719,7 +807,11 @@
     }
     @media (prefers-reduced-motion: reduce) {
       #activity-list .bone,
-      #activity-live { animation: none; }
+      #activity-live,
+      #studio[data-stage="review"] > #stage-review,
+      #studio[data-stage="teams"] > #teams,
+      #studio[data-stage="report"] > #report,
+      .player-ghost { animation: none; }
     }
     label.workers {
       display: flex;
@@ -926,17 +1018,24 @@
       gap: 1rem;
       margin: 1.25rem 0 0;
     }
-    #play-nav a,
-    #play-nav button.skip {
-      padding: 0;
+    #play-nav a {
+      padding: 0.65rem 0;
       background: transparent;
       color: var(--blue);
       font-size: 0.85rem;
       font-weight: 650;
       text-decoration: none;
     }
-    #play-nav a:hover,
-    #play-nav button.skip:hover:not(:disabled) { color: #409cff; filter: none; }
+    #play-nav button.skip {
+      margin-left: auto;
+      padding: 0.7rem 1.15rem;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #111;
+      font-size: 0.85rem;
+    }
+    #play-nav a:hover { color: #409cff; }
+    #play-nav button.skip:hover:not(:disabled) { filter: brightness(1.06); color: #111; }
     #play-types { display: grid; gap: 0.85rem; margin-top: 1.15rem; }
     #play-types .type-label {
       margin: 0;
@@ -969,20 +1068,49 @@
       background: var(--gold);
       color: #111;
     }
-    #report { margin-top: 1.4rem; }
-    #report .lead { margin: 0.35rem 0 0.75rem; }
+    #report {
+      margin-top: 0;
+      padding: 1.45rem 1.35rem 1.4rem;
+      border-radius: 18px;
+      background:
+        radial-gradient(120% 90% at 100% 0%, rgba(255, 214, 10, 0.1), transparent 42%),
+        var(--surface);
+    }
+    #report .stage-kicker {
+      margin: 0;
+      color: var(--gold);
+      font-size: 0.72rem;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #report h2 {
+      margin: 0.3rem 0 0;
+      font-size: 1.7rem;
+      font-weight: 650;
+      letter-spacing: -0.035em;
+      text-transform: none;
+      color: var(--ink);
+    }
+    #report .lead { margin: 0.45rem 0 1rem; max-width: 36rem; }
     #report .exports { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    #report-generate { border-radius: 999px; padding: 0.75rem 1.2rem; }
     #report-generate:disabled { cursor: not-allowed; }
     #report a[hidden],
     #report-generate[hidden] { display: none; }
     #report a {
       display: inline-block;
-      padding: 0.65rem 1.05rem;
-      border-radius: 10px;
+      padding: 0.75rem 1.15rem;
+      border-radius: 999px;
       background: var(--ink);
       color: #111;
       font-weight: 650;
       text-decoration: none;
+    }
+    #report a + a {
+      background: transparent;
+      color: var(--ink);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
     }
     #report a:hover { filter: brightness(1.06); color: #111; }
     .play-card select.play-type {
@@ -1173,21 +1301,38 @@
       letter-spacing: -0.04em;
     }
     #download-bytes { font-size: 0.95rem; color: var(--muted); }
-    #teams { margin-top: 1.75rem; }
-    #teams .lead { margin: 0.35rem 0 0.9rem; }
+    #teams { margin-top: 0; }
+    #review #teams > h2,
+    #review #report h2 { margin-top: 0; }
+    #teams .lead { margin: 0.35rem 0 0.9rem; color: var(--ink); }
+    #teams-note,
+    #mine-ask,
+    #teams .team-uniform { display: none; }
     .team-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 0.85rem;
     }
+    .team-row[hidden] { display: none; }
     .team-card {
       display: grid;
       gap: 0.65rem;
       align-content: start;
       padding: 0.75rem;
       border: 1px solid var(--line);
-      border-radius: var(--radius);
+      border-radius: 16px;
       background: var(--surface);
+      cursor: pointer;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+    }
+    .team-card.ghost { cursor: default; }
+    .player-ghost {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #1a1c20 25%, #2a2d33 50%, #1a1c20 75%);
+      background-size: 200% 100%;
+      animation: activity-shimmer 1.2s ease-in-out infinite;
     }
     .team-kicker {
       margin: 0;
@@ -1260,7 +1405,8 @@
     }
     .team-card.chosen {
       border-color: var(--gold);
-      box-shadow: 0 0 0 1px var(--gold);
+      box-shadow: 0 0 0 1px var(--gold), 0 16px 40px rgba(0, 0, 0, 0.28);
+      transform: translateY(-2px);
     }
     .team-card.chosen button.mine {
       border-color: transparent;
@@ -1274,8 +1420,11 @@
         var(--gold);
       box-shadow: inset 0 0 0 2px #111;
     }
+    .team-card.other { opacity: 0.62; }
     .team-card.other button.mine { color: var(--muted); }
-    #select-team, #teams-save { margin-top: 0.85rem; }
+    #select-team { display: none; }
+    #teams-save,
+    #teams-retry { margin-top: 0.85rem; }
     #teams-error { color: #ff9f0a; }
     @media (max-width: 700px) {
       .team-row { grid-template-columns: 1fr; }
@@ -1428,13 +1577,22 @@
       <nav id="chart-progress" hidden aria-label="Charting">
         <ol>
           <li data-step="review">
-            <button type="button" data-target="plays-heading">Review plays<span>Optional</span></button>
+            <button type="button" data-target="stage-review">
+              <span class="step-label">Review plays</span>
+              <span class="step-state">Optional</span>
+            </button>
           </li>
           <li data-step="teams">
-            <button type="button" data-target="teams">Select team<span></span></button>
+            <button type="button" data-target="teams">
+              <span class="step-label">Your team</span>
+              <span class="step-state"></span>
+            </button>
           </li>
           <li data-step="report">
-            <button type="button" data-target="report">Generate scouting report<span></span></button>
+            <button type="button" data-target="report">
+              <span class="step-label">Scout report</span>
+              <span class="step-state"></span>
+            </button>
           </li>
         </ol>
         <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -1442,59 +1600,80 @@
         </div>
         <p class="chart-note"></p>
       </nav>
-      <section id="plays" hidden>
-        <h2 id="plays-heading">
-          <button type="button" id="plays-toggle" aria-expanded="true" aria-controls="results">
-            <span class="chevron" aria-hidden="true"></span>
-            Plays
-            <span id="plays-count"></span>
-          </button>
-        </h2>
-        <ul id="results"></ul>
-      </section>
-      <section id="teams" hidden>
-        <h2>Teams</h2>
-        <p id="teams-note" class="lead">Plays are finished. Select team to build the two players.</p>
-        <button id="select-team" type="button">Select team</button>
-        <p id="mine-ask" class="mine-ask" hidden>Which generated player is your team?</p>
-        <div class="team-row" role="radiogroup" aria-labelledby="mine-ask" hidden>
-          <article class="team-card">
-            <p id="team-left-kicker" class="team-kicker">First school</p>
-            <img id="team-left-player" class="player" alt="Generated player for the first school" hidden>
-            <p id="team-left-uniform" class="team-uniform" hidden></p>
-            <img id="team-left-still" alt="" hidden>
-            <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">This is my team</button>
-            <label for="team-left-name">Team name
-              <input id="team-left-name" maxlength="40" autocomplete="off">
-            </label>
-          </article>
-          <article class="team-card">
-            <p id="team-right-kicker" class="team-kicker">Second school</p>
-            <img id="team-right-player" class="player" alt="Generated player for the second school" hidden>
-            <p id="team-right-uniform" class="team-uniform" hidden></p>
-            <img id="team-right-still" alt="" hidden>
-            <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">This is my team</button>
-            <label for="team-right-name">Team name
-              <input id="team-right-name" maxlength="40" autocomplete="off">
-            </label>
-          </article>
+      <div id="studio" data-stage="live">
+        <div id="stage-review">
+          <section id="plays" hidden>
+            <h2 id="plays-heading">
+              <button type="button" id="plays-toggle" aria-expanded="true" aria-controls="results">
+                <span class="chevron" aria-hidden="true"></span>
+                Plays
+                <span id="plays-count"></span>
+              </button>
+            </h2>
+            <ul id="results"></ul>
+          </section>
+          <h2 id="reviews-heading" hidden>Needs a look</h2>
+          <p id="reviews-lead" class="lead" hidden>These stretches were not clearly a play. Mark each one, or leave it for later.</p>
+          <ul id="reviews"></ul>
         </div>
-        <p id="teams-error" class="lead" hidden></p>
-        <button id="teams-retry" class="retry" type="button" hidden>Generate the players again</button>
-        <button id="teams-save" type="button" hidden>Save teams</button>
-      </section>
-      <div id="report" hidden>
-        <h2>Scouting report</h2>
-        <p id="report-note" class="lead"></p>
-        <p class="exports">
-          <button id="report-generate" type="button" disabled>Generate scouting report</button>
-          <a id="report-link" href="" hidden download="scouting-report.pdf">Download PDF</a>
-          <a id="report-csv" href="" hidden download="scouting-report.csv">Download CSV</a>
-        </p>
+        <section id="teams" hidden>
+          <h2 id="teams-heading">Your team</h2>
+          <p id="teams-note" class="lead" hidden>Choose the player wearing your uniform.</p>
+          <button id="select-team" type="button">Select team</button>
+          <div id="teams-building" class="team-row" hidden>
+            <article class="team-card ghost" aria-hidden="true">
+              <p class="team-kicker">Home</p>
+              <div class="player-ghost"></div>
+            </article>
+            <article class="team-card ghost" aria-hidden="true">
+              <p class="team-kicker">Away</p>
+              <div class="player-ghost"></div>
+            </article>
+          </div>
+          <p id="mine-ask" class="mine-ask" hidden>Which player is your team?</p>
+          <div class="team-row" role="radiogroup" aria-labelledby="teams-heading" hidden>
+            <article class="team-card">
+            <p id="team-left-kicker" class="team-kicker">Home</p>
+            <img id="team-left-player" class="player" alt="Generated player for home" hidden>
+              <p id="team-left-uniform" class="team-uniform" hidden></p>
+              <img id="team-left-still" alt="" hidden>
+              <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">This is my team</button>
+              <label for="team-left-name">Team name
+                <input id="team-left-name" maxlength="40" autocomplete="off">
+              </label>
+            </article>
+            <article class="team-card">
+            <p id="team-right-kicker" class="team-kicker">Away</p>
+            <img id="team-right-player" class="player" alt="Generated player for away" hidden>
+              <p id="team-right-uniform" class="team-uniform" hidden></p>
+              <img id="team-right-still" alt="" hidden>
+              <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">This is my team</button>
+              <label for="team-right-name">Team name
+                <input id="team-right-name" maxlength="40" autocomplete="off">
+              </label>
+            </article>
+          </div>
+          <p id="teams-error" class="lead" hidden></p>
+          <button id="teams-retry" class="retry" type="button" hidden>Regenerate players</button>
+          <button id="teams-save" type="button" hidden>Save teams</button>
+        </section>
+        <div id="report" hidden>
+          <p class="stage-kicker">Scout report</p>
+          <h2>Scouting report</h2>
+          <p id="report-note" class="lead"></p>
+          <p class="exports">
+            <button id="report-generate" type="button" disabled>Generate scouting report</button>
+            <a id="report-link" href="" hidden download="scouting-report.pdf">Download PDF</a>
+            <a id="report-csv" href="" hidden download="scouting-report.csv">Download CSV</a>
+          </p>
+        </div>
+        <footer id="stage-dock" hidden>
+          <div class="dock-bar">
+            <p id="stage-status"></p>
+            <button id="stage-next" type="button">Continue</button>
+          </div>
+        </footer>
       </div>
-      <h2 id="reviews-heading" hidden>Needs a look</h2>
-      <p id="reviews-lead" class="lead" hidden>These stretches were not clearly a play. Mark each one, or leave it for later.</p>
-      <ul id="reviews"></ul>
     </section>
     <section id="play" hidden>
       <a id="play-back" href="/projects">Film</a>
@@ -1535,6 +1714,12 @@
     const chartFill = chartProgress.querySelector(".fill");
     const chartTrack = chartProgress.querySelector(".track");
     const chartNote = chartProgress.querySelector(".chart-note");
+    const studio = document.querySelector("#studio");
+    const stageReview = document.querySelector("#stage-review");
+    const stageDock = document.querySelector("#stage-dock");
+    const stageStatus = document.querySelector("#stage-status");
+    const stageNext = document.querySelector("#stage-next");
+    const teamsBuilding = document.querySelector("#teams-building");
     const button = form.querySelector("button");
     const composer = document.querySelector("#composer");
     const review = document.querySelector("#review");
@@ -1834,17 +2019,35 @@
       playSection.dataset.previous = play.previous || "";
       playSection.dataset.film = play.film || "/projects";
       playNav.replaceChildren();
-      playNav.hidden = !play.previous && !play.next;
+      playNav.hidden = !play.film && !play.previous && !play.next;
       playNav.append(play.previous ? playLink(`/play/${play.previous}`, "Previous") : document.createElement("span"));
-      playNav.append(play.next ? skipButton(play) : document.createElement("span"));
+      playNav.append(play.next ? skipButton(play) : continueToTeams(play));
     }
 
     function skipButton(play) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "skip";
-      button.textContent = "Next";
-      button.addEventListener("click", () => acceptAndOpen(play.uid, play.next, button));
+      button.textContent = "Next play";
+      button.addEventListener("click", () => acceptAndOpen(play.uid, `/play/${play.next}`, button));
+      return button;
+    }
+
+    function continueToTeams(play) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "skip";
+      button.textContent = "Choose your team";
+      button.addEventListener("click", () => {
+        const film = play.film || playSection.dataset.film || "/projects";
+        const id = (String(film).match(/\/projects\/(\d+)/) || [])[1];
+        if (id) {
+          chartProgress.dataset.intent = "teams";
+          chartProgress.dataset.project = id;
+          try { sessionStorage.setItem(stageKey(id), "teams"); } catch { /* private mode */ }
+        }
+        acceptAndOpen(play.uid, film, button);
+      });
       return button;
     }
 
@@ -1868,7 +2071,7 @@
         }
         status.className = "";
         status.textContent = "";
-        history.pushState({}, "", `/play/${nextUid}`);
+        history.pushState({}, "", nextUid);
         route();
       } catch {
         status.className = "error";
@@ -3918,13 +4121,16 @@
         showTeamChoices(true);
         return;
       }
-      if (!building) showTeamChoices(false);
+      showTeamChoices(false);
     }
 
     function showTeamChoices(open) {
-      mineAsk.hidden = !open;
-      teamsSection.querySelector(".team-row").hidden = !open;
-      teamsSave.hidden = !open;
+      const building = !open && teamsSection.dataset.loading === String(results.dataset.project || "");
+      mineAsk.hidden = true;
+      teamsSection.querySelector('.team-row[role="radiogroup"]').hidden = !open;
+      teamsBuilding.hidden = !building;
+      teamsSave.hidden = true;
+      teamsRetry.hidden = !open && teamsError.hidden;
     }
 
     function playersReady() {
@@ -3934,14 +4140,7 @@
     }
 
     function chooseTeam() {
-      const projectId = results.dataset.project;
-      if (!projectId || selectTeamButton.disabled) return;
-      if (playersReady()) {
-        showTeamChoices(true);
-        teamsSection.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      loadLineup(projectId);
+      openStage("teams");
     }
 
     function fillTeams(projectId, teams) {
@@ -3959,11 +4158,14 @@
         player.hidden = !playerUrl;
         const name = document.querySelector(`#team-${side}-name`);
         const saved = teams[`${side}_name`] || "";
-        if (saved && document.activeElement !== name && name.dataset.saved !== saved) {
+        if (name.dataset.saved === undefined) name.dataset.saved = "";
+        const untouched = document.activeElement !== name && name.value.trim() === name.dataset.saved;
+        const matchesSave = document.activeElement !== name && name.value.trim() === saved;
+        if (untouched || matchesSave) {
           name.value = saved;
           name.dataset.saved = saved;
         }
-        const school = name.value.trim() || (side === "left" ? "First school" : "Second school");
+        const school = name.value.trim() || (side === "left" ? "Home" : "Away");
         document.querySelector(`#team-${side}-kicker`).textContent = school;
         player.alt = `Generated player for ${school}`;
         document.querySelector(`#team-${side}-mine`).setAttribute(
@@ -3971,14 +4173,13 @@
           teams.mine === side ? "true" : "false",
         );
         const uniform = document.querySelector(`#team-${side}-uniform`);
-        uniform.textContent = teams[`${side}_uniform`] || "";
-        uniform.hidden = !uniform.textContent;
+        uniform.textContent = "";
+        uniform.hidden = true;
       }
       paintMineChoice();
-      teamsRetry.hidden = true;
       teamsNote.textContent = teams.left_player && teams.right_player
-        ? "A generated player for each school."
-        : "Building a generated player for each school.";
+        ? "Home and away, standing on the field."
+        : "Building the home and away players.";
     }
 
     function paintMineChoice() {
@@ -3990,10 +4191,8 @@
         card.classList.toggle("chosen", selected);
         card.classList.toggle("other", Boolean(chosen) && !selected);
         const name = document.querySelector(`#team-${button.dataset.side}-name`).value.trim();
-        const who = name || "This school";
-        document.querySelector(`#team-${button.dataset.side}-kicker`).textContent = who === "This school"
-          ? (button.dataset.side === "left" ? "First school" : "Second school")
-          : who;
+        const who = name || (button.dataset.side === "left" ? "Home" : "Away");
+        document.querySelector(`#team-${button.dataset.side}-kicker`).textContent = who;
         if (!chosen) button.textContent = "This is my team";
         else if (selected) button.textContent = "Your team";
         else button.textContent = "Opponent";
@@ -4014,15 +4213,20 @@
       }
     }
 
-    async function loadLineup(projectId) {
+    async function loadLineup(projectId, again = false) {
       teamsSection.dataset.loading = String(projectId);
       selectTeamButton.disabled = true;
       selectTeamButton.textContent = "Building players…";
       teamsNote.textContent = "Reading the plays and building a player for each uniform.";
       teamsError.hidden = true;
       teamsRetry.hidden = true;
+      showTeamChoices(false);
+      paintDock();
       try {
-        const response = await fetch(`/api/projects/${projectId}/teams/stills`, { method: "POST" });
+        const againQuery = again ? "?again=true" : "";
+        const response = await fetch(`/api/projects/${projectId}/teams/stills${againQuery}`, {
+          method: "POST",
+        });
         const payload = await readBody(response);
         if (!response.ok) {
           throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not read a lineup.");
@@ -4042,6 +4246,8 @@
         if (teamsSection.dataset.loading === String(projectId)) delete teamsSection.dataset.loading;
         selectTeamButton.disabled = false;
         selectTeamButton.textContent = "Select team";
+        if (!playersReady()) showTeamChoices(false);
+        paintDock();
       }
     }
 
@@ -4060,39 +4266,57 @@
         reportBox.dataset.project = String(projectId);
         reportBox.dataset.side = mine.dataset.side;
         reportBox.dataset.labeled = "1";
-        reportBox.hidden = false;
-        const ready = reportBox.dataset.ready === String(projectId);
-        reportGenerate.hidden = ready;
-        reportLink.hidden = !ready;
-        reportCsv.hidden = !ready;
-        reportGenerate.disabled = true;
-        reportNote.textContent = ready
-          ? reportNote.textContent
-          : "Saving your team. The scouting report can be generated next.";
-        reportBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        saveTeams({ redraw: false });
+        chartProgress.dataset.teams = "1";
+        const reportButton = chartProgress.querySelector('[data-step="report"] button');
+        if (reportButton) reportButton.disabled = false;
+        const teamsStep = chartProgress.querySelector('[data-step="teams"]');
+        if (teamsStep) teamsStep.dataset.complete = "1";
+        paintStageCopy("teams");
+        paintDock();
+        teamSave = saveTeams({ redraw: false });
+      });
+    }
+    for (const card of teamsSection.querySelectorAll('.team-row[role="radiogroup"] .team-card')) {
+      card.addEventListener("click", (event) => {
+        if (event.target.closest("input, label, button")) return;
+        const mine = card.querySelector("button.mine");
+        if (mine) mine.click();
       });
     }
     for (const name of teamsSection.querySelectorAll("input")) {
-      name.addEventListener("input", () => paintMineChoice());
+      name.addEventListener("input", () => {
+        paintMineChoice();
+        if (studio.dataset.stage === "teams") {
+          paintStageCopy("teams");
+          paintDock();
+        }
+      });
+      name.addEventListener("change", () => {
+        if (name.value.trim() === (name.dataset.saved || "")) return;
+        teamSave = saveTeams({ redraw: false });
+      });
     }
     selectTeamButton.addEventListener("click", () => chooseTeam());
     teamsRetry.addEventListener("click", () => {
-      if (results.dataset.project) loadLineup(results.dataset.project);
+      const projectId = results.dataset.project;
+      if (!projectId || teamsSection.dataset.loading === projectId) return;
+      loadLineup(projectId, true);
     });
     teamsSave.addEventListener("click", () => saveTeams());
     reportGenerate.addEventListener("click", () => enableReportDownload());
+    stageNext.addEventListener("click", () => {
+      const action = stageNext.dataset.action;
+      if (action === "teams" || action === "report") openStage(action);
+    });
     playsToggle.addEventListener("click", () => {
       setPlaysOpen(playsToggle.getAttribute("aria-expanded") !== "true");
     });
     chartProgress.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-target]");
-      if (!button) return;
-      if (button.dataset.target === "plays-heading") setPlaysOpen(true);
-      if (button.dataset.target === "teams") chooseTeam();
-      if (button.dataset.target === "report") enableReportDownload();
-      const target = document.getElementById(button.dataset.target);
-      if (target && !target.hidden) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!button || button.disabled) return;
+      const stage = button.closest("li").dataset.step;
+      if (stage === "review") setPlaysOpen(true);
+      openStage(stage);
     });
 
     function setPlaysOpen(open) {
@@ -4111,7 +4335,7 @@
       const redraw = options.redraw !== false;
       teamsSave.disabled = true;
       teamsError.hidden = true;
-      if (redraw) teamsNote.textContent = "Building a generated player for each school.";
+      if (redraw) teamsNote.textContent = "Building the home and away players.";
       try {
         const response = await fetch(`/api/projects/${projectId}/teams`, {
           method: "POST",
@@ -4133,12 +4357,15 @@
       } catch (error) {
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
-        teamsNote.textContent = "A generated player for each school.";
+        teamsNote.textContent = "Home and away, standing on the field.";
         if (!redraw) reportNote.textContent = error.message || "Could not save that team.";
       } finally {
         teamsSave.disabled = false;
+        paintDock();
       }
     }
+
+    let teamSave = null;
 
     function paint(project, token) {
       useLibraryLayout(false);
@@ -4153,6 +4380,7 @@
         results.replaceChildren();
         reviews.replaceChildren();
         results.dataset.project = String(project.project);
+        setPlaysOpen(false);
       }
       projectName.textContent = project.name;
       if (project.thumbnail && filmThumb.dataset.source !== project.thumbnail) {
@@ -4298,6 +4526,7 @@
       item.dataset.uid = play.uid;
       item.dataset.family = play.family || "";
       item.dataset.unit = play.unit || "";
+      item.dataset.reviewed = play.reviewed ? "1" : "0";
       for (const button of item.querySelectorAll(".unit-tag button")) {
         button.setAttribute("aria-pressed", button.dataset.unit === play.unit ? "true" : "false");
       }
@@ -4321,14 +4550,238 @@
       }
     }
 
+    function stageKey(id) {
+      return `film-stage-${id}`;
+    }
+
+    function clampStage(stage, teamsDone) {
+      if (stage === "report" && !teamsDone) return "teams";
+      if (stage === "review" || stage === "teams" || stage === "report") return stage;
+      return "review";
+    }
+
+    function resolveStage(project) {
+      const teamsDone = (project.teams && (project.teams.mine === "left" || project.teams.mine === "right"))
+        || chartProgress.dataset.teams === "1"
+        || Boolean(selectedTeamSide());
+      if (chartProgress.dataset.intent) {
+        const stage = clampStage(chartProgress.dataset.intent, teamsDone);
+        delete chartProgress.dataset.intent;
+        return stage;
+      }
+      if (chartProgress.dataset.project === String(project.project) && chartProgress.dataset.stage) {
+        return clampStage(chartProgress.dataset.stage, teamsDone);
+      }
+      let stored = "";
+      try { stored = sessionStorage.getItem(stageKey(project.project)) || ""; } catch { /* private mode */ }
+      if (stored) return clampStage(stored, teamsDone);
+      return teamsDone ? "report" : "review";
+    }
+
+    function rememberStage(id, stage) {
+      chartProgress.dataset.stage = stage;
+      if (!id) return;
+      try { sessionStorage.setItem(stageKey(id), stage); } catch { /* private mode */ }
+    }
+
+    function applyStage(stage) {
+      const live = stage !== "review" && stage !== "teams" && stage !== "report";
+      studio.dataset.stage = live ? "live" : stage;
+      stageReview.hidden = !live && stage !== "review";
+      if (!live) {
+        teamsSection.hidden = stage !== "teams";
+        reportBox.hidden = stage !== "report";
+        if (stage === "review") setPlaysOpen(true);
+        if (stage !== "review") {
+          for (const video of stageReview.querySelectorAll("video")) video.pause();
+        }
+      }
+      stageDock.hidden = live || stage === "report";
+      if (stage === "teams") beginTeams();
+    }
+
+    function beginTeams() {
+      const projectId = results.dataset.project;
+      if (!projectId) return;
+      if (playersReady()) {
+        showTeamChoices(true);
+        return;
+      }
+      if (teamsSection.dataset.loading === String(projectId)) {
+        showTeamChoices(false);
+        return;
+      }
+      loadLineup(projectId);
+    }
+
+    function sideName(side) {
+      if (side !== "left" && side !== "right") return "";
+      const input = document.querySelector(`#team-${side}-name`);
+      return input ? input.value.trim() : "";
+    }
+
+    function paintStageCopy(stage) {
+      const mine = selectedTeamSide();
+      const teamName = sideName(mine);
+      const opponent = sideName(mine === "left" ? "right" : mine === "right" ? "left" : "");
+      const reportReady = reportBox.dataset.ready === String(results.dataset.project || "");
+      if (stage === "report") {
+        chartNote.textContent = reportReady
+          ? "The scout report is ready."
+          : opponent
+            ? `A scouting report on ${opponent}, from every play.`
+            : "A scouting report from every play in this film.";
+        return;
+      }
+      if (stage === "teams") {
+        if (!playersReady()) {
+          chartNote.textContent = teamsSection.dataset.loading
+            ? "Building a player for each uniform."
+            : "The two uniforms in this film.";
+          return;
+        }
+        chartNote.textContent = mine
+          ? (teamName ? `${teamName} is your team. The scout report is next.` : "Your team is set. The scout report is next.")
+          : "Home and away, standing on the field. Choose yours.";
+        return;
+      }
+      if (stage === "review") chartNote.textContent = "Review any play. Choosing your team is next.";
+    }
+
+    function paintDock() {
+      const stage = studio.dataset.stage;
+      if (stage !== "review" && stage !== "teams") {
+        stageDock.hidden = true;
+        return;
+      }
+      stageDock.hidden = false;
+      if (stage === "review") {
+        const total = results.querySelectorAll(".play-card").length;
+        const reviewed = results.querySelectorAll('.play-card[data-reviewed="1"]').length;
+        const held = reviews.children.length;
+        const reviewLine = !total
+          ? "Review is optional."
+          : reviewed === total
+            ? (total === 1 ? "1 play reviewed." : `All ${total} plays reviewed.`)
+            : `${reviewed} of ${total} reviewed.`;
+        const heldLine = held === 0
+          ? ""
+          : held === 1
+            ? "1 stretch still needs a look."
+            : `${held} stretches still need a look.`;
+        stageStatus.textContent = [reviewLine, heldLine].filter(Boolean).join(" ");
+        stageNext.disabled = false;
+        stageNext.textContent = "Choose your team";
+        stageNext.dataset.action = "teams";
+        return;
+      }
+      const mine = selectedTeamSide();
+      const teamName = sideName(mine);
+      const building = teamsSection.dataset.loading === String(results.dataset.project || "");
+      if (!playersReady()) {
+        stageStatus.textContent = building ? "Reading uniforms from the film." : "Both teams will appear here.";
+        stageNext.disabled = true;
+        stageNext.textContent = building ? "Building players…" : "Continue";
+        stageNext.dataset.action = "teams";
+        return;
+      }
+      if (!mine) {
+        stageStatus.textContent = "Choose the player wearing your uniform.";
+        stageNext.disabled = true;
+        stageNext.textContent = "Continue";
+        stageNext.dataset.action = "report";
+        return;
+      }
+      stageStatus.textContent = teamName ? `${teamName} is your team.` : "Your team is selected.";
+      stageNext.disabled = false;
+      stageNext.textContent = "Continue to scout report";
+      stageNext.dataset.action = "report";
+    }
+
+    async function openStage(stage) {
+      const projectId = results.dataset.project;
+      const teamsDone = chartProgress.dataset.teams === "1" || Boolean(selectedTeamSide());
+      const next = clampStage(stage, teamsDone);
+      if (next === "report") {
+        const saved = await flushTeamNames();
+        if (!saved) {
+          rememberStage(projectId, "teams");
+          applyStage("teams");
+          retintSteps("teams");
+          paintStageLabels("teams");
+          paintStageCopy("teams");
+          paintDock();
+          return;
+        }
+      }
+      rememberStage(projectId, next);
+      applyStage(next);
+      retintSteps(next);
+      paintStageLabels(next);
+      paintStageCopy(next);
+      const filled = stageFill(next);
+      chartFill.style.width = `${filled}%`;
+      chartTrack.setAttribute("aria-valuenow", String(filled));
+      paintDock();
+    }
+
+    function paintStageLabels(stage) {
+      const teamsDone = chartProgress.dataset.teams === "1";
+      const reportReady = reportBox.dataset.ready === String(results.dataset.project || "");
+      const teamsState = chartProgress.querySelector('[data-step="teams"] .step-state');
+      const reportState = chartProgress.querySelector('[data-step="report"] .step-state');
+      if (teamsState) teamsState.textContent = teamsDone ? "Done" : stage === "teams" ? "Now" : "Next";
+      if (reportState) {
+        reportState.textContent = reportReady ? "Done" : teamsDone ? "Ready" : "";
+      }
+    }
+
+    function stageFill(stage) {
+      if (stage === "report") {
+        return reportBox.dataset.ready === String(results.dataset.project || "") ? 100 : 78;
+      }
+      if (stage === "teams") return chartProgress.dataset.teams === "1" ? 66 : 50;
+      const total = results.querySelectorAll(".play-card").length;
+      const reviewed = results.querySelectorAll('.play-card[data-reviewed="1"]').length;
+      return total ? Math.max(6, Math.round((reviewed / total) * 30)) : 6;
+    }
+
+    function retintSteps(stage) {
+      for (const name of ["review", "teams", "report"]) {
+        const item = chartProgress.querySelector(`[data-step="${name}"]`);
+        if (!item) continue;
+        markChartStep(item, name === stage ? "now" : item.dataset.complete === "1" ? "done" : "");
+      }
+    }
+
+    async function flushTeamNames() {
+      if (teamSave) {
+        try { await teamSave; } catch { /* saveTeams shows the error */ }
+      }
+      const dirty = [...teamsSection.querySelectorAll("input")].some(
+        (input) => input.value.trim() !== (input.dataset.saved || ""),
+      );
+      if (!dirty) return teamsError.hidden;
+      teamSave = saveTeams({ redraw: false });
+      try { await teamSave; } catch { /* saveTeams shows the error */ }
+      return teamsError.hidden;
+    }
+
     function paintChart(project) {
       const plays = project.plays || [];
       const show = project.status === "ready" && plays.length > 0;
       chartProgress.hidden = !show;
-      if (!show) return;
+      if (!show) {
+        studio.dataset.stage = "live";
+        stageReview.hidden = false;
+        stageDock.hidden = true;
+        return;
+      }
       if (chartProgress.dataset.project !== String(project.project)) {
         chartProgress.dataset.project = String(project.project);
         delete chartProgress.dataset.teams;
+        delete chartProgress.dataset.stage;
+        delete chartProgress.dataset.intent;
       }
       const reviewed = plays.filter((play) => play.reviewed).length;
       const reviewDone = reviewed === plays.length;
@@ -4339,28 +4792,34 @@
       }
       const teamsDone = chartProgress.dataset.teams === "1";
       const reportReady = teamsDone && reportBox.dataset.ready === String(project.project);
+      const stage = resolveStage(project);
+      rememberStage(project.project, stage);
       const reviewStep = chartProgress.querySelector('[data-step="review"]');
       const teamsStep = chartProgress.querySelector('[data-step="teams"]');
       const reportStep = chartProgress.querySelector('[data-step="report"]');
-      markChartStep(reviewStep, reviewDone ? "done" : "");
-      markChartStep(teamsStep, teamsDone ? "done" : "now");
-      markChartStep(reportStep, reportReady ? "done" : teamsDone ? "now" : "");
-      const reviewedPart = Math.round((reviewed / plays.length) * 34);
-      const filled = reportReady ? 100 : teamsDone ? 66 : reviewedPart;
+      reviewStep.dataset.complete = reviewDone ? "1" : "";
+      teamsStep.dataset.complete = teamsDone ? "1" : "";
+      reportStep.dataset.complete = reportReady ? "1" : "";
+      markChartStep(reviewStep, stage === "review" ? "now" : reviewDone ? "done" : "");
+      markChartStep(teamsStep, stage === "teams" ? "now" : teamsDone ? "done" : "");
+      markChartStep(reportStep, stage === "report" ? "now" : reportReady ? "done" : "");
+      reportStep.querySelector("button").disabled = !teamsDone;
+      const filled = stage === "report"
+        ? (reportReady ? 100 : 78)
+        : stage === "teams"
+          ? (teamsDone ? 66 : 50)
+          : Math.max(6, Math.round((reviewed / plays.length) * 30));
       chartFill.style.width = `${filled}%`;
       chartTrack.setAttribute("aria-valuenow", String(filled));
-      reviewStep.querySelector("span").textContent = reviewDone
+      reviewStep.querySelector(".step-state").textContent = reviewDone
         ? "Done"
         : reviewed === 0
           ? "Optional"
           : `${reviewed} of ${plays.length}`;
-      teamsStep.querySelector("span").textContent = teamsDone ? "Done" : "Next";
-      reportStep.querySelector("span").textContent = reportReady ? "Done" : teamsDone ? "Ready" : "";
-      chartNote.textContent = reportReady
-        ? "Each play was read. Download the scouting report."
-        : teamsDone
-          ? "Your team is tagged. Generate the scouting report from each play."
-          : "Review the plays if you want, then tag your team to generate the report.";
+      teamsStep.querySelector(".step-state").textContent = teamsDone ? "Done" : stage === "teams" ? "Now" : "Next";
+      reportStep.querySelector(".step-state").textContent = reportReady ? "Done" : teamsDone ? "Ready" : "";
+      applyStage(stage);
+      paintStageCopy(stage);
       const reviewText = reviewDone
         ? "All plays reviewed."
         : `${reviewed} of ${plays.length} plays reviewed. Reviewing is optional.`;
@@ -4368,8 +4827,9 @@
         ? "The scouting report is ready to download."
         : teamsDone
           ? "Generate the scouting report next."
-          : "Tag your team next.";
+          : "Choose your team next.";
       chartTrack.setAttribute("aria-valuetext", `${reviewText} ${nextText}`);
+      paintDock();
     }
 
     function markChartStep(item, state) {
@@ -4415,7 +4875,7 @@
       }
       const labeled = reportBox.dataset.labeled === "1";
       const saved = reportBox.dataset.saved === "1";
-      reportBox.hidden = !labeled;
+      reportBox.hidden = studio.dataset.stage !== "report";
       const ready = saved && reportBox.dataset.ready === String(project.project);
       const busy = reportGenerate.dataset.busy === "1";
       reportGenerate.hidden = ready;
@@ -4430,8 +4890,8 @@
       reportNote.textContent = ready
         ? `${read} Download the PDF or the CSV.`
         : labeled
-          ? "Your team is labeled. Generate the scouting report from each play."
-          : "Label your team, then generate the scouting report.";
+          ? "Your team is selected. Generate the scouting report from each play."
+          : "Select your team, then generate the scouting report.";
     }
 
     async function enableReportDownload() {
@@ -4458,7 +4918,8 @@
         if (chartProgress.hidden) return;
         const reportStep = chartProgress.querySelector('[data-step="report"]');
         markChartStep(reportStep, "done");
-        reportStep.querySelector("span").textContent = "Done";
+        reportStep.dataset.complete = "1";
+        reportStep.querySelector(".step-state").textContent = "Done";
         chartFill.style.width = "100%";
         chartTrack.setAttribute("aria-valuenow", "100");
         chartNote.textContent = "Each play was read. Download the scouting report.";

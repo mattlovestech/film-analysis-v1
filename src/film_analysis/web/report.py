@@ -68,8 +68,12 @@ def scouting_blocks(
         ("title", f"Scouting report: {film_name}"),
         ("body", intro),
         ("body", _chart_summary(reads)),
-        ("heading", "Each play"),
     ]
+    tendencies = tendency_lines(teams, plays)
+    if tendencies:
+        blocks.append(("heading", "Tendencies"))
+        blocks.extend(("body", line) for line in tendencies)
+    blocks.append(("heading", "Each play"))
     blocks.extend(_play_lines(reads))
     if offense or defense:
         offense_name = yours if owned else "Offense"
@@ -204,6 +208,34 @@ def _both_teams(teams: FilmTeams | None) -> str:
     if teams is None:
         return "Both teams."
     return f"{teams.left_name} and {teams.right_name}."
+
+
+def tendency_lines(
+    teams: FilmTeams | None,
+    plays: Sequence[PlayRecord],
+) -> list[str]:
+    """Run and pass rates for the user's offense and for the plays they defended."""
+
+    reads = play_reads(plays)
+    yours, _opponent, owned = _names(teams)
+    lines: list[str] = []
+    for unit, label in (("offense", "offense"), ("defense", "defense")):
+        side = [play for play in reads if play.side == unit]
+        runs = sum(1 for play in side if play.call_key == "run")
+        passes = sum(1 for play in side if play.call_key == "pass")
+        charted = runs + passes
+        if charted == 0:
+            continue
+        team = yours if owned else label.capitalize()
+        mix = (
+            f"{_calls(runs, 'run', 'runs')} ({_percent(runs, charted)}) and "
+            f"{_calls(passes, 'pass', 'passes')} ({_percent(passes, charted)})"
+        )
+        if unit == "offense":
+            lines.append(f"{team} offense: {mix}.")
+        else:
+            lines.append(f"{team} defense, from the plays the offense ran: {mix}.")
+    return lines
 
 
 def _chart_summary(plays: Sequence[PlayRead]) -> str:
