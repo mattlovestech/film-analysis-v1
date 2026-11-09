@@ -43,6 +43,17 @@ TEAM_IMAGE_KINDS = frozenset(
 PLAY_IMAGE_KINDS = frozenset({"formation"})
 
 
+def write_atomically(dest: Path, data: bytes) -> None:
+    """Write a file so readers see the old bytes or the new ones, never an empty file."""
+
+    staged = dest.with_name(f".{dest.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        staged.write_bytes(data)
+        os.replace(staged, dest)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def team_media(kind: str, suffix: str) -> tuple[str, str]:
     """Return a stored suffix and content type, or raise when the image is not one we keep."""
 
@@ -654,10 +665,12 @@ class ClipDirectory:
         cleaned, _content = team_media(kind, suffix)
         folder = self._project(project_id) / "teams"
         folder.mkdir(parents=True, exist_ok=True)
-        for old in folder.glob(f"{kind}.*"):
-            old.unlink()
         dest = folder / f"{kind}{cleaned}"
-        dest.write_bytes(data)
+        # Swap the new image in at once, so a page read meanwhile never finds it missing.
+        write_atomically(dest, data)
+        for old in folder.glob(f"{kind}.*"):
+            if old != dest:
+                old.unlink(missing_ok=True)
         return dest.relative_to(self.root).as_posix()
 
     def clear_team_image(self, project_id: int, kind: str) -> None:

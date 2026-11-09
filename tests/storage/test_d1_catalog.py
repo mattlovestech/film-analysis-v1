@@ -1,5 +1,6 @@
 """The D1 catalog makes as few round trips as it can."""
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -190,3 +191,26 @@ def test_a_deleted_film_is_not_remembered(tmp_path: Path) -> None:
     store.play_image(3, 1, "formation")
 
     assert len(store.requests) == 1
+
+
+def test_replacing_a_team_image_never_leaves_it_missing(tmp_path: Path) -> None:
+    clips = ClipDirectory(tmp_path)
+    clips.save_team_image(1, "left-player", b"old", ".jpg")
+    seen: list[bool] = []
+    stop = threading.Event()
+
+    def watch() -> None:
+        while not stop.is_set():
+            seen.append(clips.team_image(1, "left-player") is not None)
+
+    watcher = threading.Thread(target=watch)
+    watcher.start()
+    for round_number in range(300):
+        clips.save_team_image(1, "left-player", f"new-{round_number}".encode(), ".jpg")
+    stop.set()
+    watcher.join()
+
+    assert seen and all(seen)
+    assert sorted(path.name for path in (tmp_path / "projects" / "1" / "teams").iterdir()) == [
+        "left-player.jpg"
+    ]
