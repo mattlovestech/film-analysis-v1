@@ -2,11 +2,12 @@
 
 import json
 import os
+import re
 import shutil
 import threading
+import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,15 @@ from typing import Protocol
 
 class CatalogError(Exception):
     """The analysis catalog could not be read or written."""
+
+
+# Settings are read on every Activity poll. Writes from this process clear the copy at once.
+_SETTINGS_TTL_SECONDS = 2.0
+# A film page checks its film once per image. Remember films that exist for a moment.
+_EXISTS_TTL_SECONDS = 10.0
+# Databases whose columns and indexes were already checked by this process.
+_SCHEMA_READY: set[str] = set()
+_SCHEMA_LOCK = threading.Lock()
 
 
 _TIMED_PHASES = frozenset({"starting", "downloading", "saving", "scanning", "checking"})
@@ -31,6 +41,17 @@ TEAM_IMAGE_KINDS = frozenset(
 
 
 PLAY_IMAGE_KINDS = frozenset({"formation"})
+
+
+def write_atomically(dest: Path, data: bytes) -> None:
+    """Write a file so readers see the old bytes or the new ones, never an empty file."""
+
+    staged = dest.with_name(f".{dest.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        staged.write_bytes(data)
+        os.replace(staged, dest)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def team_media(kind: str, suffix: str) -> tuple[str, str]:
@@ -644,10 +665,12 @@ class ClipDirectory:
         cleaned, _content = team_media(kind, suffix)
         folder = self._project(project_id) / "teams"
         folder.mkdir(parents=True, exist_ok=True)
-        for old in folder.glob(f"{kind}.*"):
-            old.unlink()
         dest = folder / f"{kind}{cleaned}"
-        dest.write_bytes(data)
+        # Swap the new image in at once, so a page read meanwhile never finds it missing.
+        write_atomically(dest, data)
+        for old in folder.glob(f"{kind}.*"):
+            if old != dest:
+                old.unlink(missing_ok=True)
         return dest.relative_to(self.root).as_posix()
 
     def clear_team_image(self, project_id: int, kind: str) -> None:
@@ -1304,6 +1327,9 @@ class D1Catalog:
         self._api_token = api_token
         self._database_id = database_id
         self._clips = clips
+        self._settings_cache: tuple[float, dict[str, str]] | None = None
+        self._settings_lock = threading.Lock()
+        self._seen_projects: dict[int, float] = {}
         self._ensure_schema()
 
     def list_projects(self) -> list[ProjectSummary]:
@@ -1373,15 +1399,17 @@ class D1Catalog:
             where project_id = ?
             order by start_seconds
             """
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            project_rows = pool.submit(self._query, project_sql, [project_id])
-            play_rows = pool.submit(self._query, plays_sql, [project_id])
-            span_rows = pool.submit(self._query, spans_sql, [project_id])
-            rows = project_rows.result()
-            plays = play_rows.result()
-            spans = span_rows.result()
+        rows, plays, spans = self._batch(
+            [
+                (project_sql, [project_id]),
+                (plays_sql, [project_id]),
+                (spans_sql, [project_id]),
+            ]
+        )
         if not rows:
+            self._forget_project(project_id)
             return None
+        self._remember_project(project_id)
         project = rows[0]
         return ProjectDetail(
             project=int(project["id"]),
@@ -1479,56 +1507,58 @@ class D1Catalog:
             return ()
         return row.steps
 
+    def _settings(self) -> dict[str, str]:
+        """All settings in one read. Pages poll these every second, so keep them briefly."""
+
+        now = time.monotonic()
+        with self._settings_lock:
+            if self._settings_cache is not None and self._settings_cache[0] > now:
+                return self._settings_cache[1]
+        rows = self._query("select key, value from settings")
+        values = {str(row["key"]): str(row.get("value") or "") for row in rows}
+        with self._settings_lock:
+            self._settings_cache = (time.monotonic() + _SETTINGS_TTL_SECONDS, values)
+        return values
+
+    def _set_setting(self, key: str, value: str) -> None:
+        with self._settings_lock:
+            self._settings_cache = None
+        self._execute(
+            """
+            insert into settings (key, value) values (?, ?)
+            on conflict(key) do update set value = excluded.value
+            """,
+            [key, value],
+        )
+        with self._settings_lock:
+            self._settings_cache = None
+
     def worker_count(self) -> int:
-        rows = self._query("select value from settings where key = 'workers'")
-        if not rows:
+        value = self._settings().get("workers")
+        if value is None:
             return 4
         try:
-            return int(rows[0]["value"])
+            return int(value)
         except (TypeError, ValueError):
             return 4
 
     def set_worker_count(self, count: int) -> None:
-        self._execute(
-            """
-            insert into settings (key, value) values ('workers', ?)
-            on conflict(key) do update set value = excluded.value
-            """,
-            [str(count)],
-        )
+        self._set_setting("workers", str(count))
 
     def formation_reads(self) -> bool:
-        rows = self._query("select value from settings where key = 'formations'")
-        if not rows:
-            return False
-        return str(rows[0]["value"]) == "1"
+        return self._settings().get("formations") == "1"
 
     def set_formation_reads(self, enabled: bool) -> None:
-        self._execute(
-            """
-            insert into settings (key, value) values ('formations', ?)
-            on conflict(key) do update set value = excluded.value
-            """,
-            ["1" if enabled else "0"],
-        )
+        self._set_setting("formations", "1" if enabled else "0")
 
     def job_place(self) -> str | None:
-        rows = self._query("select value from settings where key = 'place'")
-        if not rows:
-            return None
-        value = str(rows[0]["value"])
+        value = self._settings().get("place")
         if value not in {"local", "cloud"}:
             return None
         return value
 
     def set_job_place(self, place: str) -> None:
-        self._execute(
-            """
-            insert into settings (key, value) values ('place', ?)
-            on conflict(key) do update set value = excluded.value
-            """,
-            [place],
-        )
+        self._set_setting("place", place)
 
     def film_teams(self, project_id: int) -> FilmTeams | None:
         rows = self._query(
@@ -1549,7 +1579,7 @@ class D1Catalog:
     def set_film_teams(self, project_id: int, teams: FilmTeams) -> None:
         if teams.mine not in {None, "left", "right"}:
             raise CatalogError("Mark which side is your team.")
-        if self.get_project(project_id) is None:
+        if not self._project_exists(project_id):
             raise CatalogError("That analysis is no longer available.")
         self._execute(
             """
@@ -1565,12 +1595,12 @@ class D1Catalog:
         )
 
     def save_team_image(self, project_id: int, kind: str, data: bytes, suffix: str) -> None:
-        if self.get_project(project_id) is None:
+        if not self._project_exists(project_id):
             raise CatalogError("That analysis is no longer available.")
         self._clips.save_team_image(project_id, kind, data, suffix)
 
     def clear_team_image(self, project_id: int, kind: str) -> None:
-        if self.get_project(project_id) is None:
+        if not self._project_exists(project_id):
             raise CatalogError("That analysis is no longer available.")
         self._clips.clear_team_image(project_id, kind)
 
@@ -1580,7 +1610,7 @@ class D1Catalog:
     def save_poster(self, project_id: int, data: bytes) -> None:
         if not data.startswith(b"\xff\xd8\xff"):
             raise CatalogError("Could not store that thumbnail.")
-        if self.get_project(project_id) is None:
+        if not self._project_exists(project_id):
             raise CatalogError("That analysis is no longer available.")
         self._clips.save_poster(project_id, data)
 
@@ -1760,17 +1790,21 @@ class D1Catalog:
         after: str,
     ) -> CoachEdit:
         stamp = datetime.now(UTC).isoformat()
-        self._execute(
+        result = self._execute(
             """
             insert into coach_edits (
                 project_id, play_number, film, action, before_text, after_text, at, learned
             )
             values (?, ?, ?, ?, ?, ?, ?, 0)
+            returning id
             """,
             [project_id, play_number, film, action, before, after, stamp],
         )
-        rows = self._query("select max(id) as id from coach_edits")
-        edit_id = int(rows[0]["id"]) if rows else 0
+        rows = result.get("results") or []
+        if rows:
+            edit_id = int(rows[0]["id"])
+        else:
+            edit_id = int((result.get("meta") or {}).get("last_row_id") or 0)
         return CoachEdit(
             edit_id, project_id, play_number, film, action, before, after, stamp
         )
@@ -1788,23 +1822,17 @@ class D1Catalog:
         return [_coach_edit(row) for row in rows]
 
     def mark_coach_edits_learned(self, edit_ids: list[int]) -> None:
-        for edit_id in edit_ids:
-            self._execute("update coach_edits set learned = 1 where id = ?", [edit_id])
+        ids = [int(edit_id) for edit_id in edit_ids]
+        if not ids:
+            return
+        marks = ", ".join("?" for _ in ids)
+        self._execute(f"update coach_edits set learned = 1 where id in ({marks})", ids)
 
     def coach_guidance(self) -> str:
-        rows = self._query("select value from settings where key = 'coach_guidance'")
-        if not rows:
-            return ""
-        return str(rows[0].get("value") or "")
+        return self._settings().get("coach_guidance", "")
 
     def set_coach_guidance(self, text: str) -> None:
-        self._execute(
-            """
-            insert into settings (key, value) values ('coach_guidance', ?)
-            on conflict(key) do update set value = excluded.value
-            """,
-            [text.strip()],
-        )
+        self._set_setting("coach_guidance", text.strip())
 
     def set_reviewed(self, project_id: int, play_number: int, reviewed: bool) -> None:
         result = self._execute(
@@ -1883,25 +1911,22 @@ class D1Catalog:
         return True
 
     def set_archived(self, project_id: int, archived: bool) -> None:
-        found = self._query("select id from projects where id = ?", [project_id])
-        if not found:
-            raise CatalogError(f"Project {project_id} was not found.")
-        self._execute(
+        result = self._execute(
             "update projects set archived = ? where id = ?",
             [1 if archived else 0, project_id],
         )
+        if not _changed(result) and not self._project_exists(project_id):
+            raise CatalogError(f"Project {project_id} was not found.")
 
     def add_read(self, project_id: int, note: ReadNote) -> None:
-        found = self._query("select id from projects where id = ?", [project_id])
-        if not found:
-            raise CatalogError(f"Project {project_id} was not found.")
-        self._execute(
+        result = self._execute(
             """
             insert into reads (
                 project_id, start_seconds, end_seconds, frames, nbytes, detail,
                 input_tokens, output_tokens, cost_usd, model
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            where exists (select 1 from projects where id = ?)
             """,
             [
                 project_id,
@@ -1914,8 +1939,11 @@ class D1Catalog:
                 note.output_tokens,
                 note.cost_usd,
                 note.model,
+                project_id,
             ],
         )
+        if not _changed(result):
+            raise CatalogError(f"Project {project_id} was not found.")
 
     def list_reads(self, project_id: int) -> list[ReadNote]:
         rows = self._query(
@@ -1955,18 +1983,24 @@ class D1Catalog:
     def play_read_costs(self) -> dict[int, list[tuple[int, float]]]:
         from film_analysis.ingest.cost import cost_per_play
 
-        read_rows = self._query(
-            """
-            select project_id, start_seconds, end_seconds, cost_usd
-            from reads
-            where cost_usd > 0
-            """
-        )
-        play_rows = self._query(
-            """
-            select project_id, play_number, start_seconds, end_seconds
-            from plays
-            """
+        read_rows, play_rows = self._batch(
+            [
+                (
+                    """
+                    select project_id, start_seconds, end_seconds, cost_usd
+                    from reads
+                    where cost_usd > 0
+                    """,
+                    None,
+                ),
+                (
+                    """
+                    select project_id, play_number, start_seconds, end_seconds
+                    from plays
+                    """,
+                    None,
+                ),
+            ]
         )
         reads: dict[int, list[tuple[float, float, float]]] = {}
         for row in read_rows:
@@ -2070,14 +2104,22 @@ class D1Catalog:
         )
 
     def delete_project(self, project_id: int) -> None:
-        self._execute("delete from activity where project_id = ?", [project_id])
-        self._execute("delete from reads where project_id = ?", [project_id])
-        self._execute("delete from scouting_analysis where project_id = ?", [project_id])
-        self._execute("delete from spans where project_id = ?", [project_id])
-        self._execute("delete from plays where project_id = ?", [project_id])
-        self._execute("delete from teams where project_id = ?", [project_id])
-        self._execute("delete from coach_edits where project_id = ?", [project_id])
-        self._execute("delete from projects where id = ?", [project_id])
+        self._forget_project(project_id)
+        self._batch(
+            [
+                (f"delete from {table} where project_id = ?", [project_id])
+                for table in (
+                    "activity",
+                    "reads",
+                    "scouting_analysis",
+                    "spans",
+                    "plays",
+                    "teams",
+                    "coach_edits",
+                )
+            ]
+            + [("delete from projects where id = ?", [project_id])]
+        )
         self._clips.remove(project_id)
 
     def clip_file(self, project_id: int, play_number: int) -> Path | None:
@@ -2089,12 +2131,12 @@ class D1Catalog:
     def save_play_image(
         self, project_id: int, play_number: int, kind: str, data: bytes
     ) -> None:
-        if self.get_project(project_id) is None:
+        if not self._project_exists(project_id):
             raise CatalogError(f"Project {project_id} was not found.")
         self._clips.save_play_image(project_id, play_number, kind, data)
 
     def play_image(self, project_id: int, play_number: int, kind: str) -> Path | None:
-        if self.get_project(project_id) is None:
+        if not self._project_exists(project_id):
             return None
         return self._clips.play_image(project_id, play_number, kind)
 
@@ -2107,6 +2149,42 @@ class D1Catalog:
         body: dict[str, object] = {"sql": " ".join(sql.split())}
         if params:
             body["params"] = params
+        results = self._post(body)
+        if not results:
+            return {}
+        first = results[0]
+        if not first.get("success", True):
+            raise CatalogError("Could not save that analysis.")
+        return first
+
+    def _batch(
+        self, statements: list[tuple[str, list[object] | None]]
+    ) -> list[list[dict[str, object]]]:
+        """Run several statements in one request, in order, and return each one's rows.
+
+        D1 runs a batch as one transaction, so a failed statement undoes the rest.
+        """
+
+        if not statements:
+            return []
+        batch: list[dict[str, object]] = []
+        for sql, params in statements:
+            item: dict[str, object] = {"sql": " ".join(sql.split())}
+            if params:
+                item["params"] = params
+            batch.append(item)
+        results = self._post({"batch": batch})
+        if len(results) != len(statements):
+            raise CatalogError("Could not read the analysis database.")
+        out: list[list[dict[str, object]]] = []
+        for result in results:
+            if not result.get("success", True):
+                raise CatalogError("Could not save that analysis.")
+            rows = result.get("results") or []
+            out.append([row for row in rows if isinstance(row, dict)])
+        return out
+
+    def _post(self, body: dict[str, object]) -> list[dict[str, object]]:
         request = urllib.request.Request(
             "https://api.cloudflare.com/client/v4/accounts/"
             f"{self._account_id}/d1/database/{self._database_id}/query",
@@ -2128,12 +2206,26 @@ class D1Catalog:
         if not payload.get("success"):
             raise CatalogError(_d1_failure(json.dumps(payload.get("errors"))))
         results = payload.get("result") or []
-        if not results:
-            return {}
-        first = results[0]
-        if not first.get("success", True):
-            raise CatalogError("Could not save that analysis.")
-        return first
+        return [result for result in results if isinstance(result, dict)]
+
+    def _project_exists(self, project_id: int) -> bool:
+        with self._settings_lock:
+            if self._seen_projects.get(project_id, 0) > time.monotonic():
+                return True
+        found = bool(self._query("select 1 as found from projects where id = ?", [project_id]))
+        if found:
+            self._remember_project(project_id)
+        else:
+            self._forget_project(project_id)
+        return found
+
+    def _remember_project(self, project_id: int) -> None:
+        with self._settings_lock:
+            self._seen_projects[project_id] = time.monotonic() + _EXISTS_TTL_SECONDS
+
+    def _forget_project(self, project_id: int) -> None:
+        with self._settings_lock:
+            self._seen_projects.pop(project_id, None)
 
     def _ensure_schema(self) -> None:
         statements = (
@@ -2234,14 +2326,69 @@ class D1Catalog:
             """,
             "alter table teams add column uniforms text",
         )
-        for sql in statements:
+        statements = (*statements, *_D1_INDEXES)
+        with _SCHEMA_LOCK:
+            if self._database_id in _SCHEMA_READY:
+                return
+        rows = self._query("select type, name, sql from sqlite_master")
+        missing = _missing_schema(statements, rows)
+        if missing:
             try:
-                self._execute(sql)
-            except CatalogError as error:
-                text = str(error).lower()
-                if "duplicate column" in text or "already exists" in text:
-                    continue
-                raise
+                self._batch([(sql, None) for sql in missing])
+            except CatalogError:
+                # Another process may have added part of it. Apply one at a time.
+                for sql in missing:
+                    try:
+                        self._execute(sql)
+                    except CatalogError as error:
+                        text = str(error).lower()
+                        if "duplicate column" in text or "already exists" in text:
+                            continue
+                        raise
+        with _SCHEMA_LOCK:
+            _SCHEMA_READY.add(self._database_id)
+
+
+_D1_INDEXES = (
+    "create index if not exists spans_by_project on spans (project_id, kind)",
+    "create index if not exists reads_by_project on reads (project_id)",
+    "create index if not exists coach_edits_by_project on coach_edits (project_id)",
+    "create index if not exists activity_by_update on activity (updated_at)",
+)
+
+_ADD_COLUMN = re.compile(r"alter\s+table\s+(\w+)\s+add\s+column\s+(\w+)", re.IGNORECASE)
+_CREATE = re.compile(
+    r"create\s+(table|index)\s+if\s+not\s+exists\s+(\w+)", re.IGNORECASE
+)
+
+
+def _missing_schema(
+    statements: tuple[str, ...], master: list[dict[str, object]]
+) -> list[str]:
+    """Return the schema statements that `sqlite_master` shows are not applied yet."""
+
+    names = {(str(row.get("type")), str(row.get("name"))) for row in master}
+    table_sql = {
+        str(row.get("name")): str(row.get("sql") or "").lower()
+        for row in master
+        if row.get("type") == "table"
+    }
+    missing: list[str] = []
+    for sql in statements:
+        created = _CREATE.search(sql)
+        if created:
+            if (created.group(1).lower(), created.group(2)) not in names:
+                missing.append(sql)
+            continue
+        added = _ADD_COLUMN.search(sql)
+        if added:
+            table, column = added.group(1), added.group(2).lower()
+            existing = table_sql.get(table)
+            if existing is None or not re.search(rf"[(,]\s*{column}\b", existing):
+                missing.append(sql)
+            continue
+        missing.append(sql)
+    return missing
 
 
 def catalog_from_env(root: Path | None = None) -> Catalog:

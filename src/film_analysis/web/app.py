@@ -476,21 +476,28 @@ def create_app(
 
     @app.get("/api/activity")
     def activity_feed(request: Request) -> dict[str, object]:
-        try:
-            saved = catalog.list_activity()
-            projects = catalog.list_projects()
-        except CatalogError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
+        # Each read is its own database round trip. Run them together, not one after another.
+        with ThreadPoolExecutor(max_workers=5) as reads:
+            saved_call = reads.submit(catalog.list_activity)
+            projects_call = reads.submit(catalog.list_projects)
+            costs_call = reads.submit(catalog.play_read_costs)
+            read_spend_call = reads.submit(catalog.read_spend)
+            report_spend_call = reads.submit(catalog.report_spend)
+            try:
+                saved = saved_call.result()
+                projects = projects_call.result()
+            except CatalogError as error:
+                raise HTTPException(status_code=502, detail=str(error)) from error
+            try:
+                play_costs = costs_call.result()
+                spend = _merged_spend(read_spend_call.result(), report_spend_call.result())
+            except CatalogError:
+                play_costs = {}
+                spend = {}
         by_id = {item.project: item for item in projects}
         with running_lock:
             active = set(running)
         seen = {item.project for item in saved}
-        try:
-            play_costs = catalog.play_read_costs()
-            spend = _merged_spend(catalog.read_spend(), catalog.report_spend())
-        except CatalogError:
-            play_costs = {}
-            spend = {}
         dated: list[tuple[str, dict[str, object]]] = []
         for item in saved:
             summary = by_id.get(item.project)
@@ -1132,8 +1139,16 @@ def create_app(
                     saved,
                     play.play_number,
                     "discard",
-                    "In the scouting report." if not play.discarded else "Left out of the scouting report.",
-                    "Left out of the scouting report." if choice.discarded else "Put back in the scouting report.",
+                    (
+                        "Left out of the scouting report."
+                        if play.discarded
+                        else "In the scouting report."
+                    ),
+                    (
+                        "Left out of the scouting report."
+                        if choice.discarded
+                        else "Put back in the scouting report."
+                    ),
                 )
             saved = catalog.get_project(project_id)
             updated = None if saved is None else _play_by_number(saved, play_number)

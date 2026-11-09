@@ -1,8 +1,10 @@
 """Play clips in a Cloudflare R2 bucket."""
 
 import contextlib
+import os
 import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -204,7 +206,13 @@ class R2Clips:
             raise CatalogError(message) from error
         cached = self.cache / key
         cached.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, cached)
+        # Films can be gigabytes: copy beside the cache file, then swap it in at once.
+        staged = cached.with_name(f".{cached.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            shutil.copyfile(source, staged)
+            os.replace(staged, cached)
+        finally:
+            staged.unlink(missing_ok=True)
         return key
 
 

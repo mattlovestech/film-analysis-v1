@@ -363,8 +363,11 @@ def test_team_analysis_starts_when_the_plays_are_ready() -> None:
     assert teams["right_name"]
     assert teams["left_still"]
     assert teams["right_still"]
-    assert client.get(str(teams["left_player"])).content == b"left"
-    assert client.get(str(teams["right_player"])).content == b"right"
+    assert client.get(str(teams["left_still"])).content == b"left"
+    assert client.get(str(teams["right_still"])).content == b"right"
+    # A wide lineup half is not one standing player, so it never becomes a team card.
+    assert teams["left_player"] is None
+    assert teams["right_player"] is None
 
 
 def test_archive_takes_a_film_off_the_shelf_until_it_is_put_back(tmp_path: Path) -> None:
