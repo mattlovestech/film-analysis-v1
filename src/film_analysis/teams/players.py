@@ -247,26 +247,26 @@ def full_body_shot(
     chosen = fresh or best
     if chosen is None:
         return None
-    return _jpeg_edge(chosen[1], 512)
+    return _jpeg_edge(chosen[1], 960)
 
 
 def lone_players(
     frames: Sequence[bytes],
     avoid: Sequence[bytes] = (),
 ) -> tuple[bytes | None, bytes | None]:
-    """One white-jersey player and one colored-jersey player, each alone in the crop.
+    """One white-jersey player and one colored-jersey player from the film.
 
-    A sharp standing player beats a taller blur. Photos in ``avoid`` are skipped
-    when another player of that jersey is in the frames.
+    A separated standing player beats a taller blur. Photos in ``avoid`` are
+    skipped when another player of that jersey is in the frames.
     """
 
-    best: dict[str, tuple[tuple[int, int, int], object]] = {}
-    fresh: dict[str, tuple[tuple[int, int, int], object]] = {}
+    best: dict[str, tuple[tuple[int, int, int, int, int], object]] = {}
+    fresh: dict[str, tuple[tuple[int, int, int, int, int], object]] = {}
     for frame in frames:
         image = _bgr(frame)
         if image is None:
             continue
-        boxes = _detected_people(image)
+        boxes = find_players(frame)
         for box in boxes:
             if _crowd(box, boxes):
                 continue
@@ -276,7 +276,13 @@ def lone_players(
             kind = _jersey_kind(crop)
             if kind is None:
                 continue
-            score = (1 if box.height >= 140 else 0, _sharpness(crop), box.height)
+            score = (
+                1 if _alone(crop) else 0,
+                1 if box.height >= 220 else 0,
+                1 if box.height >= 140 else 0,
+                _sharpness(crop),
+                box.height,
+            )
             current = best.get(kind)
             if current is None or score > current[0]:
                 best[kind] = (score, crop)
@@ -288,8 +294,8 @@ def lone_players(
     white = fresh.get("white") or best.get("white")
     colored = fresh.get("color") or best.get("color")
     return (
-        None if white is None else _jpeg_edge(white[1], 512),
-        None if colored is None else _jpeg_edge(colored[1], 512),
+        None if white is None else _jpeg_edge(white[1], 960),
+        None if colored is None else _jpeg_edge(colored[1], 960),
     )
 
 
@@ -300,8 +306,8 @@ def usable_player_jpeg(data: bytes) -> bool:
     return image is not None and _usable_player_crop(image)
 
 
-def _usable_player_crop(crop) -> bool:
-    """A portrait tall enough to show one player, with grass beside them."""
+def _usable_player_crop(crop, *, require_alone: bool = False) -> bool:
+    """A portrait tall enough to show one player — not a referee or mostly field."""
 
     height, width = crop.shape[:2]
     if height < 120 or width < 56:
@@ -310,7 +316,16 @@ def _usable_player_crop(crop) -> bool:
         return False
     if _striped(crop):
         return False
-    return _alone(crop)
+    grass = _grass(crop)
+    if grass > 0.65 or grass < 0.08:
+        return False
+    # Green above the helmet — rejects waist-up crops and sideline busts.
+    top = crop[: max(1, int(height * 0.14)), :]
+    if _grass(top) < 0.2:
+        return False
+    if require_alone and not _alone(crop):
+        return False
+    return True
 
 
 def _sharpness(crop) -> int:
@@ -837,7 +852,7 @@ def _jpeg_edge(image, edge: int) -> bytes | None:
             (max(1, round(width * scale)), max(1, round(height * scale))),
             interpolation=cv2.INTER_AREA,
         )
-    ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
     if not ok:
         return None
     return encoded.tobytes()

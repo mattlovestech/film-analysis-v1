@@ -1035,6 +1035,11 @@
       flex-wrap: wrap;
       gap: 0.45rem;
     }
+    #play-keys {
+      margin: 0.35rem 0 0.85rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
     #play-nav {
       display: flex;
       justify-content: space-between;
@@ -1171,12 +1176,68 @@
     }
     #report-view h3:first-child { margin-top: 0; }
     #report-view p { margin: 0.2rem 0; max-width: 40rem; }
+    #report-view table tr.report-jump,
+    #report-live-tendency table tr.report-jump { cursor: pointer; }
+    #report-view table tr.report-jump:hover td,
+    #report-live-tendency table tr.report-jump:hover td { color: var(--gold); }
+    #report-view .report-grid { margin: 0.2rem 0 1.1rem; scroll-margin-top: 1rem; }
+    #report-view .report-grid.open {
+      padding: 0.7rem;
+      border: 1px solid var(--gold);
+      border-radius: 0.6rem;
+    }
+    #report-view .report-grid h3 {
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+    }
+    #report-view .report-grid h3 span {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 550;
+    }
+    #report-view .clip-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(5.4rem, 1fr));
+      gap: 0.45rem;
+      margin-top: 0.45rem;
+    }
+    #report-view .clip-grid a {
+      display: grid;
+      gap: 0.15rem;
+      min-height: 3.4rem;
+      padding: 0.55rem 0.5rem;
+      border: 1px solid var(--line);
+      border-radius: 0.45rem;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--ink);
+      text-decoration: none;
+    }
+    #report-view .clip-grid a:hover {
+      border-color: var(--gold);
+      color: var(--ink);
+      filter: none;
+    }
+    #report-view .clip-grid .num {
+      font-size: 1.05rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    #report-view .clip-grid .when {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-variant-numeric: tabular-nums;
+    }
     #report-view .report-row {
       color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
     #report-view .report-row a,
     #report-analysis-table td a {
+      display: inline;
+      padding: 0;
+      border-radius: 0;
+      background: none;
       color: var(--ink);
       text-decoration: underline;
       text-underline-offset: 0.12em;
@@ -1261,16 +1322,16 @@
       border-collapse: collapse;
       font-variant-numeric: tabular-nums;
     }
-    #report-analysis-table[data-formation="0"] th:nth-child(4),
-    #report-analysis-table[data-formation="0"] td:nth-child(4) { display: none; }
+    #report-analysis-table[data-formation="0"] th:nth-child(5),
+    #report-analysis-table[data-formation="0"] td:nth-child(5) { display: none; }
     #report .exports { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
     #report .exports[hidden] { display: none; }
     #report-downloads { margin-top: 1rem; }
     #report-generate { border-radius: 999px; padding: 0.75rem 1.2rem; }
     #report-generate:disabled { cursor: not-allowed; }
-    #report a[hidden],
+    #report-downloads a[hidden],
     #report-generate[hidden] { display: none; }
-    #report a {
+    #report-downloads a {
       display: inline-block;
       padding: 0.75rem 1.15rem;
       border-radius: 999px;
@@ -1279,13 +1340,13 @@
       font-weight: 650;
       text-decoration: none;
     }
-    #report a + a {
+    #report-downloads a + a {
       background: transparent;
       color: var(--ink);
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
     }
-    #report a:hover { filter: brightness(1.06); color: #111; }
-    #report a + a:hover { color: var(--ink); }
+    #report-downloads a:hover { filter: brightness(1.06); color: #111; }
+    #report-downloads a + a:hover { color: var(--ink); }
     .play-card select.play-type {
       width: calc(100% - 1.4rem);
       margin: 0 0.7rem 0.45rem;
@@ -2330,6 +2391,7 @@
               <thead>
                 <tr>
                   <th>Play</th>
+                  <th>Film</th>
                   <th>Opponent</th>
                   <th>Call</th>
                   <th>Formation</th>
@@ -2356,6 +2418,7 @@
     <section id="play" hidden>
       <a id="play-back" href="/projects">Film</a>
       <h2 id="play-title">Play</h2>
+      <p id="play-keys">Space plays the clip. The right arrow opens the next play. O and D tag your side. R is a run, P is a pass.</p>
       <p id="play-progress" class="lead" hidden></p>
       <ol id="play-tracker" class="play-tracker" aria-label="Reviewed plays" hidden></ol>
       <video id="play-video" controls playsinline preload="metadata" muted></video>
@@ -2857,6 +2920,8 @@
     }
 
     async function acceptAndOpen(uid, nextUid, control) {
+      if (playSection.dataset.leaving === "1") return;
+      playSection.dataset.leaving = "1";
       if (control) control.disabled = true;
       try {
         if (playReviewed.dataset.reviewed !== "1") {
@@ -2882,8 +2947,23 @@
         status.className = "error";
         status.textContent = "Could not save that review.";
       } finally {
+        delete playSection.dataset.leaving;
         if (control && control.isConnected) control.disabled = false;
       }
+    }
+
+    function goNextPlay() {
+      const uid = playSection.dataset.uid;
+      const next = playSection.dataset.next;
+      if (!uid || !next) return;
+      acceptAndOpen(uid, `/play/${next}`);
+    }
+
+    function goPreviousPlay() {
+      const previous = playSection.dataset.previous;
+      if (!previous) return;
+      history.pushState({}, "", `/play/${previous}`);
+      route();
     }
 
     const playTypeGroups = [
@@ -3259,6 +3339,39 @@
       }
     }
 
+    playVideo.addEventListener("ended", () => {
+      if (playSection.hidden || !playSection.dataset.next) return;
+      goNextPlay();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (playSection.hidden) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.target.closest("input, textarea, select, #play-trim, .length-trimmer")) return;
+      const uid = playSection.dataset.uid;
+      if (event.key === " " || event.key === "Spacebar") {
+        if (event.target.closest("button, a")) return;
+        event.preventDefault();
+        if (playVideo.paused) playVideo.play();
+        else playVideo.pause();
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goNextPlay();
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goPreviousPlay();
+        return;
+      }
+      if (!uid || event.target.closest("button, a")) return;
+      const key = event.key.toLowerCase();
+      if (key === "o") tagUnit(uid, "offense");
+      else if (key === "d") tagUnit(uid, "defense");
+      else if (key === "r") relabelPlay(uid, "run");
+      else if (key === "p") relabelPlay(uid, "pass");
+    });
     playReviewed.addEventListener("click", () => {
       if (!playReviewed.dataset.uid) return;
       setReviewed(playReviewed.dataset.uid, playReviewed.dataset.reviewed !== "1", playReviewed);
@@ -5707,6 +5820,18 @@
       return Boolean(left.getAttribute("src") && right.getAttribute("src"));
     }
 
+    function teamsNamed() {
+      const left = document.querySelector("#team-left-name").value.trim();
+      const right = document.querySelector("#team-right-name").value.trim();
+      return Boolean(left && right);
+    }
+
+    function nextBreakdownPlay() {
+      const cards = [...results.querySelectorAll(".play-card")];
+      const open = cards.find((card) => card.dataset.reviewed !== "1") || cards[0];
+      return open ? open.dataset.uid || "" : "";
+    }
+
     function referencesReady() {
       const left = document.querySelector("#team-left-reference");
       const right = document.querySelector("#team-right-reference");
@@ -5865,15 +5990,17 @@
     }
 
     async function loadLineup(projectId, again = false, side = null) {
-      const keepCards = again && playersReady();
-      const showing = keepCards || (playersReady() && !again);
+      const keepCards = again && (playersReady() || teamsNamed());
+      const showing = keepCards || teamsNamed() || (playersReady() && !again);
       teamsSection.dataset.loading = String(projectId);
       if (again) teamsSection.dataset.refreshing = "1";
       selectTeamButton.disabled = true;
       selectTeamButton.textContent = showing ? "Choose who to scout" : "Finding both teams…";
       teamsNote.textContent = again
         ? (side ? "Finding another player for that team." : "Finding another player from each team.")
-        : "Finding one player from each team.";
+        : teamsNamed()
+          ? "Pick your team. Player photos fill in from the film."
+          : "Finding one player from each team.";
       teamsError.hidden = true;
       teamsRetry.disabled = true;
       teamsRetrySpin.hidden = false;
@@ -6073,6 +6200,13 @@
     reportGenerate.addEventListener("click", () => enableReportDownload());
     stageNext.addEventListener("click", () => {
       const action = stageNext.dataset.action;
+      if (action === "breakdown") {
+        const uid = stageNext.dataset.uid;
+        if (!uid) return;
+        history.pushState({}, "", `/play/${uid}`);
+        route();
+        return;
+      }
       if (action === "teams" || action === "report") openStage(action);
     });
     playsToggle.addEventListener("click", () => {
@@ -6616,8 +6750,12 @@
     function beginTeams() {
       const projectId = results.dataset.project;
       if (!projectId) return;
-      if (playersReady()) {
+      if (teamsNamed() || playersReady()) {
         showTeamChoices(true);
+        if (!playersReady()) {
+          if (teamsSection.dataset.loading !== String(projectId)) loadLineup(projectId);
+          return;
+        }
         if (!referencesReady() && teamsSection.dataset.references !== String(projectId)) {
           teamsSection.dataset.references = String(projectId);
           loadLineup(projectId);
@@ -6666,7 +6804,7 @@
         return;
       }
       if (stage === "review") {
-        chartNote.textContent = "Trim each clip and tag it. Discard a play to leave it out of the report.";
+        chartNote.textContent = "Watch a clip and tag it. The next play opens when the clip ends.";
       }
     }
 
@@ -6692,15 +6830,24 @@
             ? "1 stretch still needs a look."
             : `${held} stretches still need a look.`;
         stageStatus.textContent = [reviewLine, heldLine].filter(Boolean).join(" ");
+        const nextUid = nextBreakdownPlay();
+        const breakdownOpen = total > 0 && reviewed < total && nextUid;
         stageNext.disabled = false;
-        stageNext.textContent = "Choose who to scout";
-        stageNext.dataset.action = "teams";
+        if (breakdownOpen) {
+          stageNext.textContent = reviewed ? "Next clip" : "Start breakdown";
+          stageNext.dataset.action = "breakdown";
+          stageNext.dataset.uid = nextUid;
+        } else {
+          stageNext.textContent = "Choose who to scout";
+          stageNext.dataset.action = "teams";
+          delete stageNext.dataset.uid;
+        }
         return;
       }
       const mine = selectedTeamSide();
       const teamName = sideName(mine);
       const building = teamsSection.dataset.loading === String(results.dataset.project || "");
-      if (!playersReady()) {
+      if (!teamsNamed() && !playersReady()) {
         stageStatus.textContent = building ? "Reading uniforms from the film." : "Both teams will appear here.";
         stageNext.disabled = true;
         stageNext.textContent = building ? "Finding both teams…" : "Continue";
@@ -6857,6 +7004,7 @@
       teamsStep.querySelector(".step-state").textContent = teamsDone ? "Done" : stage === "teams" ? "Now" : "Next";
       reportStep.querySelector(".step-state").textContent = reportReady ? "Done" : teamsDone ? "Ready" : "";
       applyStage(stage);
+      if (stage === "report") resumeReportProgress(project.project);
       paintStageCopy(stage);
       const reviewText = reviewDone
         ? "All plays reviewed."
@@ -7240,6 +7388,8 @@
     function seedWaitingPlays() {
       const plays = [...results.querySelectorAll("li[data-play]")].map((item) => ({
         play: Number(item.dataset.play),
+        start: Number(item.dataset.start),
+        end: Number(item.dataset.end),
         status: "pending",
       }));
       if (plays.length) paintAnalysisTable(plays, false);
@@ -7374,23 +7524,35 @@
         const pending = status === "pending" || status === "reading";
         const playCell = document.createElement("td");
         const playNumber = Number(row.play || 0);
+        const playName = playNumber ? `Play ${playNumber}` : String(row.play || "");
         const uid = row.uid || (projectId && playNumber ? `${projectId}-${playNumber}` : "");
-        if (uid && !pending) {
-          playCell.append(playLink(`/play/${uid}`, String(playNumber || row.play || "")));
-        } else if (uid) {
-          const link = playLink(`/play/${uid}`, String(playNumber || row.play || ""));
-          link.classList.add("pending");
+        if (uid) {
+          const link = playLink(`/play/${uid}`, playName);
+          if (pending) link.classList.add("pending");
           playCell.append(link);
         } else {
-          playCell.textContent = String(row.play || "");
+          playCell.textContent = playName;
         }
         line.append(playCell);
+        appendLiveCell(line, filmSpan(row), false);
         appendLiveCell(line, sideLabel(row.side), pending && !row.side);
         appendLiveCell(line, callLabel(row.call), pending && !row.call);
         appendLiveCell(line, row.formation || "", pending && showFormation && !row.formation);
         appendLiveCell(line, statusLabel(status), status === "reading");
         body.append(line);
       }
+    }
+
+    function filmSpan(row) {
+      let start = Number(row.start);
+      let end = Number(row.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        const card = results.querySelector(`li[data-play="${row.play}"]`);
+        start = Number(card ? card.dataset.start : NaN);
+        end = Number(card ? card.dataset.end : NaN);
+      }
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return "";
+      return `${clock(start)}–${clock(end)}`;
     }
 
     function sideLabel(side) {
@@ -7447,9 +7609,21 @@
           reportView.append(reportTable(block.text || ""));
           continue;
         }
+        if (block.kind === "clips") {
+          const grid = clipGrid(block.text || "", projectId);
+          if (grid) reportView.append(grid);
+          continue;
+        }
         const node = document.createElement(block.kind === "title" || block.kind === "heading" ? "h3" : "p");
         if (block.kind === "row") node.className = "report-row";
-        if (block.kind === "row" || block.kind === "body") {
+        if (block.kind === "row") {
+          const grid = clipGridFromSentence(block.text || "", projectId);
+          if (grid) {
+            reportView.append(grid);
+            continue;
+          }
+          fillWithPlayLinks(node, block.text || "", projectId);
+        } else if (block.kind === "body") {
           fillWithPlayLinks(node, block.text || "", projectId);
         } else {
           node.textContent = block.text || "";
@@ -7480,14 +7654,88 @@
       const rows = text.split("\n").filter(Boolean);
       rows.forEach((line, index) => {
         const row = document.createElement("tr");
-        for (const cell of line.split("\t")) {
+        const cells = line.split("\t");
+        for (const cell of cells) {
           const node = document.createElement(index === 0 ? "th" : "td");
           node.textContent = cell;
           row.append(node);
         }
+        const call = cells[0] || "";
+        if (index > 0 && call && call !== "Call" && call !== "Offense") {
+          row.classList.add("report-jump");
+          row.tabIndex = 0;
+          row.setAttribute("role", "link");
+          row.setAttribute("aria-label", `Show the ${call} plays`);
+          const open = () => openClipGrid(call);
+          row.addEventListener("click", open);
+          row.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            open();
+          });
+        }
         table.append(row);
       });
       return table;
+    }
+
+    function clipGridFromSentence(text, projectId) {
+      const match = text.match(/^([^:]+):\s+((?:Play \d+(?:,\s*)?)+)$/);
+      if (!match) return null;
+      const numbers = [...match[2].matchAll(/Play (\d+)/g)].map((item) => item[1]);
+      if (!numbers.length) return null;
+      return clipGrid([match[1].trim(), ...numbers].join("\t"), projectId);
+    }
+
+    function clipGrid(text, projectId) {
+      const parts = text.split("\t").map((part) => part.trim()).filter(Boolean);
+      if (parts.length < 2 || !projectId) return null;
+      const name = parts[0];
+      const numbers = parts.slice(1);
+      const section = document.createElement("section");
+      section.className = "report-grid";
+      section.id = clipGridId(name);
+      const heading = document.createElement("h3");
+      heading.append(document.createTextNode(name));
+      const count = document.createElement("span");
+      count.textContent = numbers.length === 1 ? "1 play" : `${numbers.length} plays`;
+      heading.append(count);
+      const grid = document.createElement("div");
+      grid.className = "clip-grid";
+      for (const number of numbers) {
+        const link = document.createElement("a");
+        link.href = `/play/${projectId}-${number}`;
+        link.addEventListener("click", (event) => followLink(event, link.getAttribute("href")));
+        const num = document.createElement("span");
+        num.className = "num";
+        num.textContent = number;
+        link.append(num);
+        const card = results.querySelector(`li[data-play="${number}"]`);
+        const start = Number(card ? card.dataset.start : NaN);
+        const end = Number(card ? card.dataset.end : NaN);
+        if (Number.isFinite(start) && Number.isFinite(end)) {
+          const when = document.createElement("span");
+          when.className = "when";
+          when.textContent = `${clock(start)}–${clock(end)}`;
+          link.append(when);
+        }
+        grid.append(link);
+      }
+      section.append(heading, grid);
+      return section;
+    }
+
+    function clipGridId(name) {
+      return `report-grid-${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    }
+
+    function openClipGrid(name) {
+      const grid = document.getElementById(clipGridId(name));
+      if (!grid) return;
+      for (const other of reportView.querySelectorAll(".report-grid")) {
+        other.classList.toggle("open", other === grid);
+      }
+      grid.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     reportOptions.addEventListener("change", () => {

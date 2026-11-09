@@ -859,7 +859,10 @@ def create_app(
             "workers": workers if workers is not None else slots.get(),
             "sections": sorted(chosen),
             "can_resume": (not live) and unfinished > 0,
-            "analysis": [_analysis_view(row, project_id) for row in rows],
+            "analysis": [
+                _analysis_view(row, project_id, _play_by_number(saved, row.play_number))
+                for row in rows
+            ],
             "snapshot": live_snapshot(teams, plays, chosen),
         }
 
@@ -2983,8 +2986,9 @@ def _live_event(
     snapshot["workers"] = workers
     analysis: list[dict[str, object]] = []
     with contextlib.suppress(CatalogError):
+        by_number = {play.play_number: play for play in kept_plays}
         analysis = [
-            _analysis_view(row, project.project)
+            _analysis_view(row, project.project, by_number.get(row.play_number))
             for row in catalog.list_report_analysis(project.project)
             if row.play_number in kept
         ]
@@ -2992,11 +2996,17 @@ def _live_event(
     return json.dumps(snapshot) + "\n"
 
 
-def _analysis_view(note: ReportAnalysis, project_id: int | None = None) -> dict[str, object]:
-    play = note.play_number
+def _analysis_view(
+    note: ReportAnalysis,
+    project_id: int | None = None,
+    play: PlayRecord | None = None,
+) -> dict[str, object]:
+    number = note.play_number
     return {
-        "play": play,
-        "uid": _play_uid(project_id, play) if project_id is not None else None,
+        "play": number,
+        "uid": _play_uid(project_id, number) if project_id is not None else None,
+        "start": None if play is None else play.start_seconds,
+        "end": None if play is None else play.end_seconds,
         "status": note.status,
         "call": note.call,
         "side": note.side,
@@ -3906,7 +3916,7 @@ def _still_bytes(catalog: Catalog, project_id: int, kind: str) -> bytes | None:
 
 
 def _player_search_frames(catalog: Catalog, project_id: int) -> list[bytes]:
-    """Full-size play frames. The small lineup photos are too small to crop one player."""
+    """Near-broadcast play frames. Analysis JPEGs are too soft to crop one player."""
 
     try:
         project = catalog.get_project(project_id)
@@ -3918,10 +3928,11 @@ def _player_search_frames(catalog: Catalog, project_id: int) -> list[bytes]:
         video, _at = _lineup_video(catalog, project)
     except HTTPException:
         return []
-    frames = player_action_frames(video, project.plays)
-    if len(frames) >= 4:
+    frames = player_action_frames(video, project.plays, limit=32)
+    if len(frames) >= 8:
         return frames
-    return [*frames, *player_frames(video, project.plays, limit=8)]
+    # Short highlight films need more moments across the whole cut.
+    return [*frames, *player_frames(video, project.plays, limit=24)]
 
 
 def _crops_checked(catalog: Catalog, project_id: int) -> bool:

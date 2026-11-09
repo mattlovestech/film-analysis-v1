@@ -207,6 +207,9 @@ def scouting_pdf(
             pdf.multi_cell(0, 7, safe, new_x="LMARGIN", new_y="NEXT")
         elif kind == "table":
             _pdf_table(pdf, text)
+        elif kind == "clips":
+            pdf.set_font("Helvetica", size=11)
+            pdf.multi_cell(0, 6, _clip_line(text), new_x="LMARGIN", new_y="NEXT")
         else:
             pdf.set_font("Helvetica", size=11)
             pdf.multi_cell(0, 6, safe, new_x="LMARGIN", new_y="NEXT")
@@ -561,10 +564,19 @@ def _call_play_index(plays: Sequence[PlayRead]) -> list[tuple[str, str]]:
             groups[play.call] = []
         groups[play.call].append(play.number)
     return [
-        ("row", f"{name}: {', '.join(f'Play {number}' for number in numbers)}")
+        ("clips", "\t".join([name, *(str(number) for number in groups[name])]))
         for name in order
-        for numbers in (groups[name],)
     ]
+
+
+def _clip_line(text: str) -> str:
+    """A clip list as one readable line for the PDF."""
+
+    parts = [part for part in text.split("\t") if part]
+    if not parts:
+        return ""
+    plays = ", ".join(f"Play {number}" for number in parts[1:])
+    return f"{parts[0]}: {plays}" if plays else parts[0]
 
 
 def _play_lines(

@@ -167,6 +167,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "Cloud · 1 worker" in response.text
     assert 'id="teams"' in response.text
     assert "Choose who to scout" in response.text
+    assert "The right arrow opens the next play." in response.text
     assert "Which team do you want to scout?" in response.text
     assert 'id="team-left-reference"' in response.text
     assert 'id="team-right-reference"' in response.text
@@ -201,7 +202,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "Start here" in response.text
     assert "Save trim" in response.text
     assert 'id="play-trim"' in response.text
-    assert "Discard a play to leave it out of the report." in response.text
+    assert "The next play opens when the clip ends." in response.text
     assert "Download PDF" in response.text
     assert "Download CSV" in response.text
     assert 'id="report-downloads" class="exports" hidden' in response.text

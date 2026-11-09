@@ -46,7 +46,7 @@ def test_the_report_counts_offense_and_defense() -> None:
     assert "Run\t1\t100%" in text
     assert "Pass\t0\t0%" in text
     assert "Offense\t1\t" in text
-    assert "Run: Play 1" in text
+    assert "Run\t1" in text
     assert "South ran 1 offensive snap." in text
     assert "1 run (100%) and 0 passes (0%)" in text
     assert "South defended 2 snaps." in text
@@ -216,6 +216,9 @@ def test_the_live_report_fills_a_row_as_each_play_is_read(tmp_path: Path) -> Non
     assert lines[0]["rows"][1]["reading"] == ["side", "call"]
     assert len(lines[0]["analysis"]) == 2
     assert {row["status"] for row in lines[0]["analysis"]} == {"pending"}
+    assert lines[0]["analysis"][0]["play"] == 1
+    assert lines[0]["analysis"][0]["start"] == 2.0
+    assert lines[0]["analysis"][0]["end"] == 8.0
     assert lines[-1]["ready"] is True
     finished = "\n".join(block["text"] for block in lines[-1]["blocks"])
     assert "South on offense." in finished

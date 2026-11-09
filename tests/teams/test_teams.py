@@ -5,6 +5,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,6 +22,35 @@ from film_analysis.teams.uniforms import (
     team_cards,
 )
 from film_analysis.web.app import create_app
+
+
+def _usable_player_bytes(mark: int = 0) -> bytes:
+    """A standing white player on grass that passes the card quality checks."""
+
+    image = np.zeros((240, 100, 3), dtype=np.uint8)
+    image[:, :] = (40, 140, 40)
+    tone = 220 + (mark % 20)
+    # Fill most of the frame so the crop is not mostly field.
+    image[18:228, 18:82] = (tone, tone, tone)
+    image[10:40, 32:68] = (max(0, tone - 20), max(0, tone - 20), max(0, tone - 20))
+    image[8:14, 8:14] = (mark % 255, (mark * 3) % 255, (mark * 7) % 255)
+    return cv2.imencode(".jpg", image)[1].tobytes()
+
+
+def _stub_team_cards(
+    monkeypatch: pytest.MonkeyPatch,
+    left: bytes | None = None,
+    right: bytes | None = None,
+    factory=None,
+) -> None:
+    """Team cards come from film crops, not lineup stills."""
+
+    def cards(*_args, **_kwargs):
+        if factory is not None:
+            return factory()
+        return left, right
+
+    monkeypatch.setattr("film_analysis.web.app.team_cards", cards)
 
 
 def test_team_cards_prefer_a_player_in_each_jersey(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -439,8 +470,13 @@ def test_a_title_does_not_guess_school_names() -> None:
     assert suggest_team_names("Pike County vs. Lamar", b"left", b"right") == ("Home", "Away")
 
 
-def test_each_team_card_uses_the_film_photo(tmp_path: Path) -> None:
+def test_each_team_card_uses_the_film_photo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
+    left = _usable_player_bytes(1)
+    right = _usable_player_bytes(2)
+    _stub_team_cards(monkeypatch, left, right)
     client = TestClient(
         create_app(
             store=store,
@@ -451,14 +487,19 @@ def test_each_team_card_uses_the_film_photo(tmp_path: Path) -> None:
 
     teams = client.post("/api/projects/1/teams/stills").json()["teams"]
 
-    assert client.get(teams["left_player"]).content == b"left-jpeg"
-    assert client.get(teams["right_player"]).content == b"right-jpeg"
-    assert client.get(teams["left_reference"]).content == b"left-jpeg"
-    assert client.get(teams["right_reference"]).content == b"right-jpeg"
+    assert client.get(teams["left_player"]).content == left
+    assert client.get(teams["right_player"]).content == right
+    assert client.get(teams["left_reference"]).content == left
+    assert client.get(teams["right_reference"]).content == right
 
 
-def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
+def test_naming_teams_saves_stills_and_portraits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
+    left = _usable_player_bytes(3)
+    right = _usable_player_bytes(4)
+    _stub_team_cards(monkeypatch, left, right)
     client = TestClient(
         create_app(
             store=store,
@@ -478,8 +519,8 @@ def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
     assert teams["mine"] is None
     assert client.get(teams["left_still"]).content == b"left-jpeg"
     assert client.get(teams["right_still"]).content == b"right-jpeg"
-    assert client.get(teams["left_player"]).content == b"left-jpeg"
-    assert client.get(teams["right_player"]).content == b"right-jpeg"
+    assert client.get(teams["left_player"]).content == left
+    assert client.get(teams["right_player"]).content == right
 
     missing = client.post(
         "/api/projects/1/teams",
@@ -505,20 +546,28 @@ def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
     assert named["left_name"] == "North"
     assert named["right_name"] == "South"
     assert named["mine"] == "left"
-    assert client.get(named["left_player"]).content == b"left-jpeg"
-    assert client.get(named["right_player"]).content == b"right-jpeg"
+    assert client.get(named["left_player"]).content == left
+    assert client.get(named["right_player"]).content == right
     assert client.get("/projects/1/teams/neither").status_code == 404
 
 
-def test_a_visit_keeps_the_saved_players_until_generate_again(tmp_path: Path) -> None:
+def test_a_visit_keeps_the_saved_players_until_generate_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
     frames = {"n": 0}
+    cards = {"n": 0}
 
     def lineup(video, at):
         del video, at
         frames["n"] += 1
         return f"left-{frames['n']}".encode(), f"right-{frames['n']}".encode()
 
+    def factory():
+        cards["n"] += 1
+        return _usable_player_bytes(cards["n"]), _usable_player_bytes(cards["n"] + 40)
+
+    _stub_team_cards(monkeypatch, factory=factory)
     client = TestClient(
         create_app(
             store=store,
@@ -544,15 +593,23 @@ def test_a_visit_keeps_the_saved_players_until_generate_again(tmp_path: Path) ->
     assert client.get(again.json()["teams"]["left_player"]).content != saved
 
 
-def test_one_team_photo_can_be_regenerated(tmp_path: Path) -> None:
+def test_one_team_photo_can_be_regenerated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
     frames = {"n": 0}
+    cards = {"n": 0}
 
     def lineup(video, at):
         del video, at
         frames["n"] += 1
         return f"left-{frames['n']}".encode(), f"right-{frames['n']}".encode()
 
+    def factory():
+        cards["n"] += 1
+        return _usable_player_bytes(cards["n"]), _usable_player_bytes(cards["n"] + 40)
+
+    _stub_team_cards(monkeypatch, factory=factory)
     client = TestClient(
         create_app(
             store=store,
@@ -573,14 +630,19 @@ def test_one_team_photo_can_be_regenerated(tmp_path: Path) -> None:
     assert client.get(again.json()["teams"]["right_player"]).content != right
 
 
-def test_opening_a_film_replaces_the_old_generated_players(tmp_path: Path) -> None:
+def test_opening_a_film_replaces_the_old_generated_players(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
     store.save_team_image(1, "left", b"left-jpeg", ".jpg")
     store.save_team_image(1, "right", b"right-jpeg", ".jpg")
     old = _jpeg_claiming(768, 1280)
+    left = _usable_player_bytes(11)
+    right = _usable_player_bytes(12)
     store.save_team_image(1, "left-player", old, ".jpg")
     store.save_team_image(1, "right-player", old, ".jpg")
     store.set_film_teams(1, FilmTeams("North", "South", "left", ""))
+    _stub_team_cards(monkeypatch, left, right)
 
     client = TestClient(
         create_app(
@@ -590,28 +652,32 @@ def test_opening_a_film_replaces_the_old_generated_players(tmp_path: Path) -> No
         )
     )
 
-    visit = _wait_for_player(client, b"left-jpeg")
+    visit = _wait_for_player(client, left)
 
     assert visit.status_code == 200
     teams = visit.json()["teams"]
-    assert client.get(teams["left_player"]).content == b"left-jpeg"
-    assert client.get(teams["right_player"]).content == b"right-jpeg"
+    assert client.get(teams["left_player"]).content == left
+    assert client.get(teams["right_player"]).content == right
 
     second = client.get("/api/projects/1")
 
     assert second.status_code == 200
-    assert client.get(second.json()["teams"]["left_player"]).content == b"left-jpeg"
+    assert client.get(second.json()["teams"]["left_player"]).content == left
 
 
-def test_opening_a_film_replaces_a_shot_that_is_too_small(tmp_path: Path) -> None:
+def test_opening_a_film_replaces_a_shot_that_is_too_small(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
     tiny = _jpeg_claiming(40, 72)
-    kept = _jpeg_claiming(512, 768)
+    kept = _usable_player_bytes(20)
+    left = _usable_player_bytes(21)
     store.save_team_image(1, "left", b"left-jpeg", ".jpg")
     store.save_team_image(1, "right", b"right-jpeg", ".jpg")
     store.save_team_image(1, "left-player", tiny, ".jpg")
     store.save_team_image(1, "right-player", kept, ".jpg")
     store.set_film_teams(1, FilmTeams("North", "South", None, ""))
+    _stub_team_cards(monkeypatch, left, kept)
 
     client = TestClient(
         create_app(
@@ -621,11 +687,11 @@ def test_opening_a_film_replaces_a_shot_that_is_too_small(tmp_path: Path) -> Non
         )
     )
 
-    visit = _wait_for_player(client, b"left-jpeg")
+    visit = _wait_for_player(client, left)
 
     assert visit.status_code == 200
     teams = visit.json()["teams"]
-    assert client.get(teams["left_player"]).content == b"left-jpeg"
+    assert client.get(teams["left_player"]).content == left
     assert client.get(teams["right_player"]).content == kept
 
 
@@ -670,7 +736,9 @@ def test_teams_wait_until_plays_are_identified(tmp_path: Path) -> None:
     assert response.json()["detail"] == "Name the teams after the plays are identified."
 
 
-def test_regenerate_clears_the_old_team_photos_first(tmp_path: Path) -> None:
+def test_regenerate_clears_the_old_team_photos_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
     store.save_team_image(1, "left", b"old-left", ".jpg")
     store.save_team_image(1, "right", b"old-right", ".jpg")
@@ -679,6 +747,9 @@ def test_regenerate_clears_the_old_team_photos_first(tmp_path: Path) -> None:
     store.save_team_image(1, "left-reference", b"old-left-ref", ".jpg")
     store.save_team_image(1, "right-reference", b"old-right-ref", ".jpg")
     store.set_film_teams(1, FilmTeams("North", "South", None, ""))
+    left = _usable_player_bytes(31)
+    right = _usable_player_bytes(32)
+    _stub_team_cards(monkeypatch, left, right)
 
     client = TestClient(
         create_app(
@@ -694,14 +765,16 @@ def test_regenerate_clears_the_old_team_photos_first(tmp_path: Path) -> None:
     teams = again.json()["teams"]
     assert client.get(teams["left_still"]).content == b"fresh-left"
     assert client.get(teams["right_still"]).content == b"fresh-right"
-    assert client.get(teams["left_player"]).content == b"fresh-left"
-    assert client.get(teams["right_player"]).content == b"fresh-right"
+    assert client.get(teams["left_player"]).content == left
+    assert client.get(teams["right_player"]).content == right
     assert client.get(teams["left_player"]).content != b"old-left-player"
     assert teams["progress"]["percent"] == 100
     assert teams["progress"]["running"] is False
 
 
-def test_reset_rebuilds_team_photos_for_every_ready_film(tmp_path: Path) -> None:
+def test_reset_rebuilds_team_photos_for_every_ready_film(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
     second = store.create_project("Saturday", None)
     store.set_progress(
@@ -723,6 +796,7 @@ def test_reset_rebuilds_team_photos_for_every_ready_film(tmp_path: Path) -> None
     store.save_team_image(second, "right-player", b"stale-2b", ".jpg")
     lineups = {"n": 0}
     saw_live = {"ok": False}
+    cards = {"n": 0}
 
     def lineup(video, at):
         del video, at
@@ -730,6 +804,11 @@ def test_reset_rebuilds_team_photos_for_every_ready_film(tmp_path: Path) -> None
         time.sleep(0.2)
         return b"left-jpeg", b"right-jpeg"
 
+    def factory():
+        cards["n"] += 1
+        return _usable_player_bytes(cards["n"]), _usable_player_bytes(cards["n"] + 50)
+
+    _stub_team_cards(monkeypatch, factory=factory)
     client = TestClient(
         create_app(
             store=store,
@@ -774,7 +853,9 @@ def test_reset_rebuilds_team_photos_for_every_ready_film(tmp_path: Path) -> None
     assert all(row.get("percent") == 100 for row in progress["films"])
 
 
-def test_reset_can_retry_only_the_failed_films(tmp_path: Path) -> None:
+def test_reset_can_retry_only_the_failed_films(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _ready_film(tmp_path)
     second = store.create_project("Saturday", None)
     store.set_progress(
@@ -791,6 +872,7 @@ def test_reset_can_retry_only_the_failed_films(tmp_path: Path) -> None:
     clip.write_bytes(b"clip-2")
     store.add_play(second, 1, 1.0, 5.0, clip, "scrimmage")
     calls = {"n": 0}
+    cards = {"n": 0}
 
     def lineup(video, at):
         del video, at
@@ -799,6 +881,11 @@ def test_reset_can_retry_only_the_failed_films(tmp_path: Path) -> None:
             raise OSError("first film fails once")
         return b"left-jpeg", b"right-jpeg"
 
+    def factory():
+        cards["n"] += 1
+        return _usable_player_bytes(cards["n"]), _usable_player_bytes(cards["n"] + 60)
+
+    _stub_team_cards(monkeypatch, factory=factory)
     client = TestClient(
         create_app(
             store=store,

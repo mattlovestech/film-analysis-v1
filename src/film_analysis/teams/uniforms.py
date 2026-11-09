@@ -190,6 +190,12 @@ def colors_from_pixels(pixels: Sequence[tuple[int, int, int]]) -> tuple[str, str
     return _hex(jersey), _FALLBACK[1] if pants is None else _hex(pants)
 
 
+# Team cards need a sharp close crop. Analysis frames stay small (768); these
+# pulls stay near broadcast width so one player is more than a few dozen pixels.
+_TEAM_FRAME_SCALE = "scale=1920:-2"
+_TEAM_FRAME_QUALITY = "2"
+
+
 def player_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 48) -> list[bytes]:
     """Full-size frames spread through the film, so each uniform is large enough to crop."""
 
@@ -201,20 +207,29 @@ def player_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 48) -> 
     if span <= 1:
         moments = [start]
     elif span <= 200:
-        return _clip_frames(video, start, end, "fps=1,scale=1280:-2")
+        return _clip_frames(
+            video, start, end, f"fps=1,{_TEAM_FRAME_SCALE}", quality=_TEAM_FRAME_QUALITY
+        )
     else:
         count = min(limit, 40)
         moments = [start + span * (index + 0.5) / count for index in range(count)]
     frames: list[bytes] = []
     for at in moments:
         try:
-            frames.append(_frame(video, at, "scale=1280:-2"))
+            frames.append(_frame(video, at, _TEAM_FRAME_SCALE, quality=_TEAM_FRAME_QUALITY))
         except (VideoAnalysisError, OSError):
             continue
     return frames
 
 
-def _clip_frames(video: Path, start: float, end: float, scale: str) -> list[bytes]:
+def _clip_frames(
+    video: Path,
+    start: float,
+    end: float,
+    scale: str,
+    *,
+    quality: str = "4",
+) -> list[bytes]:
     """One pass over a short film. A lone player can be in frame for only a second."""
 
     if shutil.which("ffmpeg") is None:
@@ -237,7 +252,7 @@ def _clip_frames(video: Path, start: float, end: float, scale: str) -> list[byte
                     "-vf",
                     scale,
                     "-q:v",
-                    "4",
+                    quality,
                     str(dest),
                 ]
             )
@@ -294,7 +309,9 @@ def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 4) -> lis
     frames: list[bytes] = []
     for play in sample_plays(plays, limit):
         try:
-            frames.append(_frame(video, lineup_moment((play,))))
+            frames.append(
+                _frame(video, lineup_moment((play,)), _TEAM_FRAME_SCALE, quality=_TEAM_FRAME_QUALITY)
+            )
         except (VideoAnalysisError, OSError):
             continue
     return frames
@@ -303,12 +320,13 @@ def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 4) -> lis
 def player_action_frames(
     video: Path,
     plays: Sequence[PlayRecord],
-    limit: int = 16,
+    limit: int = 32,
 ) -> list[bytes]:
-    """Full-size frames from live action, spread across longer plays.
+    """Near-broadcast frames from live action, spread across longer plays.
 
     A lineup still is a small group at the snap. A player card needs a moment
-    after the snap, when one uniform is large enough to crop.
+    after the snap, when one uniform is large enough to crop — and the frame
+    itself has to stay sharp enough that the crop is not a handful of pixels.
     """
 
     if limit < 1 or not plays or not video.is_file() or video.stat().st_size < 4096:
@@ -316,11 +334,18 @@ def player_action_frames(
     chosen = [play for play in plays if play.family == "scrimmage"] or list(plays)
     long = [play for play in chosen if play.end_seconds - play.start_seconds >= 4] or chosen
     frames: list[bytes] = []
-    for play in sample_plays(long, min(8, len(long))):
+    for play in sample_plays(long, min(16, len(long))):
         length = max(0.0, play.end_seconds - play.start_seconds)
         for offset in _live_offsets(length):
             try:
-                frames.append(_frame(video, play.start_seconds + offset, "scale=1280:-2"))
+                frames.append(
+                    _frame(
+                        video,
+                        play.start_seconds + offset,
+                        _TEAM_FRAME_SCALE,
+                        quality=_TEAM_FRAME_QUALITY,
+                    )
+                )
             except (VideoAnalysisError, OSError):
                 continue
             if len(frames) >= limit:
@@ -366,7 +391,7 @@ def _live_offsets(length: float) -> list[float]:
 def still_frame(video: Path, at: float) -> bytes:
     """One wide JPEG from a film or a play clip."""
 
-    return _frame(video, at, "scale=1280:-2")
+    return _frame(video, at, _TEAM_FRAME_SCALE, quality=_TEAM_FRAME_QUALITY)
 
 
 def choose_action_shot(frames: Sequence[bytes]) -> bytes | None:
@@ -927,7 +952,13 @@ def _image_block(jpeg: bytes) -> dict[str, object]:
     }
 
 
-def _frame(video: Path, at: float, scale: str = "scale=640:-2") -> bytes:
+def _frame(
+    video: Path,
+    at: float,
+    scale: str = "scale=640:-2",
+    *,
+    quality: str = "4",
+) -> bytes:
     if shutil.which("ffmpeg") is None:
         raise VideoAnalysisError("Could not read a lineup from that film.")
     with tempfile.TemporaryDirectory() as folder:
@@ -947,7 +978,7 @@ def _frame(video: Path, at: float, scale: str = "scale=640:-2") -> bytes:
                 "-vf",
                 scale,
                 "-q:v",
-                "4",
+                quality,
                 str(dest),
             ]
         )
