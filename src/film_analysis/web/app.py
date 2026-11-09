@@ -2670,7 +2670,13 @@ def _chart_formation_play(
     call = (play.play_type or "").strip().lower()
     if play.family == "special_teams" or call not in {"run", "pass"}:
         return 0, 0, ""
-    if not force and (play.unit not in {"offense", "defense"} or play.formation):
+    if not force and play.unit not in {"offense", "defense"}:
+        return 0, 0, ""
+    has_plot = False
+    with contextlib.suppress(CatalogError):
+        has_plot = catalog.play_image(project.project, play.play_number, "formation") is not None
+    # Skip only when the name and plot are already on the play.
+    if not force and play.formation and has_plot:
         return 0, 0, ""
     frames = _scrimmage_frames(catalog, project, play, snap=True)
     offense, defense = (other, mine) if play.unit != "offense" else (mine, other)
@@ -2681,7 +2687,7 @@ def _chart_formation_play(
             catalog.save_play_image(project.project, play.play_number, "formation", plot)
         if named in FORMATIONS:
             catalog.set_play_formation(project.project, play.play_number, named)
-        elif force and not named:
+        elif (force or not play.formation) and not named:
             # Keep an empty guess so the UI shows the plot for a human pick.
             catalog.set_play_formation(project.project, play.play_number, "")
     except CatalogError:
@@ -3398,7 +3404,9 @@ def _remember_team_names(catalog: Catalog, project: ProjectDetail) -> None:
     if saved is not None and not _placeholder_names(saved) and not guessed:
         left_name, right_name, mine = saved.left_name, saved.right_name, saved.mine
     else:
-        left_name, right_name = pair[0].name, pair[1].name
+        # Stable side ids stay left/right. Friendly names default to Home/Away.
+        labeled = label_home_away(*pair)
+        left_name, right_name = labeled[0].name, labeled[1].name
         mine = None if saved is None else saved.mine
     try:
         catalog.set_film_teams(
@@ -4541,6 +4549,8 @@ def _teams_view(
         right_name = suggested[1] if saved is None or not saved.right_name else saved.right_name
     progress = _team_progress_view(project_id)
     payload: dict[str, object] = {
+        "left_id": "left",
+        "right_id": "right",
         "left_name": left_name,
         "right_name": right_name,
         "mine": None if saved is None else saved.mine,

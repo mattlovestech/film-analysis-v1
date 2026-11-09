@@ -96,7 +96,7 @@ def test_generating_the_report_reads_each_play(tmp_path: Path) -> None:
     assert body["plays"] == 2
     assert body["ready"] is True
     assert body["tendencies"] == ""
-    assert body["sections"] == ["calls", "plays", "special", "tendencies"]
+    assert body["sections"] == ["calls", "formations", "plays", "special", "tendencies"]
     assert body["blocks"][0]["text"] == "Scouting report: Friday night"
 
 
@@ -179,9 +179,10 @@ def test_the_csv_lists_each_play(tmp_path: Path) -> None:
         "call",
         "family",
         "side",
+        "formation",
     ]
-    assert rows[1] == "Friday night,South,North,1,2,8,6,Run,scrimmage,North defense"
-    assert rows[2].endswith(",scrimmage,")
+    assert rows[1] == "Friday night,South,North,1,2,8,6,Run,scrimmage,North defense,"
+    assert rows[2].endswith(",scrimmage,,")
 
 
 def test_the_live_report_fills_a_row_as_each_play_is_read(tmp_path: Path) -> None:
@@ -357,7 +358,6 @@ def test_formation_setting_runs_during_call_charting(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     store.set_play_unit(1, 2, "defense")
     store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
-    store.set_formation_reads(True)
     plot = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
 
     def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
@@ -372,9 +372,46 @@ def test_formation_setting_runs_during_call_charting(tmp_path: Path) -> None:
     created = client.post("/api/projects/1/report", json={"sections": ["calls"]})
 
     assert created.status_code == 200
+    assert store.formation_reads() is True
     assert store.get_project(1).plays[1].formation == "trips"
     image = client.get("/projects/1/plays/2/formation.jpg")
     assert image.status_code == 200
+    detail = client.get("/api/plays/1-2")
+    assert detail.status_code == 200
+    assert detail.json()["formation_plot"] == "/projects/1/plays/2/formation.jpg"
+
+
+def test_report_backfills_a_missing_formation_plot(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
+    from film_analysis.chart.formation import FormationRead
+
+    store = _ready_film(tmp_path)
+    store.set_play_type(1, 2, "pass", "scrimmage")
+    store.set_play_unit(1, 2, "defense")
+    store.set_play_formation(1, 2, "shotgun")
+    store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
+    plot = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
+    called: list[str] = []
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other, kind
+        return ChartedPlay("pass", "defense")
+
+    def name(frames: list[bytes], mine: object, other: object, call: str = "") -> FormationRead:
+        del frames, mine, other
+        called.append(call)
+        return FormationRead("shotgun", plot=plot)
+
+    client = TestClient(create_app(store=store, chart=chart, formations=name))
+    created = client.post("/api/projects/1/report", json={"sections": ["calls", "formations"]})
+
+    assert created.status_code == 200
+    assert "pass" in called
+    detail = client.get("/api/plays/1-2")
+    assert detail.status_code == 200
+    assert detail.json()["formation"] == "Shotgun"
+    assert detail.json()["formation_plot"] == "/projects/1/plays/2/formation.jpg"
+    assert client.get("/projects/1/plays/2/formation.jpg").status_code == 200
 
 
 def test_a_person_can_override_the_formation(tmp_path: Path) -> None:
@@ -439,7 +476,7 @@ def test_formations_are_read_for_both_offenses(tmp_path: Path) -> None:
     text = "\n".join(block["text"] for block in blocks)
     assert "Formations" in text
     assert "Away offense: 1 Shotgun." in text
-    assert "This read is experimental." in text
+    assert "experimental" not in text.lower()
     headings = [block["text"] for block in blocks if block["kind"] == "heading"]
     assert headings[-4:] == ["Away offense", "Away defense", "Home offense", "Home defense"]
     assert "Away had the ball on 1 snap: 0 runs (0%) and 1 pass (100%)." in text
@@ -456,6 +493,10 @@ def test_formations_are_read_for_both_offenses(tmp_path: Path) -> None:
     image = client.get("/projects/1/plays/2/formation.jpg")
     assert image.status_code == 200
     assert image.content.startswith(b"\xff\xd8\xff")
+    detail = client.get("/api/plays/1-2")
+    assert detail.status_code == 200
+    assert detail.json()["formation"] == "Shotgun"
+    assert detail.json()["formation_plot"] == "/projects/1/plays/2/formation.jpg"
     sheet = client.get("/api/projects/1/report.csv?sections=formations")
     rows = sheet.content.decode().splitlines()
     assert rows[0].split(",")[-1] == "formation"

@@ -2105,112 +2105,127 @@
     #report #teams { margin: 0; }
     #report #teams-note {
       margin: 0;
-      max-width: 34rem;
+      max-width: 38rem;
       color: var(--muted);
-      font-size: 0.82rem;
-      line-height: 1.35;
+      font-size: 0.84rem;
+      line-height: 1.4;
     }
     #report #teams .team-row {
-      grid-template-columns: repeat(2, minmax(0, 11.5rem));
-      justify-content: start;
+      display: grid;
+      grid-template-columns: 1fr;
       gap: 0.45rem;
     }
+    #report #teams .team-row[hidden] { display: none; }
     #report #teams .team-card {
-      grid-template-columns: 2.35rem minmax(0, 1fr);
-      grid-template-areas:
-        "shot kicker"
-        "shot mine"
-        "shot name"
-        "shot colors"
-        "shot refresh";
-      column-gap: 0.4rem;
-      row-gap: 0.12rem;
+      display: grid;
+      grid-template-columns: 2.6rem minmax(0, 1fr) auto;
+      gap: 0.65rem 0.75rem;
       align-items: center;
-      padding: 0.35rem 0.4rem;
-      border-radius: 10px;
+      padding: 0.55rem 0.65rem;
+      border-radius: 12px;
       background: #111;
     }
     #report #teams .team-card.chosen {
       transform: none;
       box-shadow: 0 0 0 1px var(--gold);
     }
+    #report #teams .team-card.other { opacity: 0.72; }
+    #report #teams .team-meta {
+      display: grid;
+      gap: 0.28rem;
+      min-width: 0;
+    }
     #report #teams .team-kicker {
-      grid-area: kicker;
+      margin: 0;
+      color: rgba(255, 255, 255, 0.4);
       font-size: 0.68rem;
-      letter-spacing: 0.02em;
-      text-transform: none;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #report #teams .team-kicker::before {
+      content: "id " attr(data-id);
     }
     #report #teams .team-shots {
-      grid-area: shot;
       gap: 0;
       justify-items: center;
     }
     #report #teams .team-card img,
     #report #teams .team-card .team-shots img,
     #report #teams .player-ghost {
-      width: 2.35rem;
-      height: 3.1rem;
+      width: 2.6rem;
+      height: 3.45rem;
       aspect-ratio: auto;
       margin: 0;
-      object-fit: contain;
-      border-radius: 5px;
+      object-fit: cover;
+      border-radius: 6px;
+      background: #0a0a0a;
     }
     #report #teams .team-colors {
-      grid-area: colors;
       display: flex;
       flex-wrap: wrap;
-      gap: 0.15rem;
+      gap: 0.18rem;
     }
     #report #teams .team-colors li { display: block; }
     #report #teams .team-colors li span:not(.swatch) { display: none; }
     #report #teams .team-colors .swatch {
       display: inline-block;
-      width: 0.5rem;
-      height: 0.5rem;
-    }
-    #report #teams .team-card label {
-      grid-area: name;
-      font-size: 0;
-      gap: 0;
-      letter-spacing: 0;
-    }
-    #report #teams .team-card input {
-      padding: 0.18rem 0.3rem;
-      font-size: 0.72rem;
-      border-radius: 6px;
-    }
-    #report #teams .team-card button.mine {
-      grid-area: mine;
-      justify-self: start;
-      width: auto;
-      gap: 0.28rem;
-      padding: 0.18rem 0.45rem;
-      font-size: 0.7rem;
-    }
-    #report #teams .team-card button.mine::before {
       width: 0.55rem;
       height: 0.55rem;
     }
+    #report #teams .team-card label {
+      display: grid;
+      gap: 0.15rem;
+      color: var(--muted);
+      font-size: 0.62rem;
+      font-weight: 650;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    #report #teams .team-card input {
+      width: 100%;
+      min-width: 0;
+      padding: 0.4rem 0.5rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0a0a0a;
+      color: var(--ink);
+      font: inherit;
+      font-size: 0.9rem;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    #report #teams .team-card button.mine {
+      justify-self: end;
+      align-self: center;
+      width: auto;
+      min-width: 6.4rem;
+      gap: 0.35rem;
+      padding: 0.45rem 0.7rem;
+      font-size: 0.78rem;
+    }
+    #report #teams .team-card button.mine::before {
+      width: 0.7rem;
+      height: 0.7rem;
+    }
     #report #teams .team-card .team-refresh {
-      grid-area: refresh;
       justify-self: start;
       padding: 0;
-      font-size: 0.64rem;
+      font-size: 0.72rem;
     }
-    #report #teams .team-actions { margin-top: 0.2rem; }
-    #report #teams-retry { padding: 0.32rem 0.55rem; font-size: 0.76rem; }
+    #report #teams .team-ghost-line {
+      display: block;
+      width: 55%;
+      height: 0.7rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+    #report #teams .team-actions { margin-top: 0.15rem; }
+    #report #teams-retry { padding: 0.35rem 0.65rem; font-size: 0.78rem; }
     #report #teams-error { margin: 0; font-size: 0.82rem; }
-    #report #teams-building.team-row {
-      grid-template-columns: repeat(2, minmax(0, 11.5rem));
-    }
     #report #teams-building .team-card {
-      grid-template-columns: 2.35rem minmax(0, 1fr);
-      grid-template-areas: "shot kicker";
+      grid-template-columns: 2.6rem minmax(0, 1fr);
     }
-    #report #teams-building .player-ghost { grid-area: shot; }
     #select-team { display: none; }
     #teams-save:not([hidden]) { display: inline-flex; margin: 0.35rem 0 1rem; }
     .team-actions {
@@ -2601,14 +2616,14 @@
         <li><strong>Read</strong><span>Each stretch is a play, junk, or not clear yet. On Cloudflare, more workers read at once.</span></li>
         <li><strong>Cut</strong><span>A play is clipped only after the film up to that point has settled, so the clips stay in order.</span></li>
         <li><strong>Check</strong><span>A stretch that is still unclear gets one more look. What remains waits for you to mark it.</span></li>
-        <li><strong>Scout report</strong><span>In report settings, pick the team being scouted. That only swaps who counts as offense and defense. The read names a scrimmage play as a run or a pass from that side. A special-teams play is the kick, punt, or return from that team.</span></li>
-        <li><strong>Formation</strong><span>Experimental, and last. After run or pass is known, it plots 11 players on each side and names the formation from that plot.</span></li>
+        <li><strong>Scout report</strong><span>Each side of the film gets a stable id. In report settings you give them friendly names (Home and Away by default) and pick who is being scouted, so offense and defense line up on each play.</span></li>
+        <li><strong>Formation</strong><span>After run or pass is known, it plots 11 players on each side, names the formation, and keeps that map on the play page.</span></li>
       </ol>
       <label class="formation-toggle" for="formation-reads">
-        <input id="formation-reads" type="checkbox">
+        <input id="formation-reads" type="checkbox" checked>
         Read offensive formations
       </label>
-      <p class="lead" id="formation-note">Experimental, and last. Off until you turn it on. After run or pass is charted, it plots both teams (always 11, with low-confidence guesses filled in) and names the formation. Turn this on so scouting report charting includes it. On each play you can detect again, override, or clear the guess.</p>
+      <p class="lead" id="formation-note">On by default. After run or pass is charted, it plots both teams (always 11, with low-confidence guesses filled in), names the formation, and saves the map on each play. On a play you can detect again, override, or clear the guess.</p>
       <p class="lead">Charting a play comes later, after its clip is final.</p>
       <h3>Coach edits</h3>
       <p class="lead">Cuts and tags you change are kept here. Send them when you want the next read to follow what you fixed.</p>
@@ -2743,13 +2758,19 @@
               </div>
               <button id="select-team" type="button">Find both teams</button>
               <div id="teams-building" class="team-row" hidden>
-                <article class="team-card ghost" aria-hidden="true">
-                  <p class="team-kicker">Home</p>
+                <article class="team-card ghost" aria-hidden="true" data-team-id="left">
                   <div class="player-ghost"></div>
+                  <div class="team-meta">
+                    <p class="team-kicker">Home</p>
+                    <span class="team-ghost-line"></span>
+                  </div>
                 </article>
-                <article class="team-card ghost" aria-hidden="true">
-                  <p class="team-kicker">Away</p>
+                <article class="team-card ghost" aria-hidden="true" data-team-id="right">
                   <div class="player-ghost"></div>
+                  <div class="team-meta">
+                    <p class="team-kicker">Away</p>
+                    <span class="team-ghost-line"></span>
+                  </div>
                 </article>
               </div>
               <p id="teams-error" class="lead" hidden></p>
@@ -2761,11 +2782,10 @@
               </div>
               <fieldset id="scout-side">
                 <legend id="teams-heading">Team being scouted</legend>
-                <p id="teams-note">This only swaps who counts as offense and defense in the report.</p>
+                <p id="teams-note">Each side has an id from the film. Name them for the report, then pick who you are scouting so offense and defense line up.</p>
                 <p id="mine-ask" class="mine-ask" hidden>Team being scouted</p>
                 <div class="team-row" role="radiogroup" aria-labelledby="teams-heading" hidden>
-                  <article class="team-card" data-side="left">
-                    <p id="team-left-kicker" class="team-kicker">Home</p>
+                  <article class="team-card" data-side="left" data-team-id="left">
                     <div class="team-shots">
                       <figure>
                         <img id="team-left-reference" alt="Reference sent for home" hidden>
@@ -2776,16 +2796,18 @@
                         <figcaption>Player</figcaption>
                       </figure>
                     </div>
-                    <ul id="team-left-colors" class="team-colors" hidden></ul>
+                    <div class="team-meta">
+                      <p id="team-left-kicker" class="team-kicker">Home</p>
+                      <label for="team-left-name">Name
+                        <input id="team-left-name" maxlength="40" autocomplete="off" placeholder="Home">
+                      </label>
+                      <ul id="team-left-colors" class="team-colors" hidden></ul>
+                      <button class="team-refresh" type="button" data-side="left" hidden>New photo</button>
+                    </div>
                     <img id="team-left-still" alt="" hidden>
                     <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">Scout</button>
-                    <button class="team-refresh" type="button" data-side="left" hidden>New photo</button>
-                    <label for="team-left-name">Team name
-                      <input id="team-left-name" maxlength="40" autocomplete="off">
-                    </label>
                   </article>
-                  <article class="team-card" data-side="right">
-                    <p id="team-right-kicker" class="team-kicker">Away</p>
+                  <article class="team-card" data-side="right" data-team-id="right">
                     <div class="team-shots">
                       <figure>
                         <img id="team-right-reference" alt="Reference sent for away" hidden>
@@ -2796,13 +2818,16 @@
                         <figcaption>Player</figcaption>
                       </figure>
                     </div>
-                    <ul id="team-right-colors" class="team-colors" hidden></ul>
+                    <div class="team-meta">
+                      <p id="team-right-kicker" class="team-kicker">Away</p>
+                      <label for="team-right-name">Name
+                        <input id="team-right-name" maxlength="40" autocomplete="off" placeholder="Away">
+                      </label>
+                      <ul id="team-right-colors" class="team-colors" hidden></ul>
+                      <button class="team-refresh" type="button" data-side="right" hidden>New photo</button>
+                    </div>
                     <img id="team-right-still" alt="" hidden>
                     <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">Scout</button>
-                    <button class="team-refresh" type="button" data-side="right" hidden>New photo</button>
-                    <label for="team-right-name">Team name
-                      <input id="team-right-name" maxlength="40" autocomplete="off">
-                    </label>
                   </article>
                 </div>
                 <button id="teams-save" type="button" hidden>Save teams</button>
@@ -2814,7 +2839,7 @@
               <label><input type="checkbox" name="section" value="calls" checked> Run and pass</label>
               <label><input type="checkbox" name="section" value="special" checked> Special teams</label>
               <label><input type="checkbox" name="section" value="plays" checked> Each play</label>
-              <label><input type="checkbox" name="section" value="formations"> Formations <span class="experimental">Experimental</span></label>
+              <label><input type="checkbox" name="section" value="formations" checked> Formations</label>
             </fieldset>
             <p class="exports">
               <button id="report-generate" type="button" disabled>Generate scouting report</button>
@@ -6416,7 +6441,9 @@
     }
 
     function showTeamChoices(open) {
-      const building = !open && teamsSection.dataset.loading === String(results.dataset.project || "");
+      const building = !open
+        && !playersReady()
+        && teamsSection.dataset.loading === String(results.dataset.project || "");
       const scoutSide = document.querySelector("#scout-side");
       mineAsk.hidden = true;
       if (scoutSide) scoutSide.hidden = !open;
@@ -6459,10 +6486,21 @@
       openStage("report");
     }
 
+    function teamDefaultName(side) {
+      return side === "left" ? "Home" : "Away";
+    }
+
+    function teamId(side, teams) {
+      const key = `${side}_id`;
+      return (teams && teams[key]) || side;
+    }
+
     function fillTeams(projectId, teams) {
       if (!teams) return;
       teamsSection.dataset.project = String(projectId);
       for (const side of ["left", "right"]) {
+        const card = teamsSection.querySelector(`.team-card[data-side="${side}"]`);
+        if (card) card.dataset.teamId = teamId(side, teams);
         const still = document.querySelector(`#team-${side}-still`);
         still.hidden = true;
         const player = document.querySelector(`#team-${side}-player`);
@@ -6480,18 +6518,24 @@
         const shots = player.closest(".team-shots");
         if (shots) shots.style.gridTemplateColumns = "1fr";
         const name = document.querySelector(`#team-${side}-name`);
-        const saved = teams[`${side}_name`] || "";
+        const fallback = teamDefaultName(side);
+        const saved = (teams[`${side}_name`] || "").trim() || fallback;
         if (name.dataset.saved === undefined) name.dataset.saved = "";
         const untouched = document.activeElement !== name && name.value.trim() === name.dataset.saved;
-        const matchesSave = document.activeElement !== name && name.value.trim() === saved;
+        const matchesSave = document.activeElement !== name && (
+          name.value.trim() === saved || name.value.trim() === (teams[`${side}_name`] || "")
+        );
         if (untouched || matchesSave) {
           name.value = saved;
           name.dataset.saved = saved;
         }
-        const school = name.value.trim() || (side === "left" ? "Home" : "Away");
-        document.querySelector(`#team-${side}-kicker`).textContent = school;
-        player.alt = `Player for ${school}`;
-        reference.alt = `Reference sent for ${school}`;
+        name.placeholder = fallback;
+        const label = name.value.trim() || fallback;
+        const kicker = document.querySelector(`#team-${side}-kicker`);
+        kicker.dataset.id = teamId(side, teams);
+        kicker.textContent = "";
+        player.alt = `Player for ${label}`;
+        reference.alt = `Reference sent for ${label}`;
         document.querySelector(`#team-${side}-mine`).setAttribute(
           "aria-pressed",
           teams.mine === side ? "true" : "false",
@@ -6500,7 +6544,7 @@
       }
       paintMineChoice();
       teamsNote.textContent = teams.left_player && teams.right_player
-        ? "This only swaps who counts as offense and defense in the report."
+        ? "Each side has an id from the film. Name them for the report, then pick who you are scouting so offense and defense line up."
         : "Finding one player from each team.";
     }
 
@@ -6531,9 +6575,12 @@
         button.setAttribute("aria-checked", selected ? "true" : "false");
         card.classList.toggle("chosen", selected);
         card.classList.toggle("other", Boolean(chosen) && !selected);
-        const name = document.querySelector(`#team-${button.dataset.side}-name`).value.trim();
-        const who = name || (button.dataset.side === "left" ? "Home" : "Away");
-        document.querySelector(`#team-${button.dataset.side}-kicker`).textContent = who;
+        const side = button.dataset.side;
+        const name = document.querySelector(`#team-${side}-name`).value.trim();
+        const who = name || teamDefaultName(side);
+        const kicker = document.querySelector(`#team-${side}-kicker`);
+        kicker.dataset.id = card?.dataset.teamId || side;
+        kicker.textContent = "";
         button.textContent = selected ? "Scouting" : "Scout";
         button.setAttribute(
           "aria-label",
@@ -6997,8 +7044,12 @@
 
     async function saveTeams(options = {}) {
       const projectId = results.dataset.project;
-      const left = document.querySelector("#team-left-name").value.trim();
-      const right = document.querySelector("#team-right-name").value.trim();
+      const leftInput = document.querySelector("#team-left-name");
+      const rightInput = document.querySelector("#team-right-name");
+      const left = leftInput.value.trim() || teamDefaultName("left");
+      const right = rightInput.value.trim() || teamDefaultName("right");
+      leftInput.value = left;
+      rightInput.value = right;
       const mine = teamsSection.querySelector('button.mine[aria-pressed="true"]');
       const redraw = options.redraw !== false;
       teamsSave.disabled = true;
@@ -7043,7 +7094,7 @@
         }
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
-        teamsNote.textContent = "This only swaps who counts as offense and defense in the report.";
+        teamsNote.textContent = "Each side has an id from the film. Name them for the report, then pick who you are scouting so offense and defense line up.";
         if (!redraw) reportNote.textContent = error.message || "Could not save that team.";
       } finally {
         teamsSave.disabled = false;
@@ -7207,7 +7258,7 @@
           : "Updating the player photos.";
       } else {
         teamsNote.hidden = false;
-        teamsNote.textContent = "This only swaps who counts as offense and defense in the report.";
+        teamsNote.textContent = "Each side has an id from the film. Name them for the report, then pick who you are scouting so offense and defense line up.";
       }
       window.setTimeout(() => settlePlayers(token, id), 700);
     }
@@ -7648,13 +7699,13 @@
         }
         if (reportOnPage()) {
           chartNote.textContent = mine
-            ? "The scouting report is on this page. Generate again, or switch the scouted team to flip offense and defense."
-            : "In report settings, pick the team being scouted. That only flips offense and defense.";
+            ? "The scouting report is on this page. Generate again, or switch who is scouted to flip offense and defense."
+            : "Name each side, then pick who is being scouted so offense and defense line up.";
           return;
         }
         chartNote.textContent = mine
           ? "Choose what goes into the scouting report."
-          : "In report settings, pick the scouted team, then what to include.";
+          : "Name each side (Home / Away by default), pick who is scouted, then what to include.";
         return;
       }
       if (stage === "review") {
@@ -7942,7 +7993,7 @@
         : canResume
           ? leftoverNote()
           : !labeled
-            ? "Pick the team being scouted in report settings. That only flips offense and defense."
+            ? "Name each side, then pick who is being scouted so offense and defense line up."
             : picked.length
               ? "Generate the scouting report. You can leave and come back while it reads."
               : "Choose at least one part of the report.";

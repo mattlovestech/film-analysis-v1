@@ -129,8 +129,11 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="settings"' in response.text
     assert "How a film becomes plays" in response.text
     assert "Charting a play comes later, after its clip is final." in response.text
-    assert "Experimental, and last." in response.text
+    assert "keeps that map on the play page" in response.text
     assert "Read offensive formations" in response.text
+    assert 'value="formations" checked' in response.text
+    assert "Experimental, and last." not in response.text
+    assert '<span class="experimental">Experimental</span>' not in response.text
     assert 'id="activity-loading"' in response.text
     assert "Checking the server" in response.text
     assert "Looking up films that are running or stopped." in response.text
@@ -166,7 +169,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "Cloud · 1 worker" in response.text
     assert 'id="teams"' in response.text
     assert "Team being scouted" in response.text
-    assert "Switching teams swaps who is on offense and who is on defense." in response.text
+    assert "pick who you are scouting so offense and defense line up" in response.text
     assert "The right arrow opens the next play." in response.text
     assert 'id="team-left-reference"' in response.text
     assert 'id="team-right-reference"' in response.text
@@ -186,7 +189,7 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="team-reset-retry"' in response.text
     assert "Try failed films again" in response.text
     assert "Generate again" in response.text
-    assert 'id="teams-note" class="lead"' in response.text
+    assert 'id="teams-note"' in response.text
     assert 'id="report"' in response.text
     assert "Scouting report" in response.text
     assert 'id="report-generate"' in response.text
@@ -215,13 +218,13 @@ def test_page_offers_a_video_upload() -> None:
         "workers": 4,
         "place": "local",
         "cloud": False,
-        "formations": False,
+        "formations": True,
     }
     assert client.get("/api/activity").json() == {
         "workers": 4,
         "place": "local",
         "cloud": False,
-        "formations": False,
+        "formations": True,
         "jobs": [],
     }
     assert "Couldn't reach the server" in response.text
@@ -896,10 +899,14 @@ def test_worker_setting_is_saved_and_reported(tmp_path: Path) -> None:
     assert client.get("/api/activity").json()["workers"] == 4
     saved = client.post("/api/settings", json={"workers": 8})
     assert saved.status_code == 200
-    assert saved.json() == {"workers": 8, "place": "local", "cloud": False, "formations": False}
-    formed = client.post("/api/settings", json={"formations": True})
+    assert saved.json() == {"workers": 8, "place": "local", "cloud": False, "formations": True}
+    formed = client.post("/api/settings", json={"formations": False})
     assert formed.status_code == 200
-    assert formed.json()["formations"] is True
+    assert formed.json()["formations"] is False
+    assert store.formation_reads() is False
+    enabled = client.post("/api/settings", json={"formations": True})
+    assert enabled.status_code == 200
+    assert enabled.json()["formations"] is True
     assert store.formation_reads() is True
     assert client.get("/api/activity").json()["workers"] == 8
     assert store.worker_count() == 8
