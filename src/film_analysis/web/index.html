@@ -23,6 +23,7 @@
       -webkit-font-smoothing: antialiased;
     }
     main { max-width: 46rem; margin: 3rem auto; padding: 0 1.25rem 3rem; }
+    main.library { max-width: 72rem; }
     header {
       display: flex;
       align-items: center;
@@ -67,14 +68,44 @@
     #new-analysis:hover { background: #409cff; color: #fff; }
     #new-analysis:active { transform: scale(0.98); }
     p { color: var(--muted); }
-    form { display: grid; gap: 0.75rem; margin-top: 0.85rem; }
+    form { display: grid; gap: 0.85rem; margin-top: 1.15rem; }
     .lead { margin: 0.35rem 0 0; }
+    .source { display: grid; gap: 0.4rem; }
+    .source > label {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 650;
+    }
+    .source.primary {
+      gap: 0.5rem;
+      padding: 1rem 1rem 1.05rem;
+      border-radius: 16px;
+      background: var(--surface);
+    }
+    .source.primary > label {
+      color: var(--ink);
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+    .source .hint,
+    .drop .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .source.primary input[type="url"] {
+      padding: 0.9rem 0.95rem;
+      border-radius: 12px;
+      background: #111;
+      font-size: 1.05rem;
+    }
     form > label:not(.drop) { font-size: 0.8rem; color: var(--muted); }
     .drop {
       display: grid;
       place-items: center;
-      min-height: 8.5rem;
-      padding: 1rem;
+      gap: 0.15rem;
+      min-height: 4.75rem;
+      padding: 0.85rem 1rem;
       border: 1px dashed rgba(255, 255, 255, 0.22);
       border-radius: var(--radius);
       background: var(--surface);
@@ -144,18 +175,59 @@
     #status:empty { display: none; }
     #status.error { color: #ff9b90; }
     #projects, #results, #reviews { margin: 0.35rem 0 0; padding: 0; list-style: none; }
+    #project-filters {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin: 0.9rem 0 0;
+      padding: 0.55rem 0 0.7rem;
+      background: linear-gradient(#111 78%, rgba(17, 17, 17, 0));
+    }
+    #project-filters[hidden] { display: none; }
+    #project-filters .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.42rem 0.8rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+    }
+    #project-filters .chip .count {
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      opacity: 0.72;
+    }
+    #project-filters .chip:hover:not(:disabled) {
+      filter: none;
+      color: var(--ink);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+    #project-filters .chip[aria-pressed="true"] {
+      border-color: transparent;
+      background: var(--ink);
+      color: #111;
+    }
+    #project-filters .chip[aria-pressed="true"] .count { opacity: 0.62; }
     #projects {
       display: grid;
-      gap: 0.55rem;
-      margin-top: 0.85rem;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+      gap: 0.9rem;
+      margin-top: 0.35rem;
     }
+    #projects > li { min-width: 0; }
     #projects a {
-      display: grid;
-      grid-template-columns: 7.25rem minmax(0, 1fr) auto;
-      gap: 0.8rem 0.85rem;
-      align-items: center;
-      padding: 0.65rem;
-      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+      border-radius: 14px;
       background: var(--surface);
       text-decoration: none;
       transition: background 0.15s ease;
@@ -165,22 +237,47 @@
       outline: 2px solid var(--blue);
       outline-offset: 2px;
     }
-    #projects a[data-bucket="needs"],
-    #projects a[data-bucket="working"] { box-shadow: inset 3px 0 0 var(--gold); }
-    #projects a[data-bucket="failed"] { box-shadow: inset 3px 0 0 #ff9b90; }
-    #projects img, #projects .blank {
+    #projects .poster {
+      position: relative;
       display: block;
-      width: 7.25rem;
-      height: 4.08rem;
-      object-fit: cover;
-      border-radius: 8px;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      flex: none;
+      overflow: hidden;
       background: #000;
     }
+    #projects img, #projects .blank {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+      transition: transform 0.2s ease;
+    }
+    #projects a:hover img { transform: scale(1.03); }
+    #projects .mark {
+      position: absolute;
+      left: 0.5rem;
+      bottom: 0.5rem;
+      padding: 0.18rem 0.48rem;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.72);
+      color: var(--ink);
+      font-size: 0.72rem;
+      font-weight: 650;
+      line-height: 1.2;
+    }
+    #projects .mark.needs,
+    #projects .mark.working { color: var(--gold); }
+    #projects .mark.failed { color: #ff9b90; }
     #projects .copy {
       display: flex;
       flex-direction: column;
       gap: 0.12rem;
       min-width: 0;
+      padding: 0.7rem 0.85rem 0.85rem;
     }
     #projects .title {
       margin: 0;
@@ -201,7 +298,7 @@
       font-variant-numeric: tabular-nums;
     }
     #projects .next {
-      margin: 0.12rem 0 0;
+      margin: 0.18rem 0 0;
       color: var(--muted);
       font-size: 0.82rem;
       font-weight: 650;
@@ -215,12 +312,16 @@
       line-height: 1.35;
       overflow-wrap: anywhere;
       white-space: pre-wrap;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
-    #projects .retry { justify-self: start; margin-top: 0.2rem; }
+    #projects .retry { justify-self: start; margin-top: 0.35rem; }
     #projects .track {
       display: block;
       height: 4px;
-      margin-top: 0.45rem;
+      margin-top: 0.55rem;
       border-radius: 999px;
       background: #2c2c2e;
       overflow: hidden;
@@ -237,15 +338,21 @@
       animation: download-slide 1.15s ease-in-out infinite;
     }
     #projects .stat {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      min-width: 4.6rem;
+      min-width: 0;
+      padding: 0.28rem 0.45rem 0.22rem;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.72);
       text-align: right;
     }
     #projects .stat strong {
       color: var(--ink);
-      font-size: 1.35rem;
+      font-size: 0.95rem;
       font-weight: 700;
       letter-spacing: -0.04em;
       font-variant-numeric: tabular-nums;
@@ -254,52 +361,13 @@
     #projects .stat strong[hidden] { display: none; }
     #projects .stat span {
       color: var(--muted);
-      font-size: 0.75rem;
+      font-size: 0.68rem;
       font-weight: 650;
     }
     #projects .stat.working strong,
     #projects .stat.needs strong,
     #projects .stat.needs span { color: var(--gold); }
     #projects .stat.failed span { color: #ff9b90; }
-    #project-filters {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.35rem;
-      margin-top: 0.85rem;
-    }
-    #project-filters[hidden] { display: none; }
-    #project-filters .chip {
-      padding: 0.28rem 0.7rem;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: transparent;
-      color: var(--muted);
-      font-size: 0.78rem;
-      font-weight: 650;
-    }
-    #project-filters .chip:hover:not(:disabled) {
-      filter: none;
-      color: var(--ink);
-      border-color: rgba(255, 255, 255, 0.28);
-    }
-    #project-filters .chip[aria-pressed="true"] {
-      border-color: transparent;
-      background: var(--ink);
-      color: #111;
-    }
-    @media (max-width: 640px) {
-      #projects a { grid-template-columns: 5.4rem minmax(0, 1fr); }
-      #projects img, #projects .blank { width: 5.4rem; height: 3.05rem; }
-      #projects .stat {
-        grid-column: 2;
-        flex-direction: row;
-        align-items: baseline;
-        gap: 0.35rem;
-        justify-content: flex-start;
-        min-width: 0;
-        text-align: left;
-      }
-    }
     .pie {
       width: 2.6rem;
       height: 2.6rem;
@@ -437,12 +505,14 @@
     .stages li.stopped { color: #ff9b90; }
     .stages li.stopped::before { background: #ff9b90; }
     .stages[hidden],
+    #activity-legend[hidden] { display: none; }
     #activity-list .stages { margin-top: 0.15rem; }
     #activity-list .stages .took,
     #film-steps .took {
       color: var(--ink);
       font-variant-numeric: tabular-nums;
     }
+    .stages .where { color: var(--muted); font-weight: 650; }
     #film-steps { margin-top: 0.85rem; }
     #film-steps[hidden] { display: none; }
     #activity-list li.skeleton {
@@ -505,6 +575,25 @@
       color: var(--muted);
       font-size: 0.8rem;
     }
+    #settings h3 {
+      margin: 1.5rem 0 0.4rem;
+      font-size: 1rem;
+    }
+    #place-detail { margin: 0.35rem 0 0; }
+    #settings .how {
+      display: grid;
+      gap: 0.55rem;
+      margin: 0.55rem 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    #settings .how li {
+      padding: 0.75rem 0.85rem;
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    #settings .how strong { display: block; margin-bottom: 0.15rem; }
+    #settings .how span { color: var(--muted); }
     .run-where {
       display: flex;
       align-items: center;
@@ -601,6 +690,40 @@
       text-transform: none;
       color: var(--ink);
     }
+    #play-progress { margin: 0.45rem 0 0; color: var(--ink); font-weight: 650; }
+    .play-tracker {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin: 0.55rem 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .play-tracker[hidden] { display: none; }
+    .play-tracker a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.75rem;
+      height: 1.75rem;
+      padding: 0 0.35rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+      text-decoration: none;
+    }
+    .play-tracker a:hover { color: var(--ink); border-color: rgba(255, 255, 255, 0.28); }
+    .play-tracker a.reviewed {
+      border-color: transparent;
+      background: var(--gold);
+      color: #111;
+    }
+    .play-tracker a.current { box-shadow: 0 0 0 2px var(--blue); }
+    #play-reviewed { margin-top: 0.85rem; }
+    #play-reviewed.chosen { background: var(--gold); color: #111; }
     #play-video {
       display: block;
       width: 100%;
@@ -628,13 +751,17 @@
       gap: 1rem;
       margin: 1.25rem 0 0;
     }
-    #play-nav a {
+    #play-nav a,
+    #play-nav button.skip {
+      padding: 0;
+      background: transparent;
       color: var(--blue);
       font-size: 0.85rem;
       font-weight: 650;
       text-decoration: none;
     }
-    #play-nav a:hover { color: #409cff; }
+    #play-nav a:hover,
+    #play-nav button.skip:hover:not(:disabled) { color: #409cff; filter: none; }
     #play-types { display: grid; gap: 0.85rem; margin-top: 1.15rem; }
     #play-types .type-label {
       margin: 0;
@@ -838,55 +965,49 @@
       <nav>
         <a class="quiet" href="/projects">Projects</a>
         <a class="quiet" href="/activity">Activity</a>
+        <a class="quiet" href="/settings">Settings</a>
         <a id="new-analysis" href="/">New analysis</a>
       </nav>
     </header>
     <p id="status" role="status"></p>
     <section id="composer">
-      <section>
-        <h2>New analysis</h2>
-        <p class="lead">Paste a YouTube link, drop a video, or pick one already downloaded.</p>
+      <h2>New analysis</h2>
+      <p class="lead">Paste a YouTube link. The film is cut into plays.</p>
       <form id="upload">
+        <div class="source primary">
+          <label for="youtube">YouTube link</label>
+          <input id="youtube" name="youtube" type="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" enterkeyhint="go">
+        </div>
+        <p class="or">or use a file you already have</p>
         <label class="drop" id="drop" for="video">
           <input id="video" name="video" type="file" accept="video/*">
           <span id="drop-label">Drop a video here</span>
+          <span class="hint">From your computer</span>
         </label>
-        <p class="or">or</p>
-        <label for="youtube">YouTube link</label>
-        <input id="youtube" name="youtube" type="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
-        <p class="or">or</p>
-        <label for="saved">Downloaded film</label>
-        <select id="saved" name="saved">
-          <option value="">No downloaded films yet</option>
-        </select>
+        <div class="source">
+          <label for="saved">Downloaded film</label>
+          <select id="saved" name="saved">
+            <option value="">No downloaded films yet</option>
+          </select>
+          <p class="hint">A film this app already saved.</p>
+        </div>
         <button type="submit">Analyze</button>
       </form>
-      </section>
     </section>
     <section id="history" hidden>
       <div class="section-head">
         <h2>Projects</h2>
         <button id="refresh-analyses" class="retry" type="button">Refresh</button>
       </div>
+      <div id="project-filters" role="group" aria-label="Show films" hidden></div>
       <p id="projects-lead" class="lead">Each film is cut into plays you can study on their own.</p>
       <p id="projects-summary" class="lead" hidden></p>
-      <div id="project-filters" role="group" aria-label="Show films" hidden></div>
       <p id="empty" class="lead" hidden>No films yet. Use New analysis to add a game. Each play is cut out so you can study it on its own.</p>
       <p id="filter-empty" class="lead" hidden>No films in this view.</p>
       <ul id="projects"></ul>
     </section>
     <section id="activity" hidden>
       <h2>Activity</h2>
-      <div class="run-where">
-        <div class="place" role="group" aria-label="Where jobs run">
-          <button type="button" id="place-local" aria-pressed="true">Local</button>
-          <button type="button" id="place-cloud" aria-pressed="false">Cloud</button>
-        </div>
-        <label class="workers" id="workers-field" for="workers" hidden>Workers
-          <input id="workers" type="number" min="1" max="16" value="4" inputmode="numeric">
-        </label>
-      </div>
-      <p class="workers-note" id="place-note">Jobs run on this server.</p>
       <div id="activity-status">
         <div>
           <p id="activity-lead" class="lead">Checking the server</p>
@@ -906,6 +1027,30 @@
       </ol>
       <button id="activity-retry" class="retry" type="button" hidden>Try again</button>
       <ul id="activity-list"></ul>
+    </section>
+    <section id="settings" hidden>
+      <h2>Settings</h2>
+      <p class="lead">Where this page runs a film, and how that film becomes plays.</p>
+      <h3>Where it runs</h3>
+      <div class="run-where">
+        <div class="place" role="group" aria-label="Where jobs run">
+          <button type="button" id="place-local" aria-pressed="true">Local</button>
+          <button type="button" id="place-cloud" aria-pressed="false">Cloud</button>
+        </div>
+        <label class="workers" id="workers-field" for="workers" hidden>Workers
+          <input id="workers" type="number" min="1" max="16" value="4" inputmode="numeric">
+        </label>
+      </div>
+      <p class="workers-note" id="place-note">Jobs run on this computer.</p>
+      <p class="lead" id="place-detail">This page is on your computer, so the film is downloaded and read here.</p>
+      <h3>How a film becomes plays</h3>
+      <ol class="how">
+        <li><strong>Download</strong><span>The full film is saved before it is read.</span></li>
+        <li><strong>Read</strong><span>Each stretch is a play, junk, or not clear yet. On Cloudflare, more workers read at once.</span></li>
+        <li><strong>Cut</strong><span>A play is clipped only after the film up to that point has settled, so the clips stay in order.</span></li>
+        <li><strong>Check</strong><span>A stretch that is still unclear gets one more look. What remains waits for you to mark it.</span></li>
+      </ol>
+      <p class="lead">Charting a play comes later, after its clip is final.</p>
     </section>
     <section id="review" hidden>
       <img id="film-thumb" alt="" hidden>
@@ -939,9 +1084,12 @@
     <section id="play" hidden>
       <a id="play-back" href="/projects">Film</a>
       <h2 id="play-title">Play</h2>
-      <video id="play-video" controls playsinline preload="metadata"></video>
+      <p id="play-progress" class="lead" hidden></p>
+      <ol id="play-tracker" class="play-tracker" aria-label="Reviewed plays" hidden></ol>
+      <video id="play-video" controls playsinline preload="metadata" muted></video>
       <dl id="play-details"></dl>
       <div id="play-types"></div>
+      <button id="play-reviewed" type="button" hidden>Mark reviewed</button>
       <p id="play-nav" hidden></p>
     </section>
   </main>
@@ -961,11 +1109,16 @@
     const playBack = document.querySelector("#play-back");
     const playTitle = document.querySelector("#play-title");
     const playVideo = document.querySelector("#play-video");
+    const playProgress = document.querySelector("#play-progress");
+    const playTracker = document.querySelector("#play-tracker");
+    const playReviewed = document.querySelector("#play-reviewed");
     const playDetails = document.querySelector("#play-details");
     const playTypes = document.querySelector("#play-types");
     const playNav = document.querySelector("#play-nav");
+    const shell = document.querySelector("main");
     const historySection = document.querySelector("#history");
     const activitySection = document.querySelector("#activity");
+    const settingsSection = document.querySelector("#settings");
     const activityList = document.querySelector("#activity-list");
     const activityLead = document.querySelector("#activity-lead");
     const activityNoteText = document.querySelector("#activity-note-text");
@@ -978,6 +1131,7 @@
     const placeLocal = document.querySelector("#place-local");
     const placeCloud = document.querySelector("#place-cloud");
     const placeNote = document.querySelector("#place-note");
+    const placeDetail = document.querySelector("#place-detail");
     const projectList = document.querySelector("#projects");
     const projectName = document.querySelector("#project-name");
     const filmThumb = document.querySelector("#film-thumb");
@@ -1012,13 +1166,6 @@
     let activitySpinTimer = 0;
     let activityClock = 0;
     const activityPace = new Map();
-    const ACTIVITY_STAGES = [
-      ["starting", "Start"],
-      ["downloading", "Download"],
-      ["saving", "Save"],
-      ["scanning", "Read"],
-      ["checking", "Check"],
-    ];
 
     document.querySelector("header").addEventListener("click", (event) => {
       const link = event.target.closest("a");
@@ -1117,6 +1264,7 @@
         if (location.pathname === "/analyses") history.replaceState({}, "", "/projects");
         if (location.pathname === "/projects") await showAnalyses();
         else if (location.pathname === "/activity") await showActivity();
+        else if (location.pathname === "/settings") await showSettings();
         else await showComposer();
         return;
       }
@@ -1139,11 +1287,17 @@
       playVideo.pause();
     }
 
+    function useLibraryLayout(on) {
+      shell.classList.toggle("library", on);
+    }
+
     async function showPlay(uid) {
       const token = ++watch;
+      useLibraryLayout(false);
       composer.hidden = true;
       historySection.hidden = true;
       activitySection.hidden = true;
+      settingsSection.hidden = true;
       review.hidden = true;
       playSection.hidden = false;
       markCurrent();
@@ -1192,10 +1346,55 @@
         playDetails.append(label, detail);
       }
       paintPlayTypes(play);
+      paintTracker(playTracker, playProgress, play.tracker || [], play.uid);
+      paintReviewedButton(play);
+      playSection.dataset.uid = play.uid || "";
+      playSection.dataset.next = play.next || "";
+      playSection.dataset.previous = play.previous || "";
+      playSection.dataset.film = play.film || "/projects";
       playNav.replaceChildren();
       playNav.hidden = !play.previous && !play.next;
       playNav.append(play.previous ? playLink(`/play/${play.previous}`, "Previous") : document.createElement("span"));
-      playNav.append(play.next ? playLink(`/play/${play.next}`, "Next") : document.createElement("span"));
+      playNav.append(play.next ? skipButton(play) : document.createElement("span"));
+    }
+
+    function skipButton(play) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "skip";
+      button.textContent = "Next";
+      button.addEventListener("click", () => acceptAndOpen(play.uid, play.next, button));
+      return button;
+    }
+
+    async function acceptAndOpen(uid, nextUid, control) {
+      if (control) control.disabled = true;
+      try {
+        if (playReviewed.dataset.reviewed !== "1") {
+          const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reviewed: true }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            status.className = "error";
+            status.textContent = typeof payload.detail === "string"
+              ? payload.detail
+              : "Could not save that review.";
+            return;
+          }
+        }
+        status.className = "";
+        status.textContent = "";
+        history.pushState({}, "", `/play/${nextUid}`);
+        route();
+      } catch {
+        status.className = "error";
+        status.textContent = "Could not save that review.";
+      } finally {
+        if (control && control.isConnected) control.disabled = false;
+      }
     }
 
     const playTypeGroups = [
@@ -1297,7 +1496,11 @@
         status.textContent = "";
         if (payload.removed) {
           if (location.pathname.startsWith("/play/")) {
-            history.pushState({}, "", payload.film || "/projects");
+            const next = playSection.dataset.next;
+            const previous = playSection.dataset.previous;
+            const film = playSection.dataset.film || payload.film || "/projects";
+            const href = next ? `/play/${next}` : previous ? `/play/${previous}` : film;
+            history.pushState({}, "", href);
             route();
           } else if (results.dataset.project) {
             const project = await fetch(`/api/projects/${results.dataset.project}`);
@@ -1307,8 +1510,7 @@
           return;
         }
         if (picker) delete picker.dataset.saving;
-        if (location.pathname === `/play/${payload.uid}`) paintPlay(payload);
-        syncPlayCard(payload);
+        showPlayUpdate(payload);
       } catch {
         status.className = "error";
         status.textContent = "Could not save that play type.";
@@ -1322,6 +1524,96 @@
           if (button.isConnected) button.disabled = false;
         }
       }
+    }
+
+    playReviewed.addEventListener("click", () => {
+      if (!playReviewed.dataset.uid) return;
+      setReviewed(playReviewed.dataset.uid, playReviewed.dataset.reviewed !== "1", playReviewed);
+    });
+
+    function showPlayUpdate(payload) {
+      if (location.pathname === `/play/${payload.uid}`) paintPlay(payload);
+      syncPlayCard(payload);
+    }
+
+    async function setReviewed(uid, reviewed, control) {
+      if (control) control.disabled = true;
+      try {
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reviewed }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not save that review.";
+          return;
+        }
+        status.className = "";
+        status.textContent = "";
+        showPlayUpdate(payload);
+      } catch {
+        status.className = "error";
+        status.textContent = "Could not save that review.";
+      } finally {
+        if (control && control.isConnected) control.disabled = false;
+      }
+    }
+
+    function paintReviewedButton(play) {
+      playReviewed.hidden = false;
+      playReviewed.dataset.uid = play.uid;
+      playReviewed.dataset.reviewed = play.reviewed ? "1" : "0";
+      playReviewed.classList.toggle("chosen", Boolean(play.reviewed));
+      playReviewed.textContent = play.reviewed ? "Reviewed" : "Mark reviewed";
+    }
+
+    function paintTracker(list, progress, items, currentUid) {
+      const done = items.filter((item) => item.reviewed).length;
+      progress.hidden = items.length === 0;
+      list.hidden = items.length === 0;
+      progress.textContent = reviewProgress(done, items.length);
+      const links = [...list.querySelectorAll("a")];
+      const same = links.length === items.length
+        && items.every((item, index) => links[index].dataset.uid === item.uid);
+      if (!same) {
+        list.replaceChildren();
+        for (const item of items) list.append(trackerItem(item, currentUid));
+        return;
+      }
+      items.forEach((item, index) => fillTrackerLink(links[index], item, currentUid));
+    }
+
+    function trackerItem(item, currentUid) {
+      const entry = document.createElement("li");
+      const link = document.createElement("a");
+      link.addEventListener("click", (event) => followLink(event, link.getAttribute("href")));
+      fillTrackerLink(link, item, currentUid);
+      entry.append(link);
+      return entry;
+    }
+
+    function fillTrackerLink(link, item, currentUid) {
+      link.href = `/play/${item.uid}`;
+      link.dataset.uid = item.uid;
+      link.textContent = String(item.position);
+      const reviewed = Boolean(item.reviewed);
+      const current = item.uid === currentUid;
+      link.classList.toggle("reviewed", reviewed);
+      link.classList.toggle("current", current);
+      if (current) link.setAttribute("aria-current", "true");
+      else link.removeAttribute("aria-current");
+      const state = reviewed ? ", reviewed" : ", not reviewed";
+      link.setAttribute("aria-label", `Play ${item.position}${state}`);
+    }
+
+    function reviewProgress(done, total) {
+      if (!total) return "";
+      if (done === total) return total === 1 ? "1 play reviewed" : `All ${total} plays reviewed`;
+      return `${done} of ${total} reviewed`;
     }
 
     function playLink(href, label) {
@@ -1356,9 +1648,11 @@
 
     async function showComposer() {
       ++watch;
+      useLibraryLayout(false);
       composer.hidden = false;
       historySection.hidden = true;
       activitySection.hidden = true;
+      settingsSection.hidden = true;
       review.hidden = true;
       playSection.hidden = true;
       results.replaceChildren();
@@ -1392,9 +1686,11 @@
     async function showAnalyses() {
       const token = ++watch;
       document.title = "Projects · Film analysis";
+      useLibraryLayout(true);
       composer.hidden = true;
       historySection.hidden = false;
       activitySection.hidden = true;
+      settingsSection.hidden = true;
       review.hidden = true;
       playSection.hidden = true;
       results.replaceChildren();
@@ -1427,12 +1723,147 @@
       }
     });
 
+    function activitySkeleton() {
+      const item = document.createElement("li");
+      item.className = "skeleton";
+      item.setAttribute("aria-hidden", "true");
+      for (const kind of ["title", "step", "detail", "bar"]) {
+        const bone = document.createElement("span");
+        bone.className = `bone ${kind}`;
+        item.append(bone);
+      }
+      return item;
+    }
+
+    function beginActivityLoad() {
+      activityNoteMode = "loading";
+      activityLead.textContent = "Checking the server";
+      activityNoteText.textContent = "Looking up films that are running or stopped.";
+      activityLoading.setAttribute("aria-label", "Loading activity");
+      activityLive.hidden = true;
+      activityLoading.hidden = false;
+      activityRetry.hidden = true;
+      activityLegend.hidden = false;
+      activityList.replaceChildren();
+      for (let index = 0; index < 3; index += 1) activityList.append(activitySkeleton());
+      clearTimeout(activitySlowTimer);
+      activitySlowTimer = window.setTimeout(() => {
+        if (activityLoaded || activitySection.hidden || activityNoteMode !== "loading") return;
+        activityLead.textContent = "Still waiting on the server";
+        activityNoteText.textContent = "The activity feed has not answered yet.";
+        activityLoading.setAttribute("aria-label", "Still waiting for activity");
+      }, 2000);
+    }
+
+    function paintActivitySummary(jobs) {
+      const runningJobs = jobs.filter((job) => job.running);
+      const complete = jobs.filter((job) => job.phase === "ready").length;
+      const stopped = jobs.length - runningJobs.length - complete;
+      activityLive.hidden = runningJobs.length === 0;
+      activityLegend.hidden = jobs.length > 0;
+      const parts = [];
+      if (runningJobs.length) {
+        parts.push(runningJobs.length === 1 ? "1 running." : `${runningJobs.length} running.`);
+      }
+      if (stopped) parts.push(stopped === 1 ? "1 stopped." : `${stopped} stopped.`);
+      if (complete) parts.push(complete === 1 ? "1 complete." : `${complete} complete.`);
+      if (runningJobs.length === 1 && !stopped && !complete) {
+        activityLead.textContent = activityHeadline(runningJobs[0]);
+      } else {
+        activityLead.textContent = parts.length ? parts.join(" ") : "The server is idle.";
+      }
+      activityNoteText.textContent = withFreshness(
+        activityNoteBody(jobs, runningJobs, stopped, complete),
+      );
+    }
+
+    function activityNoteBody(jobs, runningJobs, stopped, complete) {
+      if (!jobs.length) {
+        return "Nothing is running. A film moves through start, download, save, read, and check.";
+      }
+      if (runningJobs.length === 1 && !stopped && !complete) return activityGlance(runningJobs[0]);
+      if (runningJobs.length) return runningHeadlines(runningJobs);
+      if (stopped && !complete) {
+        return "These films stopped before they finished. Open one for the error, or retry it.";
+      }
+      if (complete && !stopped) return "Finished films stay here. Open one to study its plays.";
+      return "Open a stopped film for the error, or a finished one to study its plays.";
+    }
+
+    function startActivityClock() {
+      clearInterval(activityClock);
+      activityClock = window.setInterval(() => {
+        if (activitySection.hidden || activityNoteMode !== "live" || activityBusy) return;
+        paintActivitySummary(activityJobs);
+        const links = [...activityList.querySelectorAll("a")];
+        if (links.length !== activityJobs.length) return;
+        activityJobs.forEach((job, index) => fillActivity(links[index], job));
+      }, 1000);
+    }
+
+    function failActivity(payload) {
+      activityLoading.hidden = true;
+      activityLive.hidden = true;
+      activityRetry.hidden = false;
+      clearTimeout(activitySlowTimer);
+      const message = typeof payload.detail === "string"
+        ? payload.detail
+        : "Couldn't read server activity.";
+      status.className = "error";
+      status.textContent = message;
+      activityNoteMode = "error";
+      if (!activityLoaded) {
+        activityLead.textContent = "Couldn't read server activity.";
+        activityNoteText.textContent = message;
+        activityLegend.hidden = false;
+        activityList.replaceChildren();
+        return;
+      }
+      activityNoteText.textContent = "Couldn't refresh. Showing the last update.";
+    }
+
+    function armRefreshSpinner() {
+      clearTimeout(activitySpinTimer);
+      activitySpinTimer = window.setTimeout(() => {
+        if (activityBusy) activityLoading.hidden = false;
+      }, 300);
+    }
+
+    function settleRefreshSpinner() {
+      clearTimeout(activitySpinTimer);
+      if (activityLoaded) activityLoading.hidden = true;
+    }
+
+    function rememberPace(job) {
+      const now = Date.now();
+      const downloaded = Number(job.downloaded) || 0;
+      const scanned = Number(job.scanned) || 0;
+      const phase = job.phase || "";
+      const prev = activityPace.get(job.project);
+      const same = Boolean(prev) && prev.phase === phase;
+      const moved = !same
+        || prev.downloaded !== downloaded
+        || Math.abs(prev.scanned - scanned) > 0.05;
+      activityPace.set(job.project, {
+        at: now,
+        downloaded,
+        scanned,
+        phase,
+        movedAt: moved ? now : prev.movedAt,
+        anchorAt: same ? prev.anchorAt : now,
+        anchorDownloaded: same ? prev.anchorDownloaded : downloaded,
+        anchorScanned: same ? prev.anchorScanned : scanned,
+      });
+    }
+
     async function showActivity() {
       const token = ++watch;
       document.title = "Activity · Film analysis";
+      useLibraryLayout(false);
       composer.hidden = true;
       historySection.hidden = true;
       activitySection.hidden = false;
+      settingsSection.hidden = true;
       review.hidden = true;
       playSection.hidden = true;
       results.replaceChildren();
@@ -1478,7 +1909,8 @@
       }
       applyProjectFilter();
       const pending = projects.some((project) => (
-        project.running || project.status === "downloading" || project.status === "scanning"
+        project.running
+        || ((project.status === "downloading" || project.status === "scanning") && !project.error)
       ));
       if (pending) {
         window.setTimeout(() => {
@@ -1515,7 +1947,8 @@
       } finally {
         activityBusy = false;
         settleRefreshSpinner();
-        if (token === watch && !activitySection.hidden) {
+        const live = activityJobs.some((job) => job.running);
+        if (live && token === watch && !activitySection.hidden) {
           window.setTimeout(() => { paintActivity(token); }, 1000);
         }
       }
@@ -1560,24 +1993,57 @@
       if (workersInput.value !== next) workersInput.value = next;
     }
 
+    const CLOUD_SITE = "https://film-analysis.broad-night-d47d.workers.dev";
+
+    function onThisComputer() {
+      const host = location.hostname;
+      return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+    }
+
     function paintRun(payload) {
-      const place = payload.place === "cloud" ? "cloud" : "local";
-      const cloud = Boolean(payload.cloud);
+      const here = onThisComputer();
+      const place = here ? "local" : "cloud";
       activityOnCloud = place === "cloud";
       const count = Number(payload.workers);
       if (Number.isInteger(count) && count > 0) activityWorkers = count;
-      placeLocal.setAttribute("aria-pressed", place === "local" ? "true" : "false");
-      placeCloud.setAttribute("aria-pressed", place === "cloud" ? "true" : "false");
-      placeCloud.disabled = !cloud;
-      workersField.hidden = place !== "cloud";
-      if (place === "cloud") {
-        placeNote.textContent = "More workers read a film faster.";
-        paintWorkers(payload.workers);
-      } else if (cloud) {
-        placeNote.textContent = "Jobs run on this server.";
+      placeLocal.setAttribute("aria-pressed", here ? "true" : "false");
+      placeCloud.setAttribute("aria-pressed", here ? "false" : "true");
+      placeLocal.disabled = !here;
+      placeCloud.disabled = false;
+      workersField.hidden = here;
+      if (here) {
+        placeNote.textContent = "Jobs run on this computer.";
+        placeDetail.textContent = "This page is on your computer, so the film is downloaded and read here.";
       } else {
-        placeNote.textContent = "Jobs run on this server. Cloud workers are not set up.";
+        placeNote.textContent = "Requests go to Cloudflare. More workers read a film faster.";
+        placeDetail.textContent = "This page sends each film to Cloudflare. One cutter keeps that film in order while workers read it at the same time.";
+        paintWorkers(payload.workers);
       }
+    }
+
+    async function showSettings() {
+      ++watch;
+      document.title = "Settings · Film analysis";
+      useLibraryLayout(false);
+      composer.hidden = true;
+      historySection.hidden = true;
+      activitySection.hidden = true;
+      settingsSection.hidden = false;
+      review.hidden = true;
+      playSection.hidden = true;
+      markCurrent();
+      const response = await fetch("/api/settings");
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        status.className = "error";
+        status.textContent = typeof payload.detail === "string"
+          ? payload.detail
+          : "Couldn't read settings.";
+        return;
+      }
+      status.className = "";
+      status.textContent = "";
+      paintRun(payload);
     }
 
     workersInput.addEventListener("change", () => saveWorkers());
@@ -1585,22 +2051,9 @@
       if (!activityLoaded) beginActivityLoad();
       paintActivity(watch);
     });
-    placeLocal.addEventListener("click", () => savePlace("local"));
     placeCloud.addEventListener("click", () => {
-      if (!placeCloud.disabled) savePlace("cloud");
+      if (onThisComputer()) location.assign(`${CLOUD_SITE}/settings`);
     });
-
-    async function savePlace(place) {
-      const allowCloud = !placeCloud.disabled;
-      placeLocal.disabled = true;
-      placeCloud.disabled = true;
-      try {
-        await saveSetting({ place });
-      } finally {
-        placeLocal.disabled = false;
-        placeCloud.disabled = !allowCloud;
-      }
-    }
 
     async function saveWorkers() {
       const count = Number(workersInput.value);
@@ -1666,9 +2119,17 @@
         if (step) {
           const took = document.createElement("span");
           took.className = "took";
-          took.textContent = clock(step.seconds || 0);
+          took.textContent = stepLength(step.seconds, step.running);
           item.append(took);
+          const where = stackLabel(step);
+          if (where) {
+            const place = document.createElement("span");
+            place.className = "where";
+            place.textContent = where;
+            item.append(place);
+          }
           item.classList.add(step.running ? "now" : "done");
+          if (step.running) item.setAttribute("aria-current", "step");
           lastTimed = item;
         }
         list.append(item);
@@ -1695,9 +2156,12 @@
       step.className = "step";
       const label = document.createElement("span");
       label.className = "label";
+      const pct = document.createElement("span");
+      pct.className = "pct";
+      pct.hidden = true;
       const when = document.createElement("span");
       when.className = "when";
-      step.append(label, when);
+      step.append(label, pct, when);
       const detail = document.createElement("p");
       detail.className = "detail";
       const fault = document.createElement("p");
@@ -1728,10 +2192,21 @@
       const step = link.querySelector(".step");
       step.querySelector(".label").textContent = activityStep(job);
       step.querySelector(".when").textContent = activityWhen(job.updated);
+      const pct = step.querySelector(".pct");
+      const percent = activityPercent(job);
+      const showPercent = percent != null && job.phase !== "saving" && job.phase !== "ready";
+      if (pct) {
+        pct.hidden = !showPercent;
+        pct.textContent = showPercent ? `${percent}%` : "";
+      }
       step.classList.toggle("stopped", job.phase !== "ready" && !job.running);
       step.classList.toggle("done", job.phase === "ready");
       link.querySelector(".detail").textContent = activityDetail(job);
-      paintStages(link.querySelector(".stages"), job.steps, !job.running && job.phase !== "ready");
+      paintStages(
+        link.querySelector(".stages"),
+        liveSteps(job),
+        !job.running && job.phase !== "ready",
+      );
       const fault = link.querySelector(".fault");
       const message = activityFault(job);
       fault.hidden = !message;
@@ -1740,7 +2215,6 @@
       retry.hidden = !canRetryJob(job);
       retry.textContent = stoppedWhileReading(job) ? "Retry" : "Retry download";
       const bar = link.querySelector(".bar");
-      const percent = activityPercent(job);
       const loading = Boolean(job.running) && percent == null;
       bar.classList.toggle("stopped", job.phase !== "ready" && !job.running);
       bar.classList.toggle("unknown", loading);
@@ -1793,22 +2267,35 @@
         const progress = activityProgress(job);
         return progress ? `Stopped while ${last} · ${progress}` : `Stopped while ${last}`;
       }
-      if (job.phase === "starting") return "Getting ready";
-      if (job.phase === "saving") return "Saving the film";
-      if (job.phase === "checking") {
-        const plays = `${job.play_count} ${job.play_count === 1 ? "play" : "plays"}`;
-        return `Checking stretches that weren't clearly a play · ${plays}`;
+      const pace = paceInsight(job);
+      if (job.phase === "starting") {
+        return joinParts([
+          "Opening the job. The download starts once the film is ready",
+          pace || stepAge(job),
+        ]);
+      }
+      if (job.phase === "saving") {
+        return joinParts(["Download finished. Writing the film into storage", stepAge(job)]);
+      }
+      const plays = `${job.play_count} ${job.play_count === 1 ? "play" : "plays"}`;
+      if (job.phase === "checking" || (job.phase === "scanning" && reachedEnd(job.scanned, job.duration))) {
+        return joinParts([
+          "Checking stretches that weren't clearly a play",
+          plays,
+          workerPhrase(),
+          pace,
+        ]);
       }
       if (job.phase === "scanning") {
-        const plays = `${job.play_count} ${job.play_count === 1 ? "play" : "plays"}`;
-        if (reachedEnd(job.scanned, job.duration)) {
-          return `Checking stretches that weren't clearly a play · ${plays}`;
-        }
         const done = clock(job.scanned || 0);
         const read = job.duration ? `Read ${done} of ${clock(job.duration)}` : `Read ${done}`;
-        return `${read} · ${plays} so far`;
+        return joinParts([read, `${plays} so far`, workerPhrase(), pace]);
       }
-      return activityProgress(job) || "Connecting to the video…";
+      const progress = activityProgress(job);
+      if (!progress) {
+        return pace || "Connecting to the video. Progress shows up once bytes arrive.";
+      }
+      return joinParts([progress, pace]);
     }
 
     function activityFault(job) {
@@ -1846,6 +2333,160 @@
       return Math.min(100, Math.round(((Number(job.downloaded) || 0) / total) * 100));
     }
 
+    function stepLength(seconds, running) {
+      const whole = Math.max(0, Math.round(Number(seconds) || 0));
+      if (whole < 1) return running ? "now" : "<1s";
+      if (whole < 60) return `${whole}s`;
+      const minutes = Math.floor(whole / 60);
+      const secs = whole % 60;
+      if (whole < 3600) return secs ? `${minutes}m ${secs}s` : `${minutes}m`;
+      const hours = Math.floor(whole / 3600);
+      const rest = Math.round((whole % 3600) / 60);
+      if (!rest) return `${hours}h`;
+      return `${hours}h ${rest}m`;
+    }
+
+    function stackLabel(step) {
+      if (step.stack === "local") return "Local";
+      if (step.stack !== "cloud") return "";
+      const count = Number(step.workers);
+      const parallel = step.name === "scanning" || step.name === "checking";
+      if (parallel && Number.isInteger(count) && count > 0) {
+        return count === 1 ? "Cloud · 1 worker" : `Cloud · ${count} workers`;
+      }
+      return "Cloud";
+    }
+
+    function liveSteps(job) {
+      const steps = Array.isArray(job.steps) ? job.steps.map((step) => ({ ...step })) : [];
+      if (
+        job.running
+        && job.phase
+        && job.phase !== "ready"
+        && !steps.some((step) => step.name === job.phase)
+      ) {
+        steps.push({ name: job.phase, seconds: 0, running: true });
+      }
+      const extra = activityRefreshedAt
+        ? Math.max(0, (Date.now() - activityRefreshedAt) / 1000)
+        : 0;
+      for (const step of steps) {
+        if (step.running) step.seconds = (Number(step.seconds) || 0) + extra;
+      }
+      return steps;
+    }
+
+    function joinParts(parts) {
+      return parts.filter(Boolean).join(" · ");
+    }
+
+    function workerPhrase() {
+      if (!activityOnCloud) return "";
+      return activityWorkers === 1 ? "1 worker" : `${activityWorkers} workers`;
+    }
+
+    function stepAge(job) {
+      const open = liveSteps(job).find((step) => step.running);
+      const seconds = open ? Number(open.seconds) || 0 : 0;
+      if (!open) return "";
+      if (seconds < 5) return "Just started this step.";
+      return `In this step for ${stepLength(seconds, false)}.`;
+    }
+
+    function paceInsight(job) {
+      if (!job.running) return "";
+      const sample = activityPace.get(job.project);
+      if (!sample) return "";
+      const quiet = (Date.now() - sample.movedAt) / 1000;
+      if ((job.phase === "downloading" || job.phase === "scanning") && quiet >= 8) {
+        if (job.phase === "downloading" && sample.downloaded <= 0) {
+          return `Still connecting. No bytes for ${stepLength(quiet, false)}.`;
+        }
+        return `No new progress for ${stepLength(quiet, false)}.`;
+      }
+      const elapsed = (sample.at - sample.anchorAt) / 1000;
+      if (elapsed < 1) return "";
+      if (job.phase === "downloading") {
+        const gained = sample.downloaded - sample.anchorDownloaded;
+        if (gained <= 0) return "";
+        const perSecond = gained / elapsed;
+        const total = Number(job.total_bytes) || 0;
+        const speed = rateLabel(perSecond);
+        if (total > sample.downloaded) {
+          const left = (total - sample.downloaded) / perSecond;
+          if (left >= 2) return `${speed} · about ${stepLength(left, false)} left`;
+        }
+        return speed;
+      }
+      if (job.phase === "scanning") {
+        const gained = sample.scanned - sample.anchorScanned;
+        if (gained <= 0.05) return "";
+        const perSecond = gained / elapsed;
+        const total = Number(job.duration) || 0;
+        const speed = perSecond >= 10
+          ? `${Math.round(perSecond)}× playback`
+          : `${perSecond.toFixed(1)}× playback`;
+        if (total > sample.scanned) {
+          const left = (total - sample.scanned) / perSecond;
+          if (left >= 2) return `${speed} · about ${stepLength(left, false)} left`;
+        }
+        return speed;
+      }
+      return "";
+    }
+
+    function rateLabel(bytesPerSecond) {
+      if (bytesPerSecond >= 1024 * 1024) return `${megabytes(bytesPerSecond)}/s`;
+      const kb = bytesPerSecond / 1024;
+      if (kb >= 10) return `${Math.round(kb)} KB/s`;
+      if (kb >= 1) return `${kb.toFixed(1)} KB/s`;
+      return `${Math.max(1, Math.round(bytesPerSecond))} B/s`;
+    }
+
+    function activityHeadline(job) {
+      const name = shortName(job.name);
+      const step = activityStep(job);
+      const percent = activityPercent(job);
+      if (!job.running || percent == null || job.phase === "saving") return `${step} · ${name}`;
+      return `${step} · ${name} · ${percent}%`;
+    }
+
+    function shortName(name) {
+      const text = String(name || "This film").trim() || "This film";
+      return text.length > 48 ? `${text.slice(0, 46)}…` : text;
+    }
+
+    function activityGlance(job) {
+      const pace = paceInsight(job);
+      if (pace) return pace;
+      if (job.phase === "starting") return stepAge(job) || "Opening the job before the download starts.";
+      if (job.phase === "saving") return stepAge(job) || "Writing the film into storage.";
+      if (job.phase === "checking" || (job.phase === "scanning" && reachedEnd(job.scanned, job.duration))) {
+        return "Rechecking stretches that weren't clearly a play.";
+      }
+      if (job.phase === "scanning") {
+        const done = clock(job.scanned || 0);
+        const read = job.duration ? `Read ${done} of ${clock(job.duration)}` : `Read ${done}`;
+        const plays = `${job.play_count} ${job.play_count === 1 ? "play" : "plays"} so far`;
+        return `${read} · ${plays}`;
+      }
+      return activityProgress(job) || "Connecting to the video. Bytes show up once the transfer starts.";
+    }
+
+    function runningHeadlines(jobs) {
+      const lines = jobs.map((job) => activityHeadline(job));
+      if (lines.length <= 3) return lines.join(" · ");
+      return `${lines.slice(0, 3).join(" · ")} · ${lines.length - 3} more`;
+    }
+
+    function withFreshness(text) {
+      if (!activityRefreshedAt) return text;
+      const age = (Date.now() - activityRefreshedAt) / 1000;
+      if (age < 3) return text;
+      const glue = /[.!?]$/.test(text) ? " " : " · ";
+      return `${text}${glue}Last update ${stepLength(age, false)} ago.`;
+    }
+
     let projectFilter = "all";
     let listedProjects = [];
 
@@ -1859,6 +2500,14 @@
         history.pushState({}, "", link.href);
         route();
       });
+      const poster = document.createElement("span");
+      poster.className = "poster";
+      const mark = document.createElement("span");
+      mark.className = "mark";
+      const stat = document.createElement("span");
+      stat.className = "stat";
+      stat.append(document.createElement("strong"), document.createElement("span"));
+      poster.append(mark, stat);
       const copy = document.createElement("span");
       copy.className = "copy";
       const title = document.createElement("p");
@@ -1878,23 +2527,28 @@
       track.setAttribute("aria-valuemax", "100");
       track.append(document.createElement("span"));
       copy.append(title, when, next, fault, track);
-      const stat = document.createElement("span");
-      stat.className = "stat";
-      stat.append(document.createElement("strong"), document.createElement("span"));
-      link.append(copy, stat);
+      link.append(poster, copy);
       fillHistoryLink(link, project);
       item.append(link);
       return item;
     }
 
+    const bucketLabel = {
+      needs: "Needs a look",
+      ready: "Ready",
+      working: "In progress",
+      failed: "Stopped",
+    };
+
     function fillHistoryLink(link, project) {
+      const poster = link.querySelector(".poster");
       let thumb = link.querySelector("img, .blank");
       if (project.thumbnail) {
         if (!thumb || thumb.tagName !== "IMG") {
           thumb?.remove();
           thumb = document.createElement("img");
           thumb.alt = "";
-          link.prepend(thumb);
+          poster.prepend(thumb);
         }
         if (thumb.getAttribute("src") !== project.thumbnail) thumb.src = project.thumbnail;
         sharpenThumb(thumb);
@@ -1903,10 +2557,13 @@
         thumb = document.createElement("span");
         thumb.className = "blank";
         thumb.setAttribute("aria-hidden", "true");
-        link.prepend(thumb);
+        poster.prepend(thumb);
       }
       const bucket = projectBucket(project);
       link.dataset.bucket = bucket;
+      const mark = poster.querySelector(".mark");
+      mark.className = `mark ${bucket}`;
+      mark.textContent = bucketLabel[bucket] || "Ready";
       const copy = link.querySelector(".copy");
       copy.querySelector(".title").textContent = project.name || "Film";
       const when = copy.querySelector(".when");
@@ -2043,7 +2700,7 @@
         lead.hidden = true;
         return;
       }
-      lead.hidden = false;
+      lead.hidden = true;
       node.hidden = false;
       node.textContent = summarizeProjects(projects);
     }
@@ -2094,7 +2751,12 @@
         button.type = "button";
         button.className = "chip";
         button.setAttribute("aria-pressed", projectFilter === key ? "true" : "false");
-        button.textContent = key === "all" ? label : `${label} · ${counts[key]}`;
+        const name = document.createElement("span");
+        name.textContent = label;
+        const count = document.createElement("span");
+        count.className = "count";
+        count.textContent = String(counts[key]);
+        button.append(name, count);
         button.addEventListener("click", () => {
           projectFilter = key;
           delete bar.dataset.signature;
@@ -2214,9 +2876,11 @@
     }
 
     function paint(project, token) {
+      useLibraryLayout(false);
       composer.hidden = true;
       historySection.hidden = true;
       activitySection.hidden = true;
+      settingsSection.hidden = true;
       review.hidden = false;
       playSection.hidden = true;
       markCurrent();
@@ -2342,14 +3006,7 @@
       view.className = "view-play";
       view.textContent = "View play";
       view.addEventListener("click", (event) => followLink(event, view.getAttribute("href")));
-      if (play.video) {
-        const video = document.createElement("video");
-        video.controls = true;
-        video.preload = "metadata";
-        video.playsInline = true;
-        video.src = play.video;
-        item.append(video);
-      }
+      if (play.video) item.append(playVideoElement(play.video));
       item.append(badge, meta, picker, view);
       syncPlayCard(play, item);
       return item;
@@ -2414,11 +3071,7 @@
       length.textContent = playLength(item.end - item.start);
       meta.append(range, length);
       if (item.video) {
-        const video = document.createElement("video");
-        video.controls = true;
-        video.preload = "metadata";
-        video.playsInline = true;
-        video.src = item.video;
+        const video = playVideoElement(item.video);
         clipVideo(video, item.start, item.end);
         card.append(video);
       }
@@ -2431,6 +3084,16 @@
       );
       card.append(badge, meta, actions);
       return card;
+    }
+
+    function playVideoElement(src) {
+      const video = document.createElement("video");
+      video.controls = true;
+      video.preload = "metadata";
+      video.playsInline = true;
+      video.muted = true;
+      video.src = src;
+      return video;
     }
 
     function clipVideo(video, start, end) {

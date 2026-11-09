@@ -5,6 +5,7 @@ import json
 import math
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
@@ -20,8 +21,9 @@ _UA = "Mozilla/5.0"
 _INSTANCES = "https://api.invidious.io/instances.json?sort_by=health"
 _KNOWN_INSTANCE = "https://yt.chocolatemoo53.com"
 _MAX_HEIGHT = 360
-_PARTS = 4
+_PARTS = 16
 _PART_FLOOR = 4 * 1024 * 1024
+_BUFFER = 1024 * 1024
 _Progress = Callable[[int, int | None], None]
 
 
@@ -146,6 +148,7 @@ def download_youtube(
         "retries": 2,
         "fragment_retries": 3,
         "concurrent_fragment_downloads": _PARTS,
+        "buffersize": _BUFFER,
         "progress_hooks": [_hook(progress)],
     }
     try:
@@ -166,6 +169,51 @@ def download_youtube(
     if merged.is_file():
         return merged
     return max(files, key=lambda path: path.stat().st_size)
+
+
+def detach_progress(send: _Progress, interval: float = 0.4) -> _Progress:
+    """Report progress without waiting on `send`.
+
+    Saving the byte count can take longer than reading the next chunk. The
+    download keeps going, and a newer count replaces one that has not been saved.
+    """
+
+    last_sent = 0.0
+    lock = threading.Lock()
+    latest: list[tuple[int, int | None] | None] = [None]
+    running = False
+
+    def report(done: int, total: int | None) -> None:
+        nonlocal running
+        now = time.monotonic()
+        finished = total is not None and total > 0 and done >= total
+        with lock:
+            if latest[0] is None and not finished and now - last_sent < interval:
+                return
+            latest[0] = (done, total)
+            if running:
+                return
+            running = True
+
+        def pump() -> None:
+            nonlocal running, last_sent
+            while True:
+                with lock:
+                    item = latest[0]
+                    latest[0] = None
+                if item is None:
+                    with lock:
+                        if latest[0] is None:
+                            running = False
+                            return
+                    continue
+                send(*item)
+                with lock:
+                    last_sent = time.monotonic()
+
+        threading.Thread(target=pump, daemon=True).start()
+
+    return report
 
 
 def _download_reason(error: Exception) -> str:
@@ -331,7 +379,7 @@ def _save_parallel(url: str, dest: Path, total: int, progress: _Progress | None)
             if getattr(response, "status", 200) != 206:
                 raise OSError("The video server did not accept a partial download.")
             handle.seek(start)
-            while chunk := response.read(256 * 1024):
+            while chunk := response.read(_BUFFER):
                 handle.write(chunk)
                 with lock:
                     done[index] += len(chunk)
@@ -378,7 +426,7 @@ def _copy_body(
     total = _byte_count(response.headers.get("Content-Length"))
     done = 0
     with dest.open("wb") as handle:
-        while chunk := response.read(1024 * 1024):
+        while chunk := response.read(_BUFFER):
             handle.write(chunk)
             done += len(chunk)
             if progress is not None:

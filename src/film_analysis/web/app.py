@@ -7,7 +7,6 @@ import os
 import shutil
 import tempfile
 import threading
-import time
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -31,6 +30,7 @@ from film_analysis.agents.segments import FilmSpan, format_play
 from film_analysis.agents.youtube import (
     FilmInfo,
     canonical_youtube_url,
+    detach_progress,
     download_youtube,
     thumbnail_url,
     youtube_details,
@@ -43,10 +43,11 @@ from film_analysis.storage.catalog import (
     MemoryCatalog,
     PlayRecord,
     ProjectDetail,
+    ProjectSummary,
     SpanRecord,
     catalog_from_env,
 )
-from film_analysis.web.cloud import cloud_target, start_remote
+from film_analysis.web.cloud import cloud_target
 from film_analysis.web.playback import cut_clip
 
 _PAGE = Path(__file__).with_name("index.html")
@@ -112,14 +113,23 @@ class _WorkerSetting(BaseModel):
 
 
 class _PlayLabel(BaseModel):
-    play_type: str
+    play_type: str | None = None
+    reviewed: bool | None = None
 
     @field_validator("play_type")
     @classmethod
-    def _known_type(cls, value: str) -> str:
+    def _known_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if value not in _PLAY_LABELS:
             raise ValueError("play type must be a known play")
         return value
+
+    @model_validator(mode="after")
+    def _has_change(self) -> "_PlayLabel":
+        if self.play_type is None and self.reviewed is None:
+            raise ValueError("Choose a play type or mark the review.")
+        return self
 
 
 def _stored_play_label(play_type: str) -> tuple[str, str | None]:
@@ -200,6 +210,10 @@ def create_app(
     def activity_page() -> HTMLResponse:
         return _page()
 
+    @app.get("/settings")
+    def settings_page() -> HTMLResponse:
+        return _page()
+
     @app.get("/projects/{project_id}")
     def project_page(project_id: int) -> HTMLResponse:
         del project_id
@@ -240,29 +254,24 @@ def create_app(
     def activity_feed(request: Request) -> dict[str, object]:
         try:
             saved = catalog.list_activity()
-        except CatalogError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
-        try:
             projects = catalog.list_projects()
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
+        by_id = {item.project: item for item in projects}
         with running_lock:
             active = set(running)
         seen = {item.project for item in saved}
         dated: list[tuple[str, dict[str, object]]] = []
         for item in saved:
-            try:
-                detail = catalog.get_project(item.project)
-            except CatalogError as error:
-                raise HTTPException(status_code=502, detail=str(error)) from error
-            if detail is None:
+            summary = by_id.get(item.project)
+            if summary is None:
                 continue
             phase, working = _activity_state(item.phase, item.running, item.project in active)
             dated.append(
                 (
                     item.updated_at,
                     _activity_job(
-                        detail,
+                        summary,
                         phase=phase,
                         running=working,
                         updated=item.updated_at,
@@ -273,37 +282,34 @@ def create_app(
         for summary in projects:
             if summary.project in seen or summary.status != "ready":
                 continue
-            try:
-                detail = catalog.get_project(summary.project)
-            except CatalogError as error:
-                raise HTTPException(status_code=502, detail=str(error)) from error
-            if detail is None or detail.status != "ready":
-                continue
             stamp = summary.created_at or ""
             dated.append(
-                (stamp, _activity_job(detail, phase="ready", running=False, updated=stamp))
+                (stamp, _activity_job(summary, phase="ready", running=False, updated=stamp))
             )
         dated.sort(key=lambda pair: pair[0], reverse=True)
-        available = cloud_target(request.headers.get("x-film-worker-url")) is not None
-        return {**_run_payload(catalog, slots, available), "jobs": [job for _, job in dated]}
+        return {**_run_payload(catalog, slots, request), "jobs": [job for _, job in dated]}
+
+    @app.get("/api/settings")
+    def read_settings(request: Request) -> dict[str, object]:
+        return _run_payload(catalog, slots, request)
 
     @app.post("/api/settings")
     def update_settings(body: _WorkerSetting, request: Request) -> dict[str, object]:
-        available = cloud_target(request.headers.get("x-film-worker-url")) is not None
-        if body.place == "cloud" and not available:
-            raise HTTPException(
-                status_code=400,
-                detail="Cloud workers are not set up on this server.",
+        here = _request_place(request)
+        if body.place is not None and body.place != here:
+            detail = (
+                "Open the Cloudflare site to run jobs there."
+                if body.place == "cloud"
+                else "Local runs on your computer. This site runs on Cloudflare."
             )
+            raise HTTPException(status_code=400, detail=detail)
         try:
             if body.workers is not None:
                 catalog.set_worker_count(body.workers)
                 slots.set(body.workers)
-            if body.place is not None:
-                catalog.set_job_place(body.place)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
-        return _run_payload(catalog, slots, available)
+        return _run_payload(catalog, slots, request)
 
     @app.get("/api/projects/{project_id}")
     def project(project_id: int) -> dict[str, object]:
@@ -478,8 +484,11 @@ def create_app(
                     "project": project_id,
                     "film": f"/projects/{project_id}",
                 }
-            family, play_type = _stored_play_label(choice.play_type)
-            catalog.set_play_type(project_id, play_number, play_type, family)
+            if choice.play_type is not None:
+                family, play_type = _stored_play_label(choice.play_type)
+                catalog.set_play_type(project_id, play_number, play_type, family)
+            elif choice.reviewed is not None:
+                catalog.set_reviewed(project_id, play_number, choice.reviewed)
             saved = catalog.get_project(project_id)
         except CatalogError as error:
             status = 404 if str(error) == "That play is no longer available." else 502
@@ -650,12 +659,26 @@ def _note(
 ) -> None:
     with lock:
         activity[project_id] = phase
-    _save_activity(catalog, project_id, phase, running=True)
+    _save_activity(catalog, project_id, phase, running=True, stack="local")
 
 
-def _save_activity(catalog: Catalog, project_id: int, phase: str, *, running: bool) -> None:
+def _save_activity(
+    catalog: Catalog,
+    project_id: int,
+    phase: str,
+    *,
+    running: bool,
+    stack: str | None = None,
+    workers: int | None = None,
+) -> None:
     try:
-        catalog.record_activity(project_id, phase, running=running)
+        catalog.record_activity(
+            project_id,
+            phase,
+            running=running,
+            stack=stack,
+            workers=workers,
+        )
     except CatalogError:
         return
 
@@ -832,21 +855,13 @@ def _can_resume_scan(catalog: Catalog, project_id: int, probe: _Duration) -> boo
 
 
 def _download_reporter(catalog: Catalog, project_id: int) -> Callable[[int, int | None], None]:
-    last = 0.0
-
-    def report(done: int, total: int | None) -> None:
-        nonlocal last
-        now = time.monotonic()
-        finished = total is not None and total > 0 and done >= total
-        if not finished and now - last < 0.4:
-            return
-        last = now
+    def send(done: int, total: int | None) -> None:
         try:
             catalog.set_download(project_id, done, total)
         except CatalogError:
             return
 
-    return report
+    return detach_progress(send)
 
 
 def _fetch(
@@ -909,41 +924,31 @@ def _progress(
 _INTERRUPTED = "The server stopped while this was running."
 
 
+def _request_place(request: Request) -> str:
+    """Cloud is the public site. Local is this computer, and only this computer."""
+
+    return "cloud" if request.headers.get("x-film-delegate") == "1" else "local"
+
+
 def _cloud_choice(request: Request, catalog: Catalog) -> tuple[str, str] | None:
-    """The worker target when this film should run in the cloud."""
+    """Set when the browser called the Cloudflare worker, so the cutter should start."""
 
-    target = cloud_target(request.headers.get("x-film-worker-url"))
-    if _job_place(catalog, target is not None) != "cloud":
+    del catalog
+    if _request_place(request) != "cloud":
         return None
-    if target is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Cloud workers are not set up on this server.",
-        )
-    return target
+    return cloud_target(request.headers.get("x-film-worker-url")) or ("", "")
 
 
-def _job_place(catalog: Catalog, cloud_available: bool) -> str:
-    """Where the next job runs. Cloud is the default only when it is set up."""
-
-    try:
-        saved = catalog.job_place()
-    except CatalogError:
-        saved = None
-    if saved in {"local", "cloud"}:
-        return saved
-    return "cloud" if cloud_available else "local"
-
-
-def _run_payload(catalog: Catalog, slots: WorkerLimit, cloud_available: bool) -> dict[str, object]:
+def _run_payload(catalog: Catalog, slots: WorkerLimit, request: Request) -> dict[str, object]:
+    place = _request_place(request)
     try:
         workers = catalog.worker_count()
     except CatalogError:
         workers = slots.get()
     return {
         "workers": workers,
-        "place": _job_place(catalog, cloud_available),
-        "cloud": cloud_available,
+        "place": place,
+        "cloud": place == "cloud",
     }
 
 
@@ -962,27 +967,24 @@ def _dispatch_cloud(
     cloud: tuple[str, str],
     slots: WorkerLimit,
 ) -> JSONResponse | dict[str, object]:
-    """Start the cutter. Behind the public worker, the worker does the call."""
+    """Tell the Cloudflare worker to start the cutter for this film."""
 
+    del cloud
     workers = _chosen_workers(catalog, slots)
-    if request.headers.get("x-film-delegate") == "1":
-        return _delegate(catalog, project_id, youtube, workers)
-    worker, token = cloud
-    try:
-        start_remote(worker, token, project_id, youtube, workers)
-    except CatalogError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    _save_activity(catalog, project_id, "starting", running=True)
-    detail = catalog.get_project(project_id)
-    if detail is None:
-        raise HTTPException(status_code=502, detail="Could not save that analysis.")
-    return _project_payload(detail, running=True)
+    return _delegate(catalog, project_id, youtube, workers)
 
 
 def _delegate(catalog: Catalog, project_id: int, youtube: str | None, workers: int) -> JSONResponse:
     """Tell the Worker to start the cutter. The website does not call it itself."""
 
-    _save_activity(catalog, project_id, "starting", running=True)
+    _save_activity(
+        catalog,
+        project_id,
+        "starting",
+        running=True,
+        stack="cloud",
+        workers=workers,
+    )
     detail = catalog.get_project(project_id)
     if detail is None:
         raise HTTPException(status_code=502, detail="Could not save that analysis.")
@@ -1189,13 +1191,16 @@ def _activity_state(phase: str, running: bool, active: bool) -> tuple[str, bool]
 
 
 def _activity_job(
-    project: ProjectDetail,
+    project: ProjectDetail | ProjectSummary,
     *,
     phase: str,
     running: bool,
     updated: str,
     steps: tuple[ActivityStep, ...] = (),
 ) -> dict[str, object]:
+    play_count = (
+        project.play_count if isinstance(project, ProjectSummary) else len(project.plays)
+    )
     return {
         "project": project.project,
         "name": project.name,
@@ -1208,7 +1213,7 @@ def _activity_job(
         "duration": project.duration_seconds,
         "error": project.error,
         "youtube": project.youtube_url is not None,
-        "play_count": len(project.plays),
+        "play_count": play_count,
         "updated": updated,
         "steps": _step_times(steps),
     }
@@ -1247,6 +1252,7 @@ def _play_summary(project_id: int, play: PlayRecord) -> dict[str, object]:
         "end": play.end_seconds,
         "family": play.family,
         "play_type": play.play_type,
+        "reviewed": play.reviewed,
         "video": f"/projects/{project_id}/plays/{play.play_number}",
     }
 
@@ -1276,6 +1282,14 @@ def _play_payload(project: ProjectDetail, play_number: int) -> dict[str, object]
             else _play_uid(project.project, previous_play.play_number)
         ),
         "next": None if next_play is None else _play_uid(project.project, next_play.play_number),
+        "tracker": [
+            {
+                "uid": _play_uid(project.project, item.play_number),
+                "position": place,
+                "reviewed": item.reviewed,
+            }
+            for place, item in enumerate(ordered, start=1)
+        ],
     }
 
 
@@ -1303,6 +1317,8 @@ def _step_times(steps: tuple[ActivityStep, ...]) -> list[dict[str, object]]:
                 "name": step.name,
                 "seconds": round(seconds, 1),
                 "running": step.ended_at is None,
+                "stack": step.stack,
+                "workers": step.workers,
             }
         )
     return timed

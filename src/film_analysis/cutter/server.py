@@ -145,9 +145,22 @@ def _label_task(
         )
 
 
-def _mark(catalog: Catalog, project_id: int, phase: str, *, running: bool = True) -> None:
+def _mark(
+    catalog: Catalog,
+    project_id: int,
+    phase: str,
+    *,
+    running: bool = True,
+    workers: int | None = None,
+) -> None:
     try:
-        catalog.record_activity(project_id, phase, running=running)
+        catalog.record_activity(
+            project_id,
+            phase,
+            running=running,
+            stack="cloud" if running else None,
+            workers=workers if running else None,
+        )
     except CatalogError:
         return
 
@@ -182,7 +195,7 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
     )
     watcher.start()
     try:
-        _mark(catalog, project_id, "scanning")
+        _mark(catalog, project_id, "scanning", workers=slots.get())
         _progress(catalog, project_id, "scanning", duration, 0.0, None)
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             jobs = [
@@ -232,7 +245,7 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
 
         spans = [span for group in collected.values() for span in group]
         if review_ranges(spans):
-            _mark(catalog, project_id, "checking")
+            _mark(catalog, project_id, "checking", workers=slots.get())
         _review(catalog, body, token, spans, kept, published, play_number, slots)
         _progress(catalog, project_id, "ready", duration, duration, None)
         _mark(catalog, project_id, "ready", running=False)

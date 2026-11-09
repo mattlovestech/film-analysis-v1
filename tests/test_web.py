@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError, tool_failure
 from film_analysis.agents.segments import FilmSpan, PlaySegment
 from film_analysis.agents.youtube import FilmInfo
-from film_analysis.storage.catalog import MemoryCatalog
+from film_analysis.storage.catalog import MemoryCatalog, decode_activity_steps
 from film_analysis.web.app import create_app
 
 
@@ -104,6 +104,11 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="project-filters"' in response.text
     assert 'id="refresh-analyses"' in response.text
     assert 'href="/activity"' in response.text
+    assert 'href="/settings"' in response.text
+    assert ">Settings<" in response.text
+    assert 'id="settings"' in response.text
+    assert "How a film becomes plays" in response.text
+    assert "Charting a play comes later, after its clip is final." in response.text
     assert 'id="activity-loading"' in response.text
     assert "Checking the server" in response.text
     assert "Looking up films that are running or stopped." in response.text
@@ -113,12 +118,20 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="place-local"' in response.text
     assert 'id="place-cloud"' in response.text
     assert "Where jobs run" in response.text
-    assert "More workers read a film faster." in response.text
+    assert "Jobs run on this computer." in response.text
+    assert "Requests go to Cloudflare." in response.text
+    assert "Cloud · 1 worker" in response.text
     library = client.get("/projects")
     assert library.status_code == 200
     assert ">Projects<" in library.text
     assert client.get("/analyses").status_code == 200
     assert client.get("/activity").status_code == 200
+    assert client.get("/settings").status_code == 200
+    assert client.get("/api/settings").json() == {
+        "workers": 4,
+        "place": "local",
+        "cloud": False,
+    }
     assert client.get("/api/activity").json() == {
         "workers": 4,
         "place": "local",
@@ -140,8 +153,12 @@ def test_page_offers_a_video_upload() -> None:
     assert 'project.error || "Could not read that film."' in response.text
     assert "The server stopped while this was running." in response.text
     assert 'createElement("video")' in response.text
+    assert "video.muted = true" in response.text
+    assert 'id="play-video" controls playsinline preload="metadata" muted' in response.text
     assert "View play" in response.text
     assert 'id="play-details"' in response.text
+    assert 'id="play-tracker"' in response.text
+    assert "Mark reviewed" in response.text
     assert "/api/plays/" in response.text
 
 
@@ -176,6 +193,7 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
             "end": 2.0,
             "family": "scrimmage",
             "play_type": None,
+            "reviewed": False,
             "video": "/projects/1/plays/1",
         }
     ]
@@ -471,16 +489,13 @@ def test_jobs_can_run_locally_or_in_the_cloud(
         )
     )
 
-    assert client.get("/api/activity", headers=headers).json()["place"] == "cloud"
-    assert client.get("/api/activity", headers=headers).json()["cloud"] is True
-    chosen = client.post("/api/settings", json={"place": "local"}, headers=headers)
-    assert chosen.json()["place"] == "local"
-    calls: list[tuple[object, ...]] = []
-
-    def remember(*args: object) -> None:
-        calls.append(args)
-
-    monkeypatch.setattr("film_analysis.web.app.start_remote", remember)
+    assert client.get("/api/activity", headers=headers).json()["place"] == "local"
+    assert client.get("/api/activity", headers=headers).json()["cloud"] is False
+    cloud_headers = {**headers, "x-film-delegate": "1"}
+    assert client.get("/api/activity", headers=cloud_headers).json()["place"] == "cloud"
+    assert client.get("/api/activity", headers=cloud_headers).json()["cloud"] is True
+    refused = client.post("/api/settings", json={"place": "cloud"}, headers=headers)
+    assert refused.status_code == 400
     local = client.post(
         "/analyze",
         data={"youtube": "https://youtu.be/abcdefghijk"},
@@ -488,29 +503,37 @@ def test_jobs_can_run_locally_or_in_the_cloud(
     )
     assert local.status_code == 200
     assert "x-film-start" not in local.headers
-    assert calls == []
-    assert _settle(client, local.json()["project"])["status"] == "ready"
+    local_film = _settle(client, local.json()["project"])
+    assert local_film["status"] == "ready"
+    assert local_film["steps"]
+    assert {step["stack"] for step in local_film["steps"]} == {"local"}
 
-    client.post("/api/settings", json={"place": "cloud", "workers": 6}, headers=headers)
+    client.post("/api/settings", json={"workers": 6}, headers=cloud_headers)
     handed = client.post(
         "/analyze",
         data={"youtube": "https://youtu.be/abcdefghijk"},
-        headers={**headers, "x-film-delegate": "1"},
+        headers=cloud_headers,
     )
     assert handed.status_code == 200
     assert handed.headers["x-film-start"] == str(handed.json()["project"])
     assert handed.headers["x-film-workers"] == "6"
-    assert calls == []
+    cloud_job = next(
+        job
+        for job in client.get("/api/activity", headers=headers).json()["jobs"]
+        if job["project"] == handed.json()["project"]
+    )
+    starting = next(step for step in cloud_job["steps"] if step["name"] == "starting")
+    assert starting["stack"] == "cloud"
+    assert starting["workers"] == 6
     assert client.get(f"/api/projects/{handed.json()['project']}").json()["status"] == "downloading"
 
     direct = client.post(
         "/analyze",
         files={"video": ("clip.mp4", b"fake-video", "video/mp4")},
-        headers=headers,
+        headers=cloud_headers,
     )
     assert direct.status_code == 200
-    assert "x-film-start" not in direct.headers
-    assert calls == [("https://film.example", "secret", direct.json()["project"], None, 6)]
+    assert direct.headers["x-film-start"] == str(direct.json()["project"])
 
 
 def _saved_download(url: str, directory: Path) -> Path:
@@ -538,6 +561,7 @@ def test_worker_setting_is_saved_and_reported(tmp_path: Path) -> None:
     assert client.post("/api/settings", json={"place": "lab"}).status_code == 422
     blocked = client.post("/api/settings", json={"place": "cloud"})
     assert blocked.status_code == 400
+    assert "Cloudflare" in blocked.json()["detail"]
     assert store.job_place() is None
 
 
@@ -689,6 +713,53 @@ def test_activity_times_each_step(tmp_path: Path) -> None:
         "scanning",
         "checking",
     ]
+    assert steps["downloading"]["stack"] is None
+
+
+def test_a_step_keeps_the_stack_that_started_it(tmp_path: Path) -> None:
+    store = MemoryCatalog(tmp_path)
+    project_id = store.create_project("Week 6", "https://youtu.be/abcdefghijk")
+    store.record_activity(
+        project_id,
+        "downloading",
+        running=True,
+        stack="cloud",
+        updated_at="2026-11-09T05:00:00+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "downloading",
+        running=True,
+        stack="local",
+        updated_at="2026-11-09T05:00:30+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "scanning",
+        running=True,
+        stack="cloud",
+        workers=8,
+        updated_at="2026-11-09T05:01:00+00:00",
+    )
+    store.record_activity(
+        project_id,
+        "ready",
+        running=False,
+        updated_at="2026-11-09T05:04:00+00:00",
+    )
+    client = TestClient(create_app(agent=_Agent(), store=store))
+    job = client.get("/api/activity").json()["jobs"][0]
+    saved = {step["name"]: step for step in job["steps"]}
+
+    assert saved["downloading"]["stack"] == "cloud"
+    assert saved["downloading"]["workers"] is None
+    assert saved["scanning"]["stack"] == "cloud"
+    assert saved["scanning"]["workers"] == 8
+    legacy = decode_activity_steps(
+        '[{"name":"downloading","started":"2026-11-09T05:00:00+00:00","ended":null}]'
+    )
+    assert legacy[0].stack is None
+    assert legacy[0].workers is None
 
 
 def test_activity_shows_the_error_that_stopped_a_job(tmp_path: Path) -> None:
@@ -1264,6 +1335,7 @@ def test_play_page_shows_one_play_and_its_neighbors(tmp_path: Path) -> None:
         "end": 46.0,
         "family": "special_teams",
         "play_type": None,
+        "reviewed": False,
         "video": "/projects/1/plays/2",
         "project": 1,
         "name": "Pike County vs Lamar",
@@ -1273,6 +1345,10 @@ def test_play_page_shows_one_play_and_its_neighbors(tmp_path: Path) -> None:
         "film": "/projects/1",
         "previous": "1-1",
         "next": None,
+        "tracker": [
+            {"uid": "1-1", "position": 1, "reviewed": False},
+            {"uid": "1-2", "position": 2, "reviewed": False},
+        ],
     }
     assert client.get("/projects/1/plays/2").content == b"second-play"
     assert client.get("/api/plays/1-9").status_code == 404
@@ -1298,6 +1374,16 @@ def test_a_play_can_be_relabeled_or_dropped(tmp_path: Path) -> None:
     assert punt.status_code == 200
     assert punt.json()["play_type"] == "punt"
     assert punt.json()["family"] == "special_teams"
+    assert punt.json()["reviewed"] is True
+    assert punt.json()["tracker"][0]["reviewed"] is True
+
+    marked = client.post("/api/plays/1-2", json={"reviewed": True})
+    assert marked.status_code == 200
+    assert marked.json()["reviewed"] is True
+    assert marked.json()["play_type"] is None
+    cleared = client.post("/api/plays/1-2", json={"reviewed": False})
+    assert cleared.status_code == 200
+    assert cleared.json()["reviewed"] is False
 
     coarse = client.post("/api/plays/1-2", json={"play_type": "scrimmage"})
     assert coarse.status_code == 200

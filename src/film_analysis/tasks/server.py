@@ -3,7 +3,6 @@
 import os
 import shutil
 import tempfile
-import time
 import urllib.request
 from pathlib import Path
 
@@ -14,7 +13,7 @@ from film_analysis.agents.errors import VideoAnalysisError
 from film_analysis.agents.frames import video_duration
 from film_analysis.agents.play_boundaries import agent_from_env
 from film_analysis.agents.segments import FilmSpan
-from film_analysis.agents.youtube import download_youtube, youtube_details
+from film_analysis.agents.youtube import detach_progress, download_youtube, youtube_details
 from film_analysis.storage.catalog import Catalog, CatalogError, catalog_from_env
 from film_analysis.storage.r2 import source_url
 from film_analysis.tasks.media import cut_url, extract_window_url
@@ -131,21 +130,13 @@ def _download_source(project_id: int, directory: Path) -> Path:
 
 
 def _download_progress(catalog: Catalog, project_id: int):
-    last = 0.0
-
-    def report(done: int, total: int | None) -> None:
-        nonlocal last
-        now = time.monotonic()
-        finished = total is not None and total > 0 and done >= total
-        if not finished and now - last < 0.4:
-            return
-        last = now
+    def send(done: int, total: int | None) -> None:
         try:
             catalog.set_download(project_id, done, total)
         except CatalogError:
             return
 
-    return report
+    return detach_progress(send)
 
 
 def _span_payload(span: FilmSpan) -> dict[str, object]:

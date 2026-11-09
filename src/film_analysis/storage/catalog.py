@@ -26,6 +26,8 @@ class ActivityStep:
     name: str
     started_at: str
     ended_at: str | None = None
+    stack: str | None = None
+    workers: int | None = None
 
 
 @dataclass(frozen=True)
@@ -45,8 +47,14 @@ def advance_activity_steps(
     *,
     running: bool,
     now: str,
+    stack: str | None = None,
+    workers: int | None = None,
 ) -> tuple[ActivityStep, ...]:
-    """Close the open step, then start `phase` when it is a step we time."""
+    """Close the open step, then start `phase` when it is a step we time.
+
+    The stack is the one that started the step. A later update of the same
+    open step keeps that stack.
+    """
 
     if (
         running
@@ -59,20 +67,26 @@ def advance_activity_steps(
     closed = _close_open_step(steps, now)
     if not running or phase not in _TIMED_PHASES:
         return closed
-    return (*closed, ActivityStep(phase, now))
+    return (*closed, ActivityStep(phase, now, stack=stack, workers=workers))
 
 
 def _close_open_step(steps: tuple[ActivityStep, ...], now: str) -> tuple[ActivityStep, ...]:
     if not steps or steps[-1].ended_at is not None:
         return steps
     last = steps[-1]
-    return (*steps[:-1], ActivityStep(last.name, last.started_at, now))
+    return (*steps[:-1], replace(last, ended_at=now))
 
 
 def encode_activity_steps(steps: tuple[ActivityStep, ...]) -> str:
     return json.dumps(
         [
-            {"name": step.name, "started": step.started_at, "ended": step.ended_at}
+            {
+                "name": step.name,
+                "started": step.started_at,
+                "ended": step.ended_at,
+                "stack": step.stack,
+                "workers": step.workers,
+            }
             for step in steps
         ],
         separators=(",", ":"),
@@ -97,8 +111,23 @@ def decode_activity_steps(raw: object) -> tuple[ActivityStep, ...]:
         if not isinstance(name, str) or not isinstance(started, str):
             continue
         ended = item.get("ended")
-        steps.append(ActivityStep(name, started, ended if isinstance(ended, str) else None))
+        stack = item.get("stack")
+        steps.append(
+            ActivityStep(
+                name,
+                started,
+                ended if isinstance(ended, str) else None,
+                stack if stack in {"local", "cloud"} else None,
+                _step_workers(item.get("workers")),
+            )
+        )
     return tuple(steps)
+
+
+def _step_workers(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
 
 
 def _activity_row(row: dict[str, object]) -> ActivityRecord:
@@ -134,6 +163,7 @@ class PlayRecord:
     end_seconds: float
     family: str = "scrimmage"
     play_type: str | None = None
+    reviewed: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,8 +202,14 @@ class Catalog(Protocol):
         *,
         running: bool,
         updated_at: str | None = None,
+        stack: str | None = None,
+        workers: int | None = None,
     ) -> None:
-        """Remember the phase Activity should show for this film."""
+        """Remember the phase Activity should show for this film.
+
+        `stack` is local or cloud, for the step that is starting. `workers` is
+        how many cloud labelers that step started with.
+        """
 
         ...
 
@@ -259,6 +295,9 @@ class Catalog(Protocol):
         family: str,
     ) -> None:
         """Relabel one kept play. `play_type` is empty when only the family changes."""
+
+    def set_reviewed(self, project_id: int, play_number: int, reviewed: bool) -> None:
+        """Remember whether this play has been checked."""
 
     def drop_play(self, project_id: int, play_number: int) -> None:
         """Remove a play the user has marked as not a play."""
@@ -362,12 +401,21 @@ class MemoryCatalog:
         *,
         running: bool,
         updated_at: str | None = None,
+        stack: str | None = None,
+        workers: int | None = None,
     ) -> None:
         stamp = updated_at or datetime.now(UTC).isoformat()
         with self._lock:
             current = self._activity.get(project_id)
             previous = () if current is None else current.steps
-            steps = advance_activity_steps(previous, phase, running=running, now=stamp)
+            steps = advance_activity_steps(
+                previous,
+                phase,
+                running=running,
+                now=stamp,
+                stack=stack,
+                workers=workers,
+            )
             self._activity[project_id] = ActivityRecord(project_id, phase, running, stamp, steps)
 
     def list_activity(self) -> list[ActivityRecord]:
@@ -582,6 +630,14 @@ class MemoryCatalog:
                 raise CatalogError("That play is no longer available.")
             self._replace(project_id, replace(current, plays=updated))
 
+    def set_reviewed(self, project_id: int, play_number: int, reviewed: bool) -> None:
+        with self._lock:
+            current = self._require(project_id)
+            updated = _mark_reviewed(current.plays, play_number, reviewed)
+            if updated is None:
+                raise CatalogError("That play is no longer available.")
+            self._replace(project_id, replace(current, plays=updated))
+
     def drop_play(self, project_id: int, play_number: int) -> None:
         with self._lock:
             current = self._require(project_id)
@@ -732,7 +788,7 @@ class D1Catalog:
         project = rows[0]
         plays = self._query(
             """
-            select play_number, start_seconds, end_seconds, family, play_type
+            select play_number, start_seconds, end_seconds, family, play_type, reviewed
             from plays
             where project_id = ?
             order by play_number
@@ -788,6 +844,8 @@ class D1Catalog:
         *,
         running: bool,
         updated_at: str | None = None,
+        stack: str | None = None,
+        workers: int | None = None,
     ) -> None:
         stamp = updated_at or datetime.now(UTC).isoformat()
         steps = advance_activity_steps(
@@ -795,6 +853,8 @@ class D1Catalog:
             phase,
             running=running,
             now=stamp,
+            stack=stack,
+            workers=workers,
         )
         self._execute(
             """
@@ -972,10 +1032,22 @@ class D1Catalog:
         result = self._execute(
             """
             update plays
-            set family = ?, play_type = ?
+            set family = ?, play_type = ?, reviewed = 1
             where project_id = ? and play_number = ?
             """,
             [family, play_type, project_id, play_number],
+        )
+        if not _changed(result):
+            raise CatalogError("That play is no longer available.")
+
+    def set_reviewed(self, project_id: int, play_number: int, reviewed: bool) -> None:
+        result = self._execute(
+            """
+            update plays
+            set reviewed = ?
+            where project_id = ? and play_number = ?
+            """,
+            [1 if reviewed else 0, project_id, play_number],
         )
         if not _changed(result):
             raise CatalogError("That play is no longer available.")
@@ -1093,6 +1165,7 @@ class D1Catalog:
             "alter table projects add column total_bytes integer",
             "alter table plays add column family text not null default 'scrimmage'",
             "alter table plays add column play_type text",
+            "alter table plays add column reviewed integer not null default 0",
             """
             create table if not exists spans (
                 project_id integer not null,
@@ -1176,6 +1249,7 @@ def _play_record(play: dict[str, object]) -> PlayRecord:
         float(play["end_seconds"]),
         str(play.get("family") or "scrimmage"),
         _optional_text(play.get("play_type")),
+        reviewed=bool(play.get("reviewed")),
     )
 
 
@@ -1190,7 +1264,25 @@ def _retitle(
     for play in plays:
         if play.play_number == play_number:
             found = True
-            updated.append(replace(play, family=family, play_type=play_type))
+            updated.append(replace(play, family=family, play_type=play_type, reviewed=True))
+        else:
+            updated.append(play)
+    if not found:
+        return None
+    return tuple(updated)
+
+
+def _mark_reviewed(
+    plays: tuple[PlayRecord, ...],
+    play_number: int,
+    reviewed: bool,
+) -> tuple[PlayRecord, ...] | None:
+    found = False
+    updated: list[PlayRecord] = []
+    for play in plays:
+        if play.play_number == play_number:
+            found = True
+            updated.append(replace(play, reviewed=reviewed))
         else:
             updated.append(play)
     if not found:

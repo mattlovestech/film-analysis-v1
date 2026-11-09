@@ -1,4 +1,5 @@
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -6,12 +7,14 @@ import pytest
 
 from film_analysis.agents.youtube import (
     _PART_FLOOR,
+    _PARTS,
     FilmInfo,
     _hook,
     _part_bounds,
     _save_url,
     _select_stream,
     canonical_youtube_url,
+    detach_progress,
     film_info,
 )
 
@@ -142,10 +145,25 @@ def test_a_large_stream_is_fetched_in_parts(tmp_path: Path) -> None:
         server.shutdown()
 
     assert dest.read_bytes() == body
-    assert len(_part_bounds(len(body))) == 4
+    assert len(_part_bounds(len(body))) == _PARTS
 
 
-def test_download_hook_reads_byte_counts() -> None:
+def test_progress_does_not_wait_on_a_slow_save() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def send(done: int, total: int | None) -> None:
+        del done, total
+        started.set()
+        assert release.wait(timeout=2)
+
+    report = detach_progress(send, interval=0)
+    began = time.monotonic()
+    report(10, 100)
+
+    assert started.wait(timeout=1)
+    assert time.monotonic() - began < 0.5
+    release.set()
     seen: list[tuple[int, int | None]] = []
     _hook(lambda done, total: seen.append((done, total)))(
         {"status": "downloading", "downloaded_bytes": 10, "total_bytes_estimate": 40}

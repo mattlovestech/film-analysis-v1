@@ -1,4 +1,7 @@
-"""Hand a film to the Cloudflare cutter instead of processing it in the website."""
+"""The public site asks the Cloudflare worker to start a cutter.
+
+Localhost never uses this. A film opened on this computer runs in the local process.
+"""
 
 import json
 import os
