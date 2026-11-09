@@ -198,7 +198,8 @@ def test_page_offers_a_video_upload() -> None:
     assert 'id="report-options"' not in response.text
     assert "Play tendency table" not in response.text
     assert "Choose at least one part of the report." not in response.text
-    assert 'const REPORT_SECTIONS = ["tendencies", "calls", "special", "plays", "formations"]' in response.text
+    sections = '["tendencies", "calls", "special", "plays", "formations"]'
+    assert f"const REPORT_SECTIONS = {sections}" in response.text
     assert 'id="report-view"' in response.text
     assert 'id="report-analysis-table"' in response.text
     assert "Scouting analysis" in response.text

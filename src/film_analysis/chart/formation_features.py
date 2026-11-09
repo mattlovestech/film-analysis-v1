@@ -190,7 +190,7 @@ def _oline_anchor(points: Sequence[tuple[float, float]]) -> tuple[float, float]:
     ordered = sorted(points, key=lambda point: point[1])
     # Prefer the densest band of ~5 players across width — the line of scrimmage.
     best: tuple[float, list[tuple[float, float]]] | None = None
-    for index, (_x, y) in enumerate(ordered):
+    for _x, y in ordered:
         band = [point for point in ordered if abs(point[1] - y) <= 0.06]
         if len(band) < 3:
             continue

@@ -33,6 +33,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from pydantic import BaseModel, Field, field_validator, model_validator
+from starlette.background import BackgroundTask
 
 from film_analysis.chart.call import SPECIAL_CALLS, ChartedPlay, chart_play
 from film_analysis.chart.formation import (
@@ -2465,9 +2466,9 @@ def _remove_temp(path: Path) -> None:
 def _pack_play_clips(catalog: Catalog, project: ProjectDetail, plays: list[PlayRecord]) -> Path:
     """Write kept clips and a small sheet into one zip file."""
 
-    handle = tempfile.NamedTemporaryFile(prefix="plays-", suffix=".zip", delete=False)
-    packed = Path(handle.name)
-    handle.close()
+    descriptor, name = tempfile.mkstemp(prefix="plays-", suffix=".zip")
+    os.close(descriptor)
+    packed = Path(name)
     sheet = io.StringIO()
     writer = csv.writer(sheet)
     writer.writerow(["play", "start", "end", "family", "call", "unit", "formation", "file"])
@@ -3187,7 +3188,7 @@ def _analyze_report_play(
             )
         detail = ""
         status = "ready" if learned else "missed"
-        if learned and want_formation and phase in {"all", "formation"}:
+        if learned and "formations" in chosen and phase in {"all", "formation"}:
             call = (latest.play_type or "").strip().lower()
             if (
                 latest.family != "special_teams"
@@ -3206,7 +3207,8 @@ def _analyze_report_play(
                 call=latest.play_type or "",
                 side=latest.unit or "",
                 formation=latest.formation or "",
-                input_tokens=incoming + (prior.input_tokens if prior and phase == "formation" else 0),
+                input_tokens=incoming
+                + (prior.input_tokens if prior and phase == "formation" else 0),
                 output_tokens=outgoing
                 + (prior.output_tokens if prior and phase == "formation" else 0),
                 cost_usd=cost,

@@ -104,10 +104,7 @@ def normalize_to_los(
         if mirror:
             dy = -dy
         # Diagram: LOS at 0.5; offense deeper = larger y; defense = smaller y.
-        if offense_side:
-            out_y = 0.5 + abs(dy) * 0.9
-        else:
-            out_y = 0.5 - abs(dy) * 0.9
+        out_y = 0.5 + abs(dy) * 0.9 if offense_side else 0.5 - abs(dy) * 0.9
         return _clamp(0.5 + dx), _clamp(out_y)
 
     return (
