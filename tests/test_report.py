@@ -50,21 +50,15 @@ def test_a_scrimmage_play_without_a_side_is_still_open() -> None:
     assert untagged_plays(plays) == 1
 
 
-def test_the_pdf_waits_until_every_play_is_tagged(tmp_path: Path) -> None:
+def test_the_pdf_is_ready_after_the_team_is_labeled(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
-    store.set_film_teams(1, FilmTeams("North", "South", "left"))
     client = TestClient(create_app(store=store))
 
     waiting = client.get("/api/projects/1/report.pdf")
     assert waiting.status_code == 400
-    assert "Tag 2 plays" in waiting.json()["detail"]
+    assert "Label your team" in waiting.json()["detail"]
 
-    offense = client.post("/api/plays/1-1", json={"unit": "offense"})
-    assert offense.status_code == 200
-    assert offense.json()["unit"] == "offense"
-
-    client.post("/api/plays/1-2", json={"play_type": "pass"})
-    client.post("/api/plays/1-2", json={"unit": "defense"})
+    store.set_film_teams(1, FilmTeams("North", "South", "left"))
     report = client.get("/api/projects/1/report.pdf")
 
     assert report.status_code == 200
@@ -73,7 +67,7 @@ def test_the_pdf_waits_until_every_play_is_tagged(tmp_path: Path) -> None:
     assert report.content.startswith(b"%PDF")
     assert b"North" in report.content
     assert b"Run" in report.content
-    assert b"Pass" in report.content
+    assert b"Scrimmage" in report.content
 
 
 def test_special_teams_do_not_block_the_report(tmp_path: Path) -> None:
@@ -82,6 +76,7 @@ def test_special_teams_do_not_block_the_report(tmp_path: Path) -> None:
     clip.write_bytes(b"clip")
     store.add_play(1, 3, 30.0, 36.0, clip, "special_teams")
     store.set_play_type(1, 3, "kickoff", "special_teams")
+    store.set_film_teams(1, FilmTeams("North", "South", "left"))
     store.set_play_unit(1, 1, "offense")
     store.set_play_unit(1, 2, "defense")
     client = TestClient(create_app(store=store))

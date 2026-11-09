@@ -391,7 +391,33 @@
       background: conic-gradient(from -90deg, var(--gold) var(--pct, 0%), #2c2c2e 0);
       flex: none;
     }
-    #activity-list { margin: 0.7rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.45rem; }
+    #activity-charts {
+      display: grid;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+    #activity-charts[hidden] { display: none; }
+    #activity-charts figure { margin: 0; }
+    #activity-charts figcaption {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.3rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 650;
+    }
+    #activity-charts figcaption strong {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    #activity-charts svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--surface);
+      border-radius: var(--radius);
+    }
     #activity-list a {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -1171,7 +1197,16 @@
         </div>
         <div id="activity-loading" class="pie unknown" role="status" aria-label="Loading activity"></div>
       </div>
-      <ol id="activity-legend" class="stages" aria-label="Film steps">
+      <div id="activity-charts" hidden>
+        <figure>
+          <figcaption>Total time <strong id="chart-time-value"></strong></figcaption>
+          <svg id="chart-time" viewBox="0 0 320 128" role="img" aria-label="Total processing time over time"></svg>
+        </figure>
+        <figure>
+          <figcaption>Reading plays per minute <strong id="chart-plays-value"></strong></figcaption>
+          <svg id="chart-plays" viewBox="0 0 320 128" role="img" aria-label="Plays read per minute over time"></svg>
+        </figure>
+      </div>
         <li>Start</li>
         <li>Download</li>
         <li>Save</li>
