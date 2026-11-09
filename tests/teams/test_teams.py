@@ -760,7 +760,9 @@ def test_team_build_reports_loading_telemetry(
     assert progress["sides"]["left"]["status"] in {"saved", "kept", "found", "ready"}
     assert progress["sides"]["right"]["status"] in {"saved", "kept", "found", "ready"}
     assert progress["events"]
-    assert any("Saved" in row["text"] or "ready" in row["text"].lower() for row in progress["events"])
+    assert any(
+        "Saved" in row["text"] or "ready" in row["text"].lower() for row in progress["events"]
+    )
 
 
 def test_teams_wait_until_plays_are_identified(tmp_path: Path) -> None:

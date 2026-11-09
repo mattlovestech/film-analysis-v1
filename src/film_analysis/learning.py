@@ -24,7 +24,8 @@ Edits:
 Rules:
 - Keep a note only when the edits support it. Drop a note the edits contradict.
 - Say how a play should be cut when an edit moved the start or the end.
-- Say how a play should be tagged when an edit changed offense, defense, run, pass, special teams, or not a play.
+- Say how a play should be tagged when an edit changed offense, defense, run, pass,
+  special teams, or not a play.
 - Stay under 900 characters.
 - Do not explain. The whole reply is one JSON object: {{"guidance":"..."}}
 """.strip()
@@ -60,7 +61,8 @@ def learn_prompt(guidance: str, edits: Sequence[CoachEdit]) -> str:
     """The request that turns coach corrections into notes for the next read."""
 
     lines = [
-        f"- {edit.film}, play {edit.play_number or '?'}: {edit.action}. Was: {edit.before} Now: {edit.after}."
+        f"- {edit.film}, play {edit.play_number or '?'}: {edit.action}. "
+        f"Was: {edit.before} Now: {edit.after}."
         for edit in edits
     ]
     current = guidance.strip() or "No notes yet."

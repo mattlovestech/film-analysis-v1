@@ -730,7 +730,10 @@ def create_app(
         if switching and _running(running, running_lock, project_id):
             raise HTTPException(
                 status_code=409,
-                detail="Wait until this report finishes reading, then switch the team being scouted.",
+                detail=(
+                    "Wait until this report finishes reading, "
+                    "then switch the team being scouted."
+                ),
             )
         if body.redraw or not _players_saved(catalog, project_id):
             _store_portraits(catalog, project_id, named)
@@ -1174,8 +1177,16 @@ def create_app(
                     saved,
                     play.play_number,
                     "discard",
-                    "In the scouting report." if not play.discarded else "Left out of the scouting report.",
-                    "Left out of the scouting report." if choice.discarded else "Put back in the scouting report.",
+                    (
+                        "Left out of the scouting report."
+                        if play.discarded
+                        else "In the scouting report."
+                    ),
+                    (
+                        "Left out of the scouting report."
+                        if choice.discarded
+                        else "Put back in the scouting report."
+                    ),
                 )
             saved = catalog.get_project(project_id)
             updated = None if saved is None else _play_by_number(saved, play_number)
@@ -4315,7 +4326,9 @@ def _store_portraits(
             if current_shot:
                 avoid.append(current_shot)
     cards = team_cards(search_frames, wearing[0], wearing[1], avoid)
-    found = sum(1 for index, side in enumerate(("left", "right")) if side in chosen and cards[index])
+    found = sum(
+        1 for index, side in enumerate(("left", "right")) if side in chosen and cards[index]
+    )
     _set_team_progress(
         project_id,
         step="find",
