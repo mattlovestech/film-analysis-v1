@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from film_analysis.chart.formation import FORMATIONS
 from film_analysis.ingest.errors import MissingApiKeyError, VideoAnalysisError, tool_failure
 from film_analysis.ingest.youtube import FilmInfo
 from film_analysis.plays.boundaries import AnthropicPlayAgent
 from film_analysis.plays.segments import FilmSpan, PlaySegment
-from film_analysis.chart.formation import FORMATIONS
 from film_analysis.storage.catalog import FilmTeams, MemoryCatalog, ReadNote, decode_activity_steps
 from film_analysis.web.app import create_app
 

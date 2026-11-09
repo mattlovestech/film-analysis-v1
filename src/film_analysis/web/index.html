@@ -7175,7 +7175,9 @@
         if (analysis.ok) {
           const body = await analysis.json();
           const rows = body.analysis || [];
-          paintAnalysisTable(rows, sections.includes("formations"));
+          const showFormation = sections.includes("formations")
+            || rows.some((row) => row.formation);
+          paintAnalysisTable(rows, showFormation);
           if (body.snapshot && body.snapshot.tendency) paintLiveTendency(body.snapshot);
         }
       } catch {
@@ -7257,7 +7259,11 @@
         reportBox.dataset.replaced = "1";
       }
       if (snapshot.tendency) paintLiveTendency(snapshot);
-      if (analysis.length) paintAnalysisTable(analysis, Boolean(snapshot.formation));
+      if (analysis.length) {
+        const showFormation = Boolean(snapshot.formation)
+          || analysis.some((row) => row.formation);
+        paintAnalysisTable(analysis, showFormation);
+      }
       paintReportProgress(done, total);
       const workers = Number(
         payload.workers != null ? payload.workers : snapshot.workers || 0,

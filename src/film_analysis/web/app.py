@@ -37,8 +37,6 @@ from film_analysis.chart.formation import (
     formation_label,
     read_formation,
 )
-
-_FORMATION_KEYS = frozenset(FORMATIONS)
 from film_analysis.domain.models import PlayType
 from film_analysis.ingest.cost import read_cost
 from film_analysis.ingest.errors import MissingApiKeyError, VideoAnalysisError
@@ -89,6 +87,7 @@ from film_analysis.storage.catalog import (
     SpanRecord,
     catalog_from_env,
 )
+from film_analysis.teams.players import usable_player_jpeg
 from film_analysis.teams.uniforms import (
     Uniform,
     action_moments,
@@ -114,6 +113,7 @@ from film_analysis.teams.uniforms import (
 from film_analysis.web.cloud import cloud_target
 from film_analysis.web.playback import cut_clip
 
+_FORMATION_KEYS = frozenset(FORMATIONS)
 _PAGE = Path(__file__).with_name("index.html")
 _DEFAULT_MAX_BYTES = 500 * 1024 * 1024
 _ALLOWED_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
@@ -2445,7 +2445,8 @@ def _play_summary(
     has_plot = False
     if catalog is not None:
         with contextlib.suppress(CatalogError):
-            has_plot = catalog.play_image(project.project, play.play_number, "formation") is not None
+            path = catalog.play_image(project.project, play.play_number, "formation")
+            has_plot = path is not None
     return {
         "uid": _play_uid(project.project, play.play_number),
         "play_number": play.play_number,
@@ -2620,9 +2621,8 @@ def _chart_formation_play(
     call = (play.play_type or "").strip().lower()
     if play.family == "special_teams" or call not in {"run", "pass"}:
         return 0, 0, ""
-    if not force:
-        if play.unit != "defense" or play.formation:
-            return 0, 0, ""
+    if not force and (play.unit != "defense" or play.formation):
+        return 0, 0, ""
     frames = _scrimmage_frames(catalog, project, play)
     offense, defense = (other, mine) if play.unit != "offense" else (mine, other)
     answer = _call_formation_reader(reader, frames, offense, defense, call)
@@ -4028,13 +4028,15 @@ def _store_portraits(
                 continue
             label = teams.left_name if side == "left" else teams.right_name
             who = label or ("Home" if side == "left" else "Away")
-            shot = cards[index]
+            shot = cards[index] or b""
+            if shot and not usable_player_jpeg(shot):
+                shot = b""
             if not shot:
                 other = wearing[1 - index]
-                shot = player_photo(search_frames, wearing[index], other) or b""
-            if not shot:
-                still = _still_bytes(catalog, project_id, side) or b""
-                shot = focus_player(still, side) if still else b""
+                candidate = player_photo(search_frames, wearing[index], other) or b""
+                if candidate and usable_player_jpeg(candidate):
+                    shot = candidate
+            # Wide lineup halves and referees are not team cards — leave blank.
             current = _still_bytes(catalog, project_id, f"{side}-player")
             if not shot:
                 if keep_current and current is not None and not _portrait_should_replace(current):
