@@ -12,6 +12,7 @@ from film_analysis.web.app import create_app
 from film_analysis.web.teams import (
     Uniform,
     colors_from_pixels,
+    detect_uniforms,
     focus_player,
     lineup_moment,
     make_portrait,
@@ -37,7 +38,39 @@ def test_colors_skip_grass_and_keep_two_uniform_colors() -> None:
     pants = (210, 180, 40)
     pixels = [grass] * 20 + [jersey] * 8 + [pants] * 5
 
-    assert colors_from_pixels(pixels) == ("#0020a0", "#c0a020")
+    assert colors_from_pixels(pixels) == ("#1428b4", "#d2b428")
+
+
+def test_a_white_jersey_is_kept() -> None:
+    white = (245, 245, 245)
+    navy = (20, 40, 180)
+
+    assert colors_from_pixels([white] * 12 + [navy] * 6)[0] == "#f5f5f5"
+
+
+def test_photo_colors_replace_a_guessed_hex(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "film_analysis.web.teams._ask_uniforms",
+        lambda frames, title, left_still=None, right_still=None: (
+            Uniform(
+                "Home",
+                "blue",
+                "gold",
+                "blue",
+                jersey_hex="#0000ff",
+                pants_hex="#ffff00",
+                helmet_hex="#0000ff",
+            ),
+            Uniform("Away", "white", "white", "white"),
+        ),
+    )
+    pixels = [(20, 40, 180)] * 30 + [(210, 180, 40)] * 20
+    monkeypatch.setattr("film_analysis.web.teams._sample_pixels", lambda still: pixels)
+
+    left, _right = detect_uniforms([], "Friday night", b"left", b"right")
+
+    assert left.jersey_hex == "#1428b4"
+    assert left.pants_hex == "#d2b428"
 
 
 def test_colors_fall_back_when_the_frame_is_only_grass() -> None:
@@ -49,7 +82,8 @@ def test_player_prompt_asks_for_a_standing_player() -> None:
 
     assert "standing full length" in prompt
     assert "exact clothes" in prompt
-    assert "reference photo is a football player" in prompt
+    assert "Image 0 is the reference photo" in prompt
+    assert "representative" in prompt
     assert "Madden-style" in prompt
     assert "00" in prompt
     assert "dark blue jersey" in prompt
@@ -109,6 +143,7 @@ def test_a_uniform_keeps_hex_colors_and_style() -> None:
     assert right.helmet_style == "center stripe"
     assert "#f4f1ea" in prompt
     assert "solid shell" in prompt
+    assert "black" in prompt
     assert "00" in prompt
     assert "Pike" not in prompt
     assert "do not write color codes" in prompt
@@ -124,6 +159,77 @@ def test_play_samples_are_spread_across_the_film() -> None:
     picked = sample_plays(plays, 4)
 
     assert [play.play_number for play in picked] == [1, 3, 6, 8]
+
+
+def test_a_renamed_team_keeps_the_uniform_from_the_photo() -> None:
+    from film_analysis.web.teams import portrait_uniform
+
+    original = Uniform(
+        "Home",
+        "white",
+        "black",
+        "white",
+        number="black",
+        jersey_hex="#f4f1ea",
+        pants_hex="#1a1a1a",
+        helmet_hex="#f7f4ee",
+        number_hex="#111111",
+        helmet_style="solid shell",
+        pants_style="solid",
+    )
+
+    renamed = portrait_uniform(original, "Pike County Pirates")
+
+    assert renamed.name == "Pike County Pirates"
+    assert renamed.jersey_hex == "#f4f1ea"
+    assert renamed.helmet_style == "solid shell"
+    assert renamed.number_hex == "#111111"
+    assert renamed.pants_style == "solid"
+
+
+def test_a_reference_photo_is_sent_as_image_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    from film_analysis.web.teams import _render
+
+    sent: list[tuple[str, bytes]] = []
+
+    def post(account: str, token: str, model: str, body: bytes, content_type: str) -> bytes:
+        sent.append((content_type, body))
+        return b"\xff\xd8\xffok"
+
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "token")
+    monkeypatch.setattr("film_analysis.web.teams._reference_jpeg", lambda still: b"\xff\xd8\xffref")
+    monkeypatch.setattr("film_analysis.web.teams._post_image", post)
+
+    image = _render("Match image 0.", b"\xff\xd8\xffstill")
+
+    assert image == b"\xff\xd8\xffok"
+    assert len(sent) == 1
+    content_type, body = sent[0]
+    assert content_type.startswith("multipart/form-data")
+    assert b'name="input_image_0"' in body
+    assert b"\xff\xd8\xffref" in body
+    assert b'name="guidance"' in body
+    assert b"Match image 0." in body
+
+
+def test_a_failed_reference_does_not_drop_the_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+    from film_analysis.web.teams import _render
+
+    calls: list[bytes] = []
+
+    def post(account: str, token: str, model: str, body: bytes, content_type: str) -> None:
+        calls.append(body)
+        return None
+
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "token")
+    monkeypatch.setattr("film_analysis.web.teams._reference_jpeg", lambda still: b"\xff\xd8\xffref")
+    monkeypatch.setattr("film_analysis.web.teams._post_image", post)
+
+    assert _render("Match image 0.", b"\xff\xd8\xffstill") is None
+    assert len(calls) == 1
+    assert b'name="input_image_0"' in calls[0]
 
 
 def test_portrait_falls_back_to_a_drawing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,10 +281,10 @@ def test_split_lineup_crops_each_side(tmp_path: Path) -> None:
 
     left, right = split_lineup(video, 0.2)
 
-    assert colors_from_pixels(_pixels(left))[0].startswith("#0000")
-    assert colors_from_pixels(_pixels(right))[0].startswith("#e000") or colors_from_pixels(
-        _pixels(right)
-    )[0].startswith("#c000")
+    left_color = colors_from_pixels(_pixels(left))[0]
+    assert left_color[5:7] > left_color[1:3] and left_color[5:7] > left_color[3:5]
+    right_color = colors_from_pixels(_pixels(right))[0]
+    assert right_color[1:3] > right_color[3:5] and right_color[1:3] > right_color[5:7]
 
 
 def test_the_uniform_prompt_keeps_the_json_example() -> None:

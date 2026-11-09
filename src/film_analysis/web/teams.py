@@ -11,7 +11,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from film_analysis.agents.errors import VideoAnalysisError
@@ -46,18 +46,19 @@ _COLORS = frozenset(
 )
 _MODS = frozenset({"dark", "light"})
 _PLAYER_PROMPT = (
-    "The reference photo is a football player from this team's game film. "
-    "Turn that player into one Madden-style video-game render. "
-    "Match the colors and the style of the uniform in the reference photo. "
-    "Copy the exact clothes: the same jersey, pants, helmet, "
+    "Image 0 is the reference photo of one football player from this team. "
+    "Generate one representative Madden-style video-game player wearing only this uniform. "
+    "Match the colors and the style of the uniform in image 0. "
+    "Do not brighten, darken, or shift any cloth color. "
+    "Copy the exact clothes from image 0: the same jersey, pants, helmet, "
     "stripes, sleeves, socks, and shoe colors. "
     "Stylized 3D football video-game player, helmet on, not a photograph, "
     "standing full length, facing the camera, both feet on the ground, arms relaxed, "
     "{jersey} jersey {jersey_hex}, {pants} pants {pants_hex}, {pants_style}, "
-    "{helmet} helmet {helmet_hex}, {helmet_style}, jersey numbers {number_hex}, "
+    "{helmet} helmet {helmet_hex}, {helmet_style}, jersey numbers {number} {number_hex}, "
     "only the number 00 on the jersey, no other text, do not write color codes, "
     "cleats, plain dark studio background, entire body from helmet to cleats in frame, "
-    "no field, no crowd, no badges."
+    "no field, no crowd, no other team, no badges."
 )
 _DETECT_PROMPT = (
     'These frames are from the football film "{title}". '
@@ -72,6 +73,7 @@ _DETECT_PROMPT = (
     "Read jerseys, helmets, the scoreboard, and the field. "
     "A short school name is right when that is what is written. "
     "For each side give jersey, pants, and helmet as color words. "
+    "Read each hex from the cloth in these photos, not from a remembered school color. "
     "Also give jersey_hex, pants_hex, helmet_hex, and number_hex as #rrggbb. "
     "number_hex is the color of the digits on the jersey. "
     "helmet_style is the shell, such as solid or striped. "
@@ -191,19 +193,13 @@ def dominant_colors(still: bytes) -> tuple[str, str]:
 
 
 def colors_from_pixels(pixels: Sequence[tuple[int, int, int]]) -> tuple[str, str]:
-    """Pick the two strongest uniform colors in already-sampled pixels."""
+    """Pick the two strongest uniform colors, averaged from the photo itself."""
 
-    counts: dict[tuple[int, int, int], int] = {}
-    for red, green, blue in pixels:
-        if _skip_color(red, green, blue):
-            continue
-        key = (red // 32 * 32, green // 32 * 32, blue // 32 * 32)
-        counts[key] = counts.get(key, 0) + 1
-    ranked = sorted(counts, key=lambda color: counts[color], reverse=True)
-    if not ranked:
+    palette = _palette(pixels)
+    if not palette:
         return _FALLBACK
-    jersey = ranked[0]
-    pants = next((color for color in ranked[1:] if _apart(jersey, color)), None)
+    jersey = palette[0]
+    pants = next((color for color in palette[1:] if _apart(jersey, color)), None)
     return _hex(jersey), _FALLBACK[1] if pants is None else _hex(pants)
 
 
@@ -244,7 +240,10 @@ def detect_uniforms(
 
     found = _ask_uniforms(frames, title, left_still, right_still)
     if found is not None:
-        return found
+        return (
+            _snap_uniform(found[0], left_still),
+            _snap_uniform(found[1], right_still),
+        )
     return _color_uniforms(title, left_still, right_still)
 
 
@@ -293,16 +292,24 @@ def _labeled(color: str, hex_code: str = "", style: str = "") -> str:
     return " ".join(parts)
 
 
+def portrait_uniform(uniform: Uniform, name: str) -> Uniform:
+    """Keep the detected colors and style when the displayed team name changes."""
+
+    return replace(uniform, name=name or uniform.name)
+
+
 def player_prompt(uniform: Uniform) -> str:
-    """The one standing-player prompt. It requires the clothes in the play photo."""
+    """The one standing-player prompt. It requires the clothes in image 0."""
 
     jersey = color_phrase(uniform.jersey) or "white"
     pants = color_phrase(uniform.pants) or "white"
     helmet = color_phrase(uniform.helmet) or jersey
+    number = color_phrase(uniform.number) or "the number color in the photo"
     return _PLAYER_PROMPT.format(
         jersey=jersey,
         pants=pants,
         helmet=helmet,
+        number=number,
         jersey_hex=_hex_color(uniform.jersey_hex) or "from the photo",
         pants_hex=_hex_color(uniform.pants_hex) or "from the photo",
         helmet_hex=_hex_color(uniform.helmet_hex) or "from the photo",
@@ -523,7 +530,7 @@ def _sample_pixels(still: bytes) -> list[tuple[int, int, int]]:
                 "-i",
                 str(source),
                 "-vf",
-                "scale=16:16",
+                "scale=48:48",
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
@@ -541,11 +548,74 @@ def _sample_pixels(still: bytes) -> list[tuple[int, int, int]]:
 
 
 def _skip_color(red: int, green: int, blue: int) -> bool:
-    if max(red, green, blue) < 40 or min(red, green, blue) > 210:
+    peak = max(red, green, blue)
+    if peak < 35:
         return True
-    if max(red, green, blue) - min(red, green, blue) < 18:
+    if green > red + 12 and green > blue + 8 and green > 70:
         return True
-    return green > red + 12 and green > blue + 8 and green > 70
+    return peak - min(red, green, blue) < 18 and peak < 170
+
+
+def _palette(pixels: Sequence[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+    groups: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
+    for red, green, blue in pixels:
+        if _skip_color(red, green, blue):
+            continue
+        key = (red // 16 * 16, green // 16 * 16, blue // 16 * 16)
+        groups.setdefault(key, []).append((red, green, blue))
+    ranked = sorted(groups, key=lambda color: len(groups[color]), reverse=True)
+    return [_average(groups[color]) for color in ranked[:4]]
+
+
+def _average(samples: Sequence[tuple[int, int, int]]) -> tuple[int, int, int]:
+    count = len(samples)
+    return (
+        round(sum(red for red, _green, _blue in samples) / count),
+        round(sum(green for _red, green, _blue in samples) / count),
+        round(sum(blue for _red, _green, blue in samples) / count),
+    )
+
+
+def _snap_uniform(uniform: Uniform, still: bytes | None) -> Uniform:
+    if not still:
+        return uniform
+    try:
+        measured = [_hex(color) for color in _palette(_sample_pixels(still))]
+    except (OSError, VideoAnalysisError):
+        return uniform
+    if not measured:
+        return uniform
+    jersey = _nearest(uniform.jersey_hex, measured, required=True)
+    pants = _nearest(uniform.pants_hex, measured, required=True)
+    helmet = _nearest(uniform.helmet_hex or jersey, measured, required=False)
+    number = _nearest(uniform.number_hex, measured, required=False) if uniform.number_hex else ""
+    return replace(
+        uniform,
+        jersey=color_words(jersey),
+        pants=color_words(pants),
+        helmet=color_words(helmet),
+        jersey_hex=jersey,
+        pants_hex=pants,
+        helmet_hex=helmet,
+        number_hex=number or uniform.number_hex,
+    )
+
+
+def _nearest(guess: str, measured: list[str], *, required: bool) -> str:
+    if not measured:
+        return guess
+    if not _hex_color(guess):
+        return measured[0]
+    best = min(measured, key=lambda color: _rgb_distance(guess, color))
+    if required or _rgb_distance(guess, best) <= 120 * 120 * 3:
+        return best
+    return guess
+
+
+def _rgb_distance(left: str, right: str) -> int:
+    first = tuple(int(left[index : index + 2], 16) for index in (1, 3, 5))
+    second = tuple(int(right[index : index + 2], 16) for index in (1, 3, 5))
+    return sum((one - two) ** 2 for one, two in zip(first, second, strict=True))
 
 
 def _apart(left: tuple[int, int, int], right: tuple[int, int, int]) -> bool:
@@ -855,12 +925,15 @@ def _render(prompt: str, still: bytes | None = None) -> bytes | None:
     reference = _reference_jpeg(still) if still else None
     if reference is not None:
         body, content_type = _form(
-            [("prompt", prompt), ("width", "768"), ("height", "1280")],
+            [
+                ("prompt", prompt),
+                ("width", "768"),
+                ("height", "1280"),
+                ("guidance", "5"),
+            ],
             reference,
         )
-        image = _post_image(account, token, _KLEIN, body, content_type)
-        if image is not None:
-            return image
+        return _post_image(account, token, _KLEIN, body, content_type)
     body, content_type = _fields([("prompt", prompt), ("width", "768"), ("height", "1280")])
     image = _post_image(account, token, _KLEIN, body, content_type)
     if image is not None:
@@ -886,7 +959,11 @@ def _form(fields: list[tuple[str, str]], reference: bytes) -> tuple[bytes, str]:
 
 
 def _reference_jpeg(still: bytes) -> bytes | None:
-    """A portrait-sized JPEG of the lineup player, small enough to send with the prompt."""
+    """A close crop of the uniform, under 512 pixels on each side.
+
+    Flux Klein ignores a reference that is 512 pixels or larger, and a wide
+    lineup makes the jersey too small to copy.
+    """
 
     if shutil.which("ffmpeg") is None or not still.startswith(b"\xff\xd8\xff"):
         return None
@@ -903,7 +980,7 @@ def _reference_jpeg(still: bytes) -> bytes | None:
                 "-i",
                 str(source),
                 "-vf",
-                "scale=480:480:force_original_aspect_ratio=decrease",
+                "scale=480:480:force_original_aspect_ratio=increase,crop=480:480",
                 "-q:v",
                 "5",
                 str(dest),
