@@ -1,0 +1,46 @@
+[project]
+name = "film-analysis"
+version = "0.1.0"
+description = "American football film analysis with AI agents"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.70",
+    "boto3>=1.43.126",
+    "fastapi>=0.115",
+    "pydantic>=2.10",
+    "python-multipart>=0.0.12",
+    "uvicorn>=0.32",
+    "yt-dlp>=2025.1.1",
+]
+
+[project.scripts]
+film-analysis = "film_analysis.web.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["film_analysis"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/film_analysis/web/index.html" = "film_analysis/web/index.html"
