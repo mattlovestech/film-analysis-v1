@@ -394,12 +394,39 @@
     #activity-list { margin: 0.7rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.45rem; }
     #activity-list a {
       display: grid;
-      gap: 0.28rem;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.75rem;
+      align-items: start;
       padding: 0.75rem 0.85rem;
       border-radius: 10px;
       background: var(--surface);
       text-decoration: none;
     }
+    #activity-list a.with-thumb { grid-template-columns: 7.2rem minmax(0, 1fr); }
+    #activity-list .thumb,
+    #activity-list .blank {
+      width: 7.2rem;
+      aspect-ratio: 16 / 9;
+      border-radius: 8px;
+      background: #000;
+      object-fit: cover;
+    }
+    #activity-list .blank { background: #2c2c2e; }
+    #activity-list .body { display: grid; gap: 0.28rem; min-width: 0; }
+    #activity-list .facts {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    #activity-list .facts strong { color: var(--ink); font-size: 1.05rem; font-weight: 700; }
+    #activity-list .speed {
+      margin: 0;
+      color: var(--gold);
+      font-size: 0.82rem;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+    #activity-list .speed[hidden] { display: none; }
     #activity-list a:hover { background: #242426; }
     #activity-list .title {
       margin: 0;
@@ -524,7 +551,8 @@
     #activity-legend[hidden] { display: none; }
     #activity-list .stages { margin-top: 0.15rem; }
     #activity-list .stages .took,
-    #film-steps .took {
+    #film-steps .took,
+    .stages .rate {
       color: var(--ink);
       font-variant-numeric: tabular-nums;
     }
@@ -794,6 +822,34 @@
       background: var(--gold);
       color: #111;
     }
+    .unit-tag {
+      display: flex;
+      gap: 0.4rem;
+      margin: 0 0.7rem 0.55rem;
+    }
+    .unit-tag button {
+      padding: 0.35rem 0.7rem;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+    }
+    .unit-tag button[aria-pressed="true"] {
+      border-color: transparent;
+      background: var(--gold);
+      color: #111;
+    }
+    #report { margin-top: 1.4rem; }
+    #report .lead { margin: 0.35rem 0 0.75rem; }
+    #report a {
+      display: inline-block;
+      padding: 0.65rem 1.05rem;
+      border-radius: 10px;
+      background: var(--ink);
+      color: #111;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    #report a:hover { filter: brightness(1.06); color: #111; }
     .play-card select.play-type {
       width: calc(100% - 1.4rem);
       margin: 0 0.7rem 0.45rem;
@@ -856,6 +912,21 @@
       line-height: 1.35;
       overflow-wrap: anywhere;
       white-space: pre-wrap;
+    }
+    #read-notes {
+      margin: 0.7rem 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.35rem;
+      max-height: 12rem;
+      overflow: auto;
+    }
+    #read-notes[hidden] { display: none; }
+    #read-notes li {
+      color: #ff9b90;
+      font-size: 0.82rem;
+      line-height: 1.35;
     }
     #review .retry { margin-top: 0.45rem; }
     #meter {
@@ -1151,6 +1222,7 @@
         </p>
       </div>
       <p id="film-error" hidden></p>
+      <ul id="read-notes" hidden></ul>
       <button id="retry" class="retry" type="button" hidden>Retry download</button>
       <p id="project-name"></p>
       <p id="film-meta"></p>
@@ -1159,7 +1231,7 @@
       <p id="outcome" class="lead" hidden></p>
       <section id="teams" hidden>
         <h2>Teams</h2>
-        <p id="teams-note" class="lead">Name each side, then mark your team.</p>
+        <p id="teams-note" class="lead">Each side gets a name from the film. Marking your team is optional.</p>
         <div class="team-row">
           <article class="team-card">
             <p class="team-kicker">Left side</p>
@@ -1173,7 +1245,7 @@
           <article class="team-card">
             <p class="team-kicker">Right side</p>
             <img id="team-right-still" alt="Right side of the lineup" hidden>
-            <img id="team-right-player" class="player" alt="Right team roster portrait, number 00" hidden>
+            <img id="team-right-player" class="player" alt="Right team player standing in uniform, number 00" hidden>
             <label for="team-right-name">Team name
               <input id="team-right-name" maxlength="40" autocomplete="off">
             </label>
@@ -1184,6 +1256,11 @@
         <button id="teams-retry" class="retry" type="button" hidden>Read the lineup again</button>
         <button id="teams-save" type="button">Save teams</button>
       </section>
+      <div id="report" hidden>
+        <h2>Scouting report</h2>
+        <p id="report-note" class="lead"></p>
+        <a id="report-link" href="" hidden download="scouting-report.pdf">Download PDF</a>
+      </div>
       <h2 id="plays-heading" hidden>Plays</h2>
       <ul id="results"></ul>
       <h2 id="reviews-heading" hidden>Needs a look</h2>
@@ -1216,6 +1293,9 @@
     const teamsError = document.querySelector("#teams-error");
     const teamsSave = document.querySelector("#teams-save");
     const teamsRetry = document.querySelector("#teams-retry");
+    const reportBox = document.querySelector("#report");
+    const reportNote = document.querySelector("#report-note");
+    const reportLink = document.querySelector("#report-link");
     const button = form.querySelector("button");
     const composer = document.querySelector("#composer");
     const review = document.querySelector("#review");
@@ -1473,6 +1553,7 @@
       const rows = [
         ["Film", playLink(play.film, play.name || "Film")],
         ["Type", kindLabel(play)],
+        ["Your team", play.unit === "defense" ? "Defense" : play.unit === "offense" ? "Offense" : "Not tagged"],
         ["In the film", `${clock(play.start)} – ${clock(play.end)}`],
         ["Length", playLength(play.end - play.start)],
       ];
@@ -1579,6 +1660,25 @@
 
     function paintPlayTypes(play) {
       playTypes.replaceChildren();
+      const side = document.createElement("div");
+      const sideLabel = document.createElement("p");
+      sideLabel.className = "type-label";
+      sideLabel.textContent = "Your team";
+      const sideActions = document.createElement("div");
+      sideActions.className = "review-actions";
+      for (const [value, label] of [["offense", "Offense"], ["defense", "Defense"]]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.classList.toggle("chosen", play.unit === value);
+        button.addEventListener("click", () => {
+          if (button.classList.contains("chosen")) return;
+          tagUnit(play.uid, value);
+        });
+        sideActions.append(button);
+      }
+      side.append(sideLabel, sideActions);
+      playTypes.append(side);
       for (const [name, choices] of playTypeGroups) {
         const group = document.createElement("div");
         const heading = document.createElement("p");
@@ -1606,6 +1706,36 @@
       discard.textContent = "Not a play";
       discard.addEventListener("click", () => relabelPlay(play.uid, "junk", discard));
       playTypes.append(discard);
+    }
+
+    async function tagUnit(uid, unit, control) {
+      const buttons = control ? [control] : [...playTypes.querySelectorAll("button")];
+      for (const button of buttons) button.disabled = true;
+      try {
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ unit }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          status.className = "error";
+          status.textContent = typeof payload.detail === "string"
+            ? payload.detail
+            : "Could not save that side of the ball.";
+          return;
+        }
+        status.className = "";
+        status.textContent = "";
+        showPlayUpdate(payload);
+      } catch {
+        status.className = "error";
+        status.textContent = "Could not save that side of the ball.";
+      } finally {
+        for (const button of buttons) {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
     }
 
     async function relabelPlay(uid, playType, control) {
@@ -1901,7 +2031,7 @@
       const complete = jobs.filter((job) => job.phase === "ready").length;
       const stopped = jobs.length - runningJobs.length - complete;
       activityLive.hidden = runningJobs.length === 0;
-      activityLegend.hidden = jobs.length > 0;
+      activityLegend.hidden = false;
       const parts = [];
       if (runningJobs.length) {
         parts.push(runningJobs.length === 1 ? "1 running." : `${runningJobs.length} running.`);
@@ -2264,7 +2394,7 @@
       ["checking", "Check"],
     ];
 
-    function paintStages(list, steps, stopped) {
+    function paintStages(list, steps, stopped, job) {
       if (!list) return;
       const saved = Array.isArray(steps) ? steps : [];
       list.hidden = saved.length === 0;
@@ -2283,6 +2413,15 @@
           took.className = "took";
           took.textContent = stepLength(step.seconds, step.running);
           item.append(took);
+          if (name === "scanning" && job) {
+            const rate = processingRate(job);
+            if (rate) {
+              const pace = document.createElement("span");
+              pace.className = "rate";
+              pace.textContent = rate;
+              item.append(pace);
+            }
+          }
           const where = stackLabel(step);
           if (where) {
             const place = document.createElement("span");
@@ -2312,6 +2451,8 @@
         history.pushState({}, "", link.href);
         route();
       });
+      const body = document.createElement("div");
+      body.className = "body";
       const title = document.createElement("p");
       title.className = "title";
       const step = document.createElement("p");
@@ -2324,6 +2465,11 @@
       const when = document.createElement("span");
       when.className = "when";
       step.append(label, pct, when);
+      const facts = document.createElement("p");
+      facts.className = "facts";
+      const speed = document.createElement("p");
+      speed.className = "speed";
+      speed.hidden = true;
       const detail = document.createElement("p");
       detail.className = "detail";
       const fault = document.createElement("p");
@@ -2343,13 +2489,15 @@
       const times = document.createElement("ol");
       times.className = "stages";
       times.setAttribute("aria-label", "Time per step");
-      link.append(title, step, detail, times, fault, retry, bar);
+      body.append(title, step, facts, speed, detail, times, fault, retry, bar);
+      link.append(body);
       fillActivity(link, job);
       item.append(link);
       return item;
     }
 
     function fillActivity(link, job) {
+      paintActivityThumb(link, job);
       link.querySelector(".title").textContent = job.name;
       const step = link.querySelector(".step");
       step.querySelector(".label").textContent = activityStep(job);
@@ -2363,11 +2511,18 @@
       }
       step.classList.toggle("stopped", job.phase !== "ready" && !job.running);
       step.classList.toggle("done", job.phase === "ready");
-      link.querySelector(".detail").textContent = activityDetail(job);
+      paintFacts(link.querySelector(".facts"), job);
+      paintSpeed(link.querySelector(".speed"), job);
+      const detail = link.querySelector(".detail");
+      const sentence = activityDetail(job);
+      const facts = activityFactParts(job).map((part) => part.text).join(" · ");
+      detail.hidden = !sentence || sentence === facts;
+      detail.textContent = sentence;
       paintStages(
         link.querySelector(".stages"),
         liveSteps(job),
         !job.running && job.phase !== "ready",
+        job,
       );
       const fault = link.querySelector(".fault");
       const message = activityFault(job);
@@ -2396,6 +2551,155 @@
       }).format(date);
     }
 
+    function paintActivityThumb(link, job) {
+      link.classList.toggle("with-thumb", Boolean(job.thumbnail));
+      let thumb = link.querySelector(".thumb");
+      if (!job.thumbnail) {
+        thumb?.remove();
+        return;
+      }
+      if (!thumb) {
+        thumb = document.createElement("img");
+        thumb.className = "thumb";
+        thumb.alt = "";
+        link.prepend(thumb);
+      }
+      if (thumb.getAttribute("src") !== job.thumbnail) thumb.src = job.thumbnail;
+      sharpenThumb(thumb);
+    }
+
+    function activityFactParts(job) {
+      const parts = [];
+      const plays = Number(job.play_count) || 0;
+      if (job.phase === "ready" || plays > 0) {
+        parts.push({ text: plays === 1 ? "1 play" : `${plays} plays`, strong: true });
+      }
+      const reviews = Number(job.review_count) || 0;
+      if (reviews > 0) {
+        parts.push({
+          text: reviews === 1 ? "1 needs a look" : `${reviews} need a look`,
+          needs: true,
+        });
+      }
+      const length = Number(job.duration) || 0;
+      if (length > 0) parts.push({ text: clock(length) });
+      const size = Number(job.total_bytes) || Number(job.downloaded) || 0;
+      if (size > 0) parts.push({ text: megabytes(size) });
+      const took = stepTotal(job);
+      if (took) parts.push({ text: `took ${took}` });
+      return parts;
+    }
+
+    function paintFacts(node, job) {
+      if (!node) return;
+      const parts = activityFactParts(job);
+      node.hidden = parts.length === 0;
+      node.replaceChildren();
+      parts.forEach((part, index) => {
+        if (index) node.append(document.createTextNode(" · "));
+        if (part.strong || part.needs) {
+          const mark = document.createElement(part.strong ? "strong" : "span");
+          if (part.needs) mark.className = "needs";
+          mark.textContent = part.text;
+          node.append(mark);
+          return;
+        }
+        node.append(document.createTextNode(part.text));
+      });
+    }
+
+    function paintSpeed(node, job) {
+      if (!node) return;
+      const parts = speedParts(job);
+      node.hidden = parts.length === 0;
+      node.textContent = parts.join(" · ");
+    }
+
+    function speedParts(job) {
+      const steps = liveSteps(job);
+      const read = steps.find((step) => step.name === "scanning");
+      const download = steps.find((step) => step.name === "downloading");
+      const parts = [];
+      const film = Math.max(Number(job.scanned) || 0, job.phase === "ready" ? Number(job.duration) || 0 : 0);
+      const readWork = read ? Number(read.seconds) || 0 : 0;
+      if (film >= 1 && readWork >= 1) {
+        parts.push(timesLabel(film / readWork));
+        const plays = Number(job.play_count) || 0;
+        const perMinute = plays / (readWork / 60);
+        if (perMinute >= 0.1) {
+          parts.push(perMinute >= 10 ? `${Math.round(perMinute)} plays/min` : `${perMinute.toFixed(1)} plays/min`);
+        }
+      }
+      const bytes = Number(job.downloaded) || 0;
+      const downWork = download ? Number(download.seconds) || 0 : 0;
+      if (bytes > 0 && downWork >= 1) parts.push(`${rateLabel(bytes / downWork)} avg`);
+      if (job.running) {
+        const now = instantSpeed(job);
+        if (now) parts.push(now);
+        const left = remainingLabel(job);
+        if (left) parts.push(left);
+      }
+      return parts;
+    }
+
+    function timesLabel(times) {
+      if (!Number.isFinite(times) || times <= 0) return "";
+      if (times >= 10) return `${Math.round(times)}× realtime`;
+      if (times >= 1) return `${times.toFixed(1)}× realtime`;
+      const each = 1 / times;
+      const shown = each >= 10 ? `${Math.round(each)}s` : `${each.toFixed(1)}s`;
+      return `${shown} of work per film sec`;
+    }
+
+    function instantSpeed(job) {
+      const sample = activityPace.get(job.project);
+      if (!sample) return "";
+      const elapsed = (sample.at - sample.anchorAt) / 1000;
+      if (elapsed < 1) return "";
+      if (job.phase === "downloading") {
+        const gained = sample.downloaded - sample.anchorDownloaded;
+        if (gained <= 0) return "";
+        return `${rateLabel(gained / elapsed)} now`;
+      }
+      if (job.phase === "scanning" || job.phase === "checking") {
+        const gained = sample.scanned - sample.anchorScanned;
+        if (gained <= 0.05) return "";
+        return `${timesLabel(gained / elapsed)} now`;
+      }
+      return "";
+    }
+
+    function remainingLabel(job) {
+      const sample = activityPace.get(job.project);
+      if (!sample) return "";
+      const elapsed = (sample.at - sample.anchorAt) / 1000;
+      if (elapsed < 1) return "";
+      if (job.phase === "downloading") {
+        const gained = sample.downloaded - sample.anchorDownloaded;
+        const total = Number(job.total_bytes) || 0;
+        if (gained <= 0 || total <= sample.downloaded) return "";
+        const left = (total - sample.downloaded) / (gained / elapsed);
+        if (left < 2) return "";
+        return `about ${stepLength(left, false)} left`;
+      }
+      if (job.phase === "scanning") {
+        const gained = sample.scanned - sample.anchorScanned;
+        const total = Number(job.duration) || 0;
+        if (gained <= 0.05 || total <= sample.scanned) return "";
+        const left = (total - sample.scanned) / (gained / elapsed);
+        if (left < 2) return "";
+        return `about ${stepLength(left, false)} left`;
+      }
+      return "";
+    }
+
+    function stepTotal(job) {
+      const steps = Array.isArray(job.steps) ? job.steps : [];
+      const seconds = steps.reduce((sum, step) => sum + (Number(step.seconds) || 0), 0);
+      if (seconds < 1) return "";
+      return stepLength(seconds, false);
+    }
+
     function activityStep(job) {
       if (job.phase === "ready") return "Complete";
       if (!job.running) return "Stopped";
@@ -2416,11 +2720,7 @@
     }
 
     function activityDetail(job) {
-      if (job.phase === "ready") {
-        const count = Number(job.play_count) || 0;
-        if (!count) return "No plays";
-        return count === 1 ? "1 play" : `${count} plays`;
-      }
+      if (job.phase === "ready") return "";
       if (!job.running) {
         const error = String(job.error || "");
         const last = error.startsWith("Stopped while saving")
@@ -2445,13 +2745,12 @@
           "Checking stretches that weren't clearly a play",
           plays,
           workerPhrase(),
-          pace,
         ]);
       }
       if (job.phase === "scanning") {
         const done = clock(job.scanned || 0);
         const read = job.duration ? `Read ${done} of ${clock(job.duration)}` : `Read ${done}`;
-        return joinParts([read, `${plays} so far`, workerPhrase(), pace]);
+        return joinParts([read, `${plays} so far`, workerPhrase()]);
       }
       const progress = activityProgress(job);
       if (!progress) {
@@ -2555,6 +2854,16 @@
       return `In this step for ${stepLength(seconds, false)}.`;
     }
 
+    function processingRate(job) {
+      const saved = (Array.isArray(job.steps) ? job.steps : []).find((step) => step.name === "scanning");
+      if (!saved) return "";
+      const live = liveSteps(job).find((step) => step.name === "scanning");
+      const work = Number(live ? live.seconds : saved.seconds) || 0;
+      const film = Number(job.scanned) || 0;
+      if (film < 1 || work < 1) return "";
+      return timesLabel(film / work);
+    }
+
     function paceInsight(job) {
       if (!job.running) return "";
       const sample = activityPace.get(job.project);
@@ -2582,17 +2891,15 @@
       }
       if (job.phase === "scanning") {
         const gained = sample.scanned - sample.anchorScanned;
-        if (gained <= 0.05) return "";
+        const rate = processingRate(job);
+        if (gained <= 0.05) return rate;
         const perSecond = gained / elapsed;
         const total = Number(job.duration) || 0;
-        const speed = perSecond >= 10
-          ? `${Math.round(perSecond)}× playback`
-          : `${perSecond.toFixed(1)}× playback`;
         if (total > sample.scanned) {
           const left = (total - sample.scanned) / perSecond;
-          if (left >= 2) return `${speed} · about ${stepLength(left, false)} left`;
+          if (left >= 2) return joinParts([rate, `about ${stepLength(left, false)} left`]);
         }
-        return speed;
+        return rate;
       }
       return "";
     }
@@ -2619,20 +2926,19 @@
     }
 
     function activityGlance(job) {
+      const speed = speedParts(job)[0] || "";
       const pace = paceInsight(job);
-      if (pace) return pace;
       if (job.phase === "starting") return stepAge(job) || "Opening the job before the download starts.";
       if (job.phase === "saving") return stepAge(job) || "Writing the film into storage.";
       if (job.phase === "checking" || (job.phase === "scanning" && reachedEnd(job.scanned, job.duration))) {
-        return "Rechecking stretches that weren't clearly a play.";
+        return joinParts(["Rechecking stretches that weren't clearly a play.", speed]);
       }
       if (job.phase === "scanning") {
         const done = clock(job.scanned || 0);
         const read = job.duration ? `Read ${done} of ${clock(job.duration)}` : `Read ${done}`;
-        const plays = `${job.play_count} ${job.play_count === 1 ? "play" : "plays"} so far`;
-        return `${read} · ${plays}`;
+        return joinParts([read, speed, pace]);
       }
-      return activityProgress(job) || "Connecting to the video. Bytes show up once the transfer starts.";
+      return joinParts([activityProgress(job), speed, pace]) || "Connecting to the video. Bytes show up once the transfer starts.";
     }
 
     function runningHeadlines(jobs) {
@@ -3106,6 +3412,18 @@
       return Math.min(100, Math.round((done / total) * 100));
     }
 
+    function paintReads(project) {
+      const list = document.querySelector("#read-notes");
+      const notes = Array.isArray(project.reads) ? project.reads : [];
+      list.replaceChildren();
+      list.hidden = notes.length === 0;
+      for (const note of notes) {
+        const item = document.createElement("li");
+        item.textContent = `Could not read ${clock(note.start)}–${clock(note.end)}. ${note.detail}`;
+        list.append(item);
+      }
+    }
+
     function showReview(project) {
       paint(project, ++watch);
     }
@@ -3163,17 +3481,15 @@
           name.value = saved;
           name.dataset.saved = saved;
         }
-        if (teams.mine === "left" || teams.mine === "right") {
-          document.querySelector(`#team-${side}-mine`).setAttribute(
-            "aria-pressed",
-            teams.mine === side ? "true" : "false",
-          );
-        }
+        document.querySelector(`#team-${side}-mine`).setAttribute(
+          "aria-pressed",
+          teams.mine === side ? "true" : "false",
+        );
       }
       teamsRetry.hidden = true;
       teamsNote.textContent = teams.left_player
-        ? "Roster portraits use each team's colors. The jersey number is 00."
-        : "Name each side from the lineup, then mark your team.";
+        ? "Standing players wear the uniform from each lineup photo. The jersey number is 00."
+        : "Each side has a name from the film. Change either one, and mark your team if you want.";
     }
 
     async function loadLineup(projectId) {
@@ -3201,8 +3517,9 @@
 
     for (const mine of teamsSection.querySelectorAll("button.mine")) {
       mine.addEventListener("click", () => {
+        const chosen = mine.getAttribute("aria-pressed") !== "true";
         for (const other of teamsSection.querySelectorAll("button.mine")) {
-          other.setAttribute("aria-pressed", other === mine ? "true" : "false");
+          other.setAttribute("aria-pressed", chosen && other === mine ? "true" : "false");
         }
       });
     }
@@ -3216,19 +3533,9 @@
       const left = document.querySelector("#team-left-name").value.trim();
       const right = document.querySelector("#team-right-name").value.trim();
       const mine = teamsSection.querySelector('button.mine[aria-pressed="true"]');
-      if (!left || !right) {
-        teamsError.hidden = false;
-        teamsError.textContent = "Name both teams.";
-        return;
-      }
-      if (!mine) {
-        teamsError.hidden = false;
-        teamsError.textContent = "Mark which side is your team.";
-        return;
-      }
       teamsSave.disabled = true;
       teamsError.hidden = true;
-      teamsNote.textContent = "Drawing roster portraits.";
+      teamsNote.textContent = "Building a standing player for each team.";
       try {
         const response = await fetch(`/api/projects/${projectId}/teams`, {
           method: "POST",
@@ -3236,7 +3543,7 @@
           body: JSON.stringify({
             left_name: left,
             right_name: right,
-            mine: mine.dataset.side,
+            mine: mine ? mine.dataset.side : null,
           }),
         });
         const payload = await response.json();
@@ -3244,10 +3551,11 @@
           throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not save those teams.");
         }
         fillTeams(projectId, payload.teams);
+        paintReport(payload);
       } catch (error) {
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
-        teamsNote.textContent = "Name each side from the lineup, then mark your team.";
+        teamsNote.textContent = "Each side has a name from the film. Change either one, and mark your team if you want.";
       } finally {
         teamsSave.disabled = false;
       }
@@ -3278,11 +3586,12 @@
       if (project.channel) meta.push(project.channel);
       if (project.duration) meta.push(clock(project.duration));
       filmMeta.textContent = meta.join(" · ");
-      paintStages(filmSteps, project.steps, project.status === "failed");
+      paintStages(filmSteps, project.steps, project.status === "failed", project);
       paintUrl(project.youtube_url || "");
       const message = hasError(project) ? (project.error || "Could not read that film.") : "";
       filmError.hidden = !message;
       filmError.textContent = message;
+      paintReads(project);
       const active = project.status === "downloading" || project.status === "scanning";
       meter.hidden = !active || Boolean(message);
       retryButton.hidden = !canRetry(project);
@@ -3315,6 +3624,7 @@
       });
       paintReviews(project);
       paintTeams(project);
+      paintReport(project);
       const failed = hasError(project);
       const running = !failed && (project.status === "downloading" || project.status === "scanning");
       const sentence = failed
@@ -3386,7 +3696,17 @@
       view.textContent = "View play";
       view.addEventListener("click", (event) => followLink(event, view.getAttribute("href")));
       if (play.video) item.append(playVideoElement(play.video));
-      item.append(badge, meta, picker, view);
+      const unitRow = document.createElement("div");
+      unitRow.className = "unit-tag";
+      for (const [value, label] of [["offense", "Offense"], ["defense", "Defense"]]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.unit = value;
+        button.textContent = label;
+        button.addEventListener("click", () => tagUnit(item.dataset.uid, value, button));
+        unitRow.append(button);
+      }
+      item.append(badge, meta, unitRow, picker, view);
       syncPlayCard(play, item);
       return item;
     }
@@ -3395,6 +3715,11 @@
       const item = card || results.querySelector(`li[data-play="${play.play_number}"]`);
       if (!item) return;
       item.dataset.uid = play.uid;
+      item.dataset.family = play.family || "";
+      item.dataset.unit = play.unit || "";
+      for (const button of item.querySelectorAll(".unit-tag button")) {
+        button.setAttribute("aria-pressed", button.dataset.unit === play.unit ? "true" : "false");
+      }
       const range = item.querySelector(".play-range");
       if (range) range.textContent = `${clock(play.start)} – ${clock(play.end)}`;
       const kind = item.querySelector(".play-kind");
@@ -3413,6 +3738,19 @@
         picker.dataset.type = value;
         picker.value = value;
       }
+    }
+
+    function paintReport(project) {
+      const plays = project.plays || [];
+      const show = project.status === "ready" && plays.length > 0;
+      reportBox.hidden = !show;
+      if (!show) return;
+      const labeled = Boolean(project.teams && (project.teams.mine === "left" || project.teams.mine === "right"));
+      reportLink.hidden = !labeled;
+      reportLink.href = `/api/projects/${project.project}/report.pdf`;
+      reportNote.textContent = labeled
+        ? "Your team is labeled. Download the scouting report from these plays."
+        : "Label your team to generate the scouting report.";
     }
 
     function paintReviews(project) {

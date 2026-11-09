@@ -112,12 +112,59 @@ def player_prompt(team_name: str, jersey: str, pants: str) -> str:
         "Create one original 3D American football player standing full length, "
         "facing the camera, both feet on the ground, arms relaxed, "
         "sports video-game create-a-player render, helmet on, shoulder pads, "
-        f"jersey color {jersey}, pants color {pants}, helmet matching the jersey, "
-        "large jersey number 00 and nothing else written on the uniform, cleats, "
+        f"{color_words(jersey)} jersey, {color_words(pants)} pants, "
+        "helmet matching the jersey, only the number 00 on the jersey, "
+        "no other text, no patches, no badges, cleats, "
         "plain dark studio background, entire body from helmet to cleats in frame, "
         "no field, no crowd, no logos, no trademarks, no real person, "
         f"uniform for the team named {team_name}."
     )
+
+
+def suggest_team_names(
+    title: str,
+    left_still: bytes | None = None,
+    right_still: bytes | None = None,
+) -> tuple[str, str]:
+    """Name both sides from the film title, or from each lineup's uniform color."""
+
+    matchup = _matchup_names(title)
+    if matchup is not None:
+        return matchup
+    left = _uniform_name(left_still)
+    right = _uniform_name(right_still)
+    if left and right and left.casefold() != right.casefold():
+        return left, right
+    return "Home", "Away"
+
+
+def color_words(value: str) -> str:
+    """A short color name, so the image model does not paint a hex code on the jersey."""
+
+    if not _COLOR.fullmatch(value):
+        return "the color in the photo"
+    red, green, blue = (int(value[index : index + 2], 16) for index in (1, 3, 5))
+    peak = max(red, green, blue)
+    floor = min(red, green, blue)
+    if peak - floor < 28:
+        if peak > 200:
+            return "white"
+        if peak < 50:
+            return "black"
+        return "gray"
+    if blue >= red and blue >= green:
+        name = "blue"
+    elif green >= red and green > blue + 15:
+        name = "green"
+    elif red > 150 and green > 110 and blue < 90:
+        name = "gold"
+    else:
+        name = "red"
+    if peak < 130:
+        return f"dark {name}"
+    if floor > 150:
+        return f"light {name}"
+    return name
 
 
 def roster_svg(jersey: str, pants: str) -> bytes:
@@ -211,6 +258,35 @@ def _hex(color: tuple[int, int, int]) -> str:
     return f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
 
 
+_MATCHUP = re.compile(r"\s+(?:vs\.?|versus|v\.|at|@)\s+", re.IGNORECASE)
+
+
+def _matchup_names(title: str) -> tuple[str, str] | None:
+    parts = _MATCHUP.split(title.strip(), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    left = _clean_name(parts[0])
+    right = _clean_name(parts[1])
+    if not left or not right or left.casefold() == right.casefold():
+        return None
+    return left, right
+
+
+def _clean_name(value: str) -> str:
+    text = " ".join(value.replace("|", " ").split()).strip(" -–—:|")
+    return text[:40]
+
+
+def _uniform_name(still: bytes | None) -> str:
+    if not still:
+        return ""
+    jersey, _pants = dominant_colors(still)
+    words = color_words(jersey)
+    if words == "the color in the photo":
+        return ""
+    return " ".join(part.capitalize() for part in words.split())
+
+
 def _safe_color(value: str, fallback: str) -> str:
     return value if _COLOR.fullmatch(value) else fallback
 
@@ -238,7 +314,7 @@ def _run_reference(account: str, token: str, prompt: str, reference: bytes) -> b
 
 
 def _run_prompt(account: str, token: str, prompt: str) -> bytes | None:
-    body = json.dumps({"prompt": prompt, "width": 768, "height": 1280}).encode()
+    body = json.dumps({"prompt": prompt}).encode()
     return _post_image(account, token, _SCHNELL, body, "application/json")
 
 
@@ -268,15 +344,14 @@ def _form(fields: list[tuple[str, str]], reference: bytes) -> tuple[bytes, str]:
     boundary = "film-player-boundary"
     chunks: list[bytes] = []
     for name, value in fields:
-        chunks.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
-        )
-    chunks.append(
-        (
-            f'--{boundary}\r\nContent-Disposition: form-data; name="input_image_0"; '
-            'filename="lineup.jpg"\r\nContent-Type: image/jpeg\r\n\r\n'
-        ).encode()
+        header = f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+        chunks.append(f"{header}{value}\r\n".encode())
+    file_header = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="input_image_0"; filename="lineup.jpg"\r\n'
+        "Content-Type: image/jpeg\r\n\r\n"
     )
+    chunks.append(file_header.encode())
     chunks.append(reference)
     chunks.append(f"\r\n--{boundary}--\r\n".encode())
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"

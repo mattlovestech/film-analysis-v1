@@ -7,10 +7,11 @@ from pathlib import Path
 
 from film_analysis.agents.errors import VideoAnalysisError, tool_failure
 
-_INTERVAL = 1.0
-# 1280 is the width of 720p, so the model can still read a formation and the ball.
-FRAME_FILTER = "fps=1,scale=1280:-2"
-FRAME_QUALITY = "4"
+FRAME_INTERVAL = 2.0
+# One frame every two seconds, at 768px wide. That is enough to see a lineup,
+# a snap, and a dead ball, and it is much less for the model to read than 720p.
+FRAME_FILTER = "fps=1/2,scale=768:-2"
+FRAME_QUALITY = "8"
 
 
 def video_duration(video_path: Path) -> float:
@@ -20,7 +21,7 @@ def video_duration(video_path: Path) -> float:
 
 
 def extract_window(video_path: Path, start: float, seconds: float) -> list[tuple[float, bytes]]:
-    """Return one JPEG per second for a stretch of film, with times from the file start."""
+    """Return one JPEG every two seconds for a stretch of film, with times from the file start."""
 
     _require_ffmpeg()
     with tempfile.TemporaryDirectory() as tmp:
@@ -37,6 +38,7 @@ def extract_window(video_path: Path, start: float, seconds: float) -> list[tuple
                 str(video_path),
                 "-t",
                 f"{max(0.1, seconds):.3f}",
+                "-an",
                 "-vf",
                 FRAME_FILTER,
                 "-q:v",
@@ -55,13 +57,13 @@ def extract_window(video_path: Path, start: float, seconds: float) -> list[tuple
                 )
             )
         return [
-            (start + index * _INTERVAL, frame.read_bytes())
+            (start + index * FRAME_INTERVAL, frame.read_bytes())
             for index, frame in enumerate(sorted(Path(tmp).glob("frame_*.jpg")))
         ]
 
 
 def extract_frames(video_path: Path) -> list[tuple[float, bytes]]:
-    """Return one JPEG per second, labeled with its offset from the start."""
+    """Return one JPEG every two seconds, labeled with its offset from the start."""
 
     _require_ffmpeg()
     with tempfile.TemporaryDirectory() as tmp:
@@ -74,6 +76,7 @@ def extract_frames(video_path: Path) -> list[tuple[float, bytes]]:
                 "error",
                 "-i",
                 str(video_path),
+                "-an",
                 "-vf",
                 FRAME_FILTER,
                 "-q:v",
@@ -93,7 +96,7 @@ def extract_frames(video_path: Path) -> list[tuple[float, bytes]]:
             )
 
         frames = [
-            (index * _INTERVAL, frame.read_bytes())
+            (index * FRAME_INTERVAL, frame.read_bytes())
             for index, frame in enumerate(sorted(Path(tmp).glob("frame_*.jpg")))
         ]
     if not frames:

@@ -8,6 +8,7 @@ dependencies = [
     "anthropic>=0.70",
     "boto3>=1.43.126",
     "fastapi>=0.115",
+    "fpdf2>=2.9.0",
     "pydantic>=2.10",
     "python-multipart>=0.0.12",
     "uvicorn>=0.32",

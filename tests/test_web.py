@@ -2,11 +2,13 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError, tool_failure
+from film_analysis.agents.play_boundaries import AnthropicPlayAgent
 from film_analysis.agents.segments import FilmSpan, PlaySegment
 from film_analysis.agents.youtube import FilmInfo
 from film_analysis.storage.catalog import MemoryCatalog, decode_activity_steps
@@ -114,6 +116,10 @@ def test_page_offers_a_video_upload() -> None:
     assert "Checking the server" in response.text
     assert "Looking up films that are running or stopped." in response.text
     assert 'id="activity-legend"' in response.text
+    assert 'className = "facts"' in response.text
+    assert 'className = "speed"' in response.text
+    assert "× realtime" in response.text
+    assert "plays/min" in response.text
     assert 'id="film-steps"' in response.text
     assert 'id="workers"' in response.text
     assert 'id="place-local"' in response.text
@@ -128,7 +134,10 @@ def test_page_offers_a_video_upload() -> None:
     assert "Cloud · 1 worker" in response.text
     assert 'id="teams"' in response.text
     assert "My team" in response.text
-    assert "Roster portraits use each team's colors." in response.text
+    assert "Standing players wear the uniform from each lineup photo." in response.text
+    assert 'id="report"' in response.text
+    assert "Scouting report" in response.text
+    assert "Download PDF" in response.text
     library = client.get("/projects")
     assert library.status_code == 200
     assert ">Projects<" in library.text
@@ -158,6 +167,7 @@ def test_page_offers_a_video_upload() -> None:
     assert "canRetryJob" in response.text
     assert 'label: "Stopped"' in response.text
     assert 'id="film-error"' in response.text
+    assert 'id="read-notes"' in response.text
     assert 'project.error || "Could not read that film."' in response.text
     assert "The server stopped while this was running." in response.text
     assert 'createElement("video")' in response.text
@@ -201,6 +211,7 @@ def test_upload_saves_the_analysis_and_its_play_clip() -> None:
             "end": 2.0,
             "family": "scrimmage",
             "play_type": None,
+            "unit": None,
             "reviewed": False,
             "video": "/projects/1/plays/1",
         }
@@ -276,6 +287,48 @@ def test_archive_takes_a_film_off_the_shelf_until_it_is_put_back(tmp_path: Path)
     assert restored.status_code == 200
     assert restored.json()["archived"] is False
     assert client.post("/api/projects/99/archive", json={"archived": True}).status_code == 404
+
+
+def test_an_unreadable_window_stays_on_the_film() -> None:
+    class _Messages:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            del kwargs
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="The scoreboard was too small.")]
+            )
+
+    agent = AnthropicPlayAgent(
+        api_key="test-key",
+        client=SimpleNamespace(messages=_Messages()),
+        frames=lambda path: [],
+    )
+    client = TestClient(
+        create_app(
+            agent=agent,
+            prepare=_keep_source,
+            cut=_copy_clip,
+            duration=_duration,
+            frames=_frames,
+        )
+    )
+
+    response = client.post(
+        "/analyze",
+        files={"video": ("clip.mp4", b"fake-video", "video/mp4")},
+    )
+
+    body = _settle(client, response.json()["project"])
+    assert body["status"] == "ready"
+    assert body["reads"] == [
+        {
+            "start": 0.0,
+            "end": 3.0,
+            "detail": (
+                "2 frames, 8 B. film spans were not valid JSON. "
+                "Reply: The scoreboard was too small."
+            ),
+        }
+    ]
 
 
 def test_youtube_link_saves_a_project() -> None:
@@ -1443,6 +1496,7 @@ def test_play_page_shows_one_play_and_its_neighbors(tmp_path: Path) -> None:
         "end": 46.0,
         "family": "special_teams",
         "play_type": None,
+        "unit": None,
         "reviewed": False,
         "video": "/projects/1/plays/2",
         "project": 1,

@@ -6,11 +6,11 @@ import tempfile
 from pathlib import Path
 
 from film_analysis.agents.errors import VideoAnalysisError
-from film_analysis.agents.frames import FRAME_FILTER, FRAME_QUALITY
+from film_analysis.agents.frames import FRAME_FILTER, FRAME_INTERVAL, FRAME_QUALITY
 
 
 def extract_window_url(url: str, start: float, seconds: float) -> list[tuple[float, bytes]]:
-    """Return one JPEG per second for a stretch, with times from the file start."""
+    """Return one JPEG every two seconds for a stretch, with times from the file start."""
 
     _require_ffmpeg()
     with tempfile.TemporaryDirectory() as tmp:
@@ -27,6 +27,7 @@ def extract_window_url(url: str, start: float, seconds: float) -> list[tuple[flo
                 url,
                 "-t",
                 f"{max(0.1, seconds):.3f}",
+                "-an",
                 "-vf",
                 FRAME_FILTER,
                 "-q:v",
@@ -39,7 +40,7 @@ def extract_window_url(url: str, start: float, seconds: float) -> list[tuple[flo
         if result.returncode != 0:
             raise VideoAnalysisError("Could not read frames from that video.")
         return [
-            (start + index, frame.read_bytes())
+            (start + index * FRAME_INTERVAL, frame.read_bytes())
             for index, frame in enumerate(sorted(Path(tmp).glob("frame_*.jpg")))
         ]
 

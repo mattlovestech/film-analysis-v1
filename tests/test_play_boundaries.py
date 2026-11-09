@@ -78,6 +78,60 @@ def test_review_window_looks_again_at_a_held_stretch() -> None:
     assert "Still not sure" in prompt
 
 
+def test_a_reply_that_is_not_json_records_the_frames_and_the_reply(tmp_path: Path) -> None:
+    del tmp_path
+    notes: list[tuple[object, ...]] = []
+    messages = _Messages("I could not decide. The frames were blurry.")
+    agent = AnthropicPlayAgent(
+        api_key="test-key",
+        client=_Client(messages),
+        frames=_frames,
+        note_unreadable=lambda *args: notes.append(args),
+    )
+
+    spans = agent.label_window([(30.0, b"ab"), (70.0, b"cdef")])
+
+    assert [(span.kind, span.start_seconds, span.end_seconds) for span in spans] == [
+        ("uncertain", 30.0, 70.0)
+    ]
+    assert notes == [
+        (
+            30.0,
+            70.0,
+            2,
+            6,
+            "film spans were not valid JSON",
+            "I could not decide. The frames were blurry.",
+        )
+    ]
+
+
+def test_one_overloaded_window_is_set_aside_and_tracked() -> None:
+    class _Overload(Exception):
+        def __init__(self) -> None:
+            super().__init__("Overloaded")
+            self.status_code = 529
+            self.api_message = "Overloaded"
+
+    class _Broken:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            raise _Overload()
+
+    notes: list[tuple[object, ...]] = []
+    agent = AnthropicPlayAgent(
+        api_key="test-key",
+        client=SimpleNamespace(messages=_Broken()),
+        frames=_frames,
+        note_unreadable=lambda *args: notes.append(args),
+    )
+
+    spans = agent.label_window([(1.0, b"aa"), (4.0, b"bbb")])
+
+    assert [span.kind for span in spans] == ["uncertain"]
+    assert notes[0][2:4] == (2, 5)
+    assert "HTTP 529" in str(notes[0][4])
+
+
 def test_a_reply_that_is_not_json_is_set_aside(tmp_path: Path) -> None:
     del tmp_path
     messages = _Messages("I could not decide. The frames were blurry.")
@@ -111,6 +165,28 @@ def test_youtube_link_is_downloaded_then_charted(tmp_path: Path) -> None:
 
     assert [segment.label for segment in segments] == ["Play 1: 0:01 - 0:02"]
     assert seen == ["https://www.youtube.com/watch?v=5mHoasOclJs"]
+
+
+def test_a_low_credit_balance_still_stops_the_window() -> None:
+    class _Billing(Exception):
+        def __init__(self) -> None:
+            super().__init__("credit balance is too low")
+            self.api_message = "Your credit balance is too low to access the Anthropic API."
+            self.error_code = None
+            self.body = {"error": {"message": self.api_message}}
+
+    class _Broken:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            raise _Billing()
+
+    agent = AnthropicPlayAgent(
+        api_key="test-key",
+        client=SimpleNamespace(messages=_Broken()),
+        frames=_frames,
+    )
+
+    with pytest.raises(VideoAnalysisError, match="out of credits"):
+        agent.label_window([(1.0, b"jpeg")])
 
 
 def test_a_low_credit_balance_is_explained(tmp_path: Path) -> None:
@@ -181,7 +257,7 @@ def test_extract_frames_from_a_short_clip(tmp_path: Path) -> None:
             "-f",
             "lavfi",
             "-i",
-            "color=c=black:s=160x120:d=2",
+            "color=c=black:s=160x120:d=4",
             "-pix_fmt",
             "yuv420p",
             str(video),
@@ -191,5 +267,5 @@ def test_extract_frames_from_a_short_clip(tmp_path: Path) -> None:
 
     frames = extract_frames(video)
 
-    assert [timestamp for timestamp, _jpeg in frames[:2]] == [0.0, 1.0]
+    assert [timestamp for timestamp, _jpeg in frames[:2]] == [0.0, 2.0]
     assert frames[0][1].startswith(b"\xff\xd8")

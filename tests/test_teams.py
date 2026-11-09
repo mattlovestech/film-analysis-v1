@@ -9,7 +9,14 @@ from fastapi.testclient import TestClient
 
 from film_analysis.storage.catalog import MemoryCatalog, PlayRecord
 from film_analysis.web.app import create_app
-from film_analysis.web.teams import colors_from_pixels, lineup_moment, make_portrait, split_lineup
+from film_analysis.web.teams import (
+    colors_from_pixels,
+    lineup_moment,
+    make_portrait,
+    player_prompt,
+    split_lineup,
+    suggest_team_names,
+)
 
 
 def test_lineup_moment_uses_the_first_scrimmage() -> None:
@@ -34,10 +41,21 @@ def test_colors_fall_back_when_the_frame_is_only_grass() -> None:
     assert colors_from_pixels([(40, 140, 50)] * 10) == ("#1c3f73", "#f2efe6")
 
 
+def test_player_prompt_asks_for_a_standing_player() -> None:
+    prompt = player_prompt("North", "#003366", "#f4f1ea")
+
+    assert "standing full length" in prompt
+    assert "reference photo" in prompt
+    assert "00" in prompt
+    assert "dark blue" in prompt
+    assert "#003366" not in prompt
+    assert "Madden" not in prompt
+
+
 def test_portrait_falls_back_to_a_drawing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "film_analysis.web.teams._flux",
-        lambda team_name, jersey, pants: None,
+        lambda still, team_name, jersey, pants: None,
     )
     monkeypatch.setattr(
         "film_analysis.web.teams.dominant_colors",
@@ -54,7 +72,7 @@ def test_portrait_falls_back_to_a_drawing(monkeypatch: pytest.MonkeyPatch) -> No
 def test_portrait_keeps_a_generated_image(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "film_analysis.web.teams._flux",
-        lambda team_name, jersey, pants: b"\xff\xd8\xfffake",
+        lambda still, team_name, jersey, pants: b"\xff\xd8\xfffake",
     )
     monkeypatch.setattr(
         "film_analysis.web.teams.dominant_colors",
@@ -100,6 +118,22 @@ def test_split_lineup_crops_each_side(tmp_path: Path) -> None:
     )[0].startswith("#c000")
 
 
+def test_a_matchup_title_names_both_sides() -> None:
+    assert suggest_team_names("Pike County vs. Lamar") == ("Pike County", "Lamar")
+
+
+def test_uniform_colors_name_the_sides_when_the_title_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    colors = iter((("#003366", "#ffffff"), ("#c0a020", "#111111")))
+    monkeypatch.setattr(
+        "film_analysis.web.teams.dominant_colors",
+        lambda still: next(colors),
+    )
+
+    assert suggest_team_names("Friday night", b"left", b"right") == ("Dark Blue", "Gold")
+
+
 def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     client = TestClient(
@@ -113,7 +147,8 @@ def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
     unnamed = client.post("/api/projects/1/teams/stills")
     assert unnamed.status_code == 200
     teams = unnamed.json()["teams"]
-    assert teams["left_name"] == ""
+    assert teams["left_name"] == "Home"
+    assert teams["right_name"] == "Away"
     assert teams["mine"] is None
     assert client.get(teams["left_still"]).content == b"left-jpeg"
     assert client.get(teams["right_still"]).content == b"right-jpeg"
@@ -123,6 +158,15 @@ def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
         json={"left_name": "North", "right_name": "South", "mine": "sideline"},
     )
     assert missing.status_code == 422
+
+    optional = client.post(
+        "/api/projects/1/teams",
+        json={"left_name": "", "right_name": ""},
+    )
+    assert optional.status_code == 200
+    assert optional.json()["teams"]["left_name"] == "Home"
+    assert optional.json()["teams"]["right_name"] == "Away"
+    assert optional.json()["teams"]["mine"] is None
 
     saved = client.post(
         "/api/projects/1/teams",

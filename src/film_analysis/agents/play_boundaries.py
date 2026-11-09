@@ -1,6 +1,7 @@
 """Agent that watches film frames and marks each play."""
 
 import base64
+import contextvars
 import logging
 import os
 import tempfile
@@ -76,6 +77,17 @@ _WINDOW = 40
 
 FrameSampler = Callable[[Path], list[tuple[float, bytes]]]
 Downloader = Callable[[str, Path], Path]
+ReadNote = Callable[[float, float, int, int, str, str], None]
+_READS: contextvars.ContextVar[ReadNote | None] = contextvars.ContextVar(
+    "film_read_note",
+    default=None,
+)
+
+
+def bind_read_note(note: ReadNote | None) -> None:
+    """Record failed reads for the label happening on this thread."""
+
+    _READS.set(note)
 
 
 @runtime_checkable
@@ -109,6 +121,7 @@ class AnthropicPlayAgent:
         client: object | None = None,
         frames: FrameSampler | None = None,
         downloader: Downloader | None = None,
+        note_unreadable: ReadNote | None = None,
     ) -> None:
         if not api_key.strip():
             raise MissingApiKeyError("Set ANTHROPIC_API_KEY to analyze film.")
@@ -117,6 +130,7 @@ class AnthropicPlayAgent:
         self._client = client
         self._frames = frames or extract_frames
         self._downloader = downloader or download_youtube
+        self.note_unreadable = note_unreadable
 
     def segment(self, video_path: Path) -> tuple[PlaySegment, ...]:
         if not video_path.is_file():
@@ -155,13 +169,49 @@ class AnthropicPlayAgent:
             return ()
         start = samples[0][0]
         end = samples[-1][0]
+        reply = ""
         try:
-            return parse_film_spans(self._ask(samples, template.format(start=start, end=end)))
+            reply = self._ask(samples, template.format(start=start, end=end))
+            return parse_film_spans(reply)
         except ValueError as error:
-            _LOG.warning("could not read spans for %.1f–%.1f: %s", start, end, error)
+            self._miss(start, end, samples, str(error), reply)
             if end <= start:
                 return ()
             return (FilmSpan(kind=UNCERTAIN, start_seconds=start, end_seconds=end),)
+        except VideoAnalysisError as error:
+            self._miss(start, end, samples, str(error), reply)
+            if _stops_the_film(error):
+                raise
+            if end <= start:
+                return ()
+            return (FilmSpan(kind=UNCERTAIN, start_seconds=start, end_seconds=end),)
+
+    def _miss(
+        self,
+        start: float,
+        end: float,
+        samples: list[tuple[float, bytes]],
+        reason: str,
+        reply: str,
+    ) -> None:
+        frames = len(samples)
+        nbytes = sum(len(jpeg) for _, jpeg in samples)
+        _LOG.warning(
+            "could not read %.1f–%.1f (%s frames, %s bytes): %s reply=%s",
+            start,
+            end,
+            frames,
+            nbytes,
+            reason,
+            _excerpt(reply),
+        )
+        note = _READS.get() or self.note_unreadable
+        if note is None:
+            return
+        try:
+            note(start, end, frames, nbytes, reason, reply)
+        except Exception:
+            _LOG.warning("could not record the failed read at %.1f–%.1f", start, end, exc_info=True)
 
     def segment_youtube(self, url: str) -> tuple[PlaySegment, ...]:
         try:
@@ -192,7 +242,7 @@ class AnthropicPlayAgent:
         try:
             message = client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=1536,
                 messages=[{"role": "user", "content": content}],
             )
         except VideoAnalysisError:
@@ -246,6 +296,24 @@ def _merge(groups: list[tuple[PlaySegment, ...]]) -> tuple[PlaySegment, ...]:
         )
         for index, play in enumerate(kept, start=1)
     )
+
+
+def _stops_the_film(error: BaseException) -> bool:
+    """True when the next window would fail for the same reason."""
+
+    text = str(error).lower()
+    if "out of credits" in text or "credit balance" in text or "billing" in text:
+        return True
+    if any(code in text for code in ("http 401", "http 402", "http 413")):
+        return True
+    return "request_too_large" in text or "request too large" in text
+
+
+def _excerpt(reply: str) -> str:
+    text = " ".join(reply.split())
+    if len(text) > 240:
+        return text[:237] + "..."
+    return text or "(empty)"
 
 
 _CREDIT = "This film couldn't be read. The analysis account is out of credits."

@@ -16,12 +16,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
 from film_analysis.agents.frames import extract_window, video_duration
-from film_analysis.agents.play_boundaries import PlayBoundaryAgent, agent_from_env
+from film_analysis.agents.play_boundaries import PlayBoundaryAgent, agent_from_env, bind_read_note
 from film_analysis.agents.scan import (
     MAX_WORKERS,
     FilmWindowError,
@@ -49,12 +49,14 @@ from film_analysis.storage.catalog import (
     PlayRecord,
     ProjectDetail,
     ProjectSummary,
+    ReadNote,
     SpanRecord,
     catalog_from_env,
 )
 from film_analysis.web.cloud import cloud_target
 from film_analysis.web.playback import cut_clip
-from film_analysis.web.teams import lineup_moment, make_portrait, split_lineup
+from film_analysis.web.report import scouting_pdf, untagged_plays
+from film_analysis.web.teams import lineup_moment, make_portrait, split_lineup, suggest_team_names
 
 _PAGE = Path(__file__).with_name("index.html")
 _DEFAULT_MAX_BYTES = 500 * 1024 * 1024
@@ -119,21 +121,23 @@ class _WorkerSetting(BaseModel):
 
 
 class _TeamNames(BaseModel):
-    left_name: str
-    right_name: str
-    mine: str
+    left_name: str = ""
+    right_name: str = ""
+    mine: str | None = None
 
     @field_validator("left_name", "right_name")
     @classmethod
     def _name(cls, value: str) -> str:
         text = " ".join(value.split())
-        if not text or len(text) > 40:
+        if len(text) > 40:
             raise ValueError("Use a team name of 40 characters or fewer.")
         return text
 
     @field_validator("mine")
     @classmethod
-    def _side(cls, value: str) -> str:
+    def _side(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
         if value not in {"left", "right"}:
             raise ValueError("Mark which side is your team.")
         return value
@@ -146,6 +150,7 @@ class _ArchiveFlag(BaseModel):
 class _PlayLabel(BaseModel):
     play_type: str | None = None
     reviewed: bool | None = None
+    unit: str | None = None
 
     @field_validator("play_type")
     @classmethod
@@ -156,10 +161,19 @@ class _PlayLabel(BaseModel):
             raise ValueError("play type must be a known play")
         return value
 
+    @field_validator("unit")
+    @classmethod
+    def _known_unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in {"offense", "defense"}:
+            raise ValueError("Mark the play as offense or defense.")
+        return value
+
     @model_validator(mode="after")
     def _has_change(self) -> "_PlayLabel":
-        if self.play_type is None and self.reviewed is None:
-            raise ValueError("Choose a play type or mark the review.")
+        if self.play_type is None and self.reviewed is None and self.unit is None:
+            raise ValueError("Choose a play type, mark the review, or tag offense or defense.")
         return self
 
 
@@ -417,12 +431,10 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(error)) from error
         if needs_lineup:
             _store_lineup(catalog, saved, draw_lineup)
-        _store_portraits(catalog, project_id, body, draw_portrait)
+        named = _named_sides(catalog, saved, body)
+        _store_portraits(catalog, project_id, named, draw_portrait)
         try:
-            catalog.set_film_teams(
-                project_id,
-                FilmTeams(body.left_name, body.right_name, body.mine),
-            )
+            catalog.set_film_teams(project_id, named)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
         return _project_payload(
@@ -444,6 +456,32 @@ def create_app(
             raise HTTPException(status_code=404, detail="That picture is not available.")
         media = "image/svg+xml" if path.suffix == ".svg" else "image/jpeg"
         return FileResponse(path, media_type=media)
+
+    @app.get("/api/projects/{project_id}/report.pdf")
+    def scouting_report(project_id: int) -> Response:
+        saved = _require_project(catalog, project_id)
+        if saved.status != "ready" or not saved.plays:
+            raise HTTPException(
+                status_code=400,
+                detail="The scouting report waits until the plays are identified.",
+            )
+        waiting = untagged_plays(saved.plays)
+        if waiting:
+            noun = "play" if waiting == 1 else "plays"
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tag {waiting} {noun} as offense or defense before the scouting report.",
+            )
+        try:
+            teams = catalog.film_teams(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        pdf = scouting_pdf(saved.name, teams, _ordered_plays(saved))
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="scouting-report.pdf"'},
+        )
 
     @app.post("/api/projects/{project_id}/archive")
     def archive_project(project_id: int, body: _ArchiveFlag) -> dict[str, object]:
@@ -618,6 +656,8 @@ def create_app(
             if choice.play_type is not None:
                 family, play_type = _stored_play_label(choice.play_type)
                 catalog.set_play_type(project_id, play_number, play_type, family)
+            elif choice.unit is not None:
+                catalog.set_play_unit(project_id, play_number, choice.unit)
             elif choice.reviewed is not None:
                 catalog.set_reviewed(project_id, play_number, choice.reviewed)
             saved = catalog.get_project(project_id)
@@ -951,16 +991,58 @@ def _watch_film(
             _progress(catalog, project_id, "scanning", length, seconds, None)
 
         def label(samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
-            return agent.label_window(samples)
+            bind_read_note(remember_read)
+            try:
+                return agent.label_window(samples)
+            finally:
+                bind_read_note(None)
 
-        review = getattr(agent, "review_window", None)
+        def review_window(samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+            watch = getattr(agent, "review_window", None)
+            if watch is None:
+                return ()
+            bind_read_note(remember_read)
+            try:
+                return watch(samples)
+            finally:
+                bind_read_note(None)
+
+        review = review_window if getattr(agent, "review_window", None) else None
 
         phase = "reading"
         _note(activity, lock, catalog, project_id, "scanning")
         _progress(catalog, project_id, "scanning", length, resume_at, None)
+        if resume_at <= 0:
+            with contextlib.suppress(CatalogError):
+                catalog.clear_reads(project_id)
 
         def mark_review() -> None:
             _note(activity, lock, catalog, project_id, "checking")
+
+        def remember_read(
+            start: float,
+            end: float,
+            frames: int,
+            nbytes: int,
+            reason: str,
+            reply: str,
+        ) -> None:
+            detail = _read_detail(frames, nbytes, reason, reply)
+            try:
+                already = catalog.list_reads(project_id)
+                if any(
+                    note.start_seconds == start
+                    and note.end_seconds == end
+                    and note.detail == detail
+                    for note in already
+                ):
+                    return
+                catalog.add_read(
+                    project_id,
+                    ReadNote(start, end, frames, nbytes, detail),
+                )
+            except CatalogError:
+                return
 
         scan_film(
             path,
@@ -1371,9 +1453,19 @@ def _activity_job(
         "error": project.error,
         "youtube": project.youtube_url is not None,
         "play_count": play_count,
+        "review_count": _review_count(project),
+        "thumbnail": thumbnail_url(project.youtube_url),
+        "created": getattr(project, "created_at", None),
         "updated": updated,
         "steps": _step_times(steps),
     }
+
+
+def _review_count(project: ProjectDetail | ProjectSummary) -> int:
+    counted = getattr(project, "review_count", None)
+    if isinstance(counted, int):
+        return counted
+    return sum(1 for span in getattr(project, "spans", ()) if span.kind == "uncertain")
 
 
 def _play_uid(project_id: int, play_number: int) -> str:
@@ -1409,6 +1501,7 @@ def _play_summary(project_id: int, play: PlayRecord) -> dict[str, object]:
         "end": play.end_seconds,
         "family": play.family,
         "play_type": play.play_type,
+        "unit": play.unit,
         "reviewed": play.reviewed,
         "video": f"/projects/{project_id}/plays/{play.play_number}",
     }
@@ -1545,14 +1638,40 @@ def _store_lineup(
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
+def _named_sides(catalog: Catalog, project: ProjectDetail, body: _TeamNames) -> FilmTeams:
+    suggested = suggest_team_names(
+        project.name,
+        _still_bytes(catalog, project.project, "left"),
+        _still_bytes(catalog, project.project, "right"),
+    )
+    return FilmTeams(
+        body.left_name or suggested[0],
+        body.right_name or suggested[1],
+        body.mine,
+    )
+
+
+def _still_bytes(catalog: Catalog, project_id: int, kind: str) -> bytes | None:
+    try:
+        path = catalog.team_image(project_id, kind)
+    except CatalogError:
+        return None
+    if path is None or not path.is_file():
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
 def _store_portraits(
     catalog: Catalog,
     project_id: int,
-    body: _TeamNames,
+    teams: FilmTeams,
     draw: Callable[[bytes, str], tuple[bytes, str]],
 ) -> None:
     try:
-        for side, name in (("left", body.left_name), ("right", body.right_name)):
+        for side, name in (("left", teams.left_name), ("right", teams.right_name)):
             still = catalog.team_image(project_id, side)
             if still is None or not still.is_file():
                 raise HTTPException(
@@ -1580,9 +1699,20 @@ def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
 
     if saved is None and url("left") is None and url("right") is None:
         return None
+    try:
+        project = catalog.get_project(project_id)
+    except CatalogError:
+        project = None
+    suggested = suggest_team_names(
+        "" if project is None else project.name,
+        _still_bytes(catalog, project_id, "left"),
+        _still_bytes(catalog, project_id, "right"),
+    )
+    left_name = suggested[0] if saved is None or not saved.left_name else saved.left_name
+    right_name = suggested[1] if saved is None or not saved.right_name else saved.right_name
     return {
-        "left_name": "" if saved is None else saved.left_name,
-        "right_name": "" if saved is None else saved.right_name,
+        "left_name": left_name,
+        "right_name": right_name,
         "mine": None if saved is None else saved.mine,
         "left_still": url("left"),
         "right_still": url("right"),
@@ -1614,6 +1744,7 @@ def _project_payload(
         "steps": _step_times(steps),
         "teams": None if catalog is None else _teams_view(catalog, project.project),
         "plays": [_play_summary(project.project, play) for play in _ordered_plays(project)],
+        "reads": [] if catalog is None else _read_views(catalog, project.project),
         "reviews": [
             {
                 "start": span.start_seconds,
@@ -1626,6 +1757,41 @@ def _project_payload(
             )
         ],
     }
+
+
+def _read_views(catalog: Catalog, project_id: int) -> list[dict[str, object]]:
+    try:
+        notes = catalog.list_reads(project_id)
+    except CatalogError:
+        return []
+    return [
+        {
+            "start": note.start_seconds,
+            "end": note.end_seconds,
+            "detail": note.detail,
+        }
+        for note in notes
+    ]
+
+
+def _read_detail(frames: int, nbytes: int, reason: str, reply: str) -> str:
+    quote = " ".join(reply.split())
+    if len(quote) > 180:
+        quote = quote[:177] + "..."
+    text = f"{frames} frames, {_byte_size(nbytes)}. {reason.rstrip('.')}."
+    if quote:
+        text = f"{text} Reply: {quote}"
+    if len(text) > 500:
+        return text[:497] + "..."
+    return text
+
+
+def _byte_size(nbytes: int) -> str:
+    if nbytes >= 1_000_000:
+        return f"{nbytes / 1_000_000:.1f} MB"
+    if nbytes >= 1000:
+        return f"{round(nbytes / 1000)} KB"
+    return f"{nbytes} B"
 
 
 def _matching_review(
