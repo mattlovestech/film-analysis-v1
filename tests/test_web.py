@@ -117,7 +117,10 @@ def test_page_offers_a_video_upload() -> None:
     assert "Looking up films that are running or stopped." in response.text
     assert 'id="activity-legend"' in response.text
     assert 'className = "facts"' in response.text
-    assert 'className = "speed"' in response.text
+    assert 'id="chart-time"' in response.text
+    assert 'id="chart-plays"' in response.text
+    assert "Total time" in response.text
+    assert "Reading plays per minute" in response.text
     assert "× realtime" in response.text
     assert "plays/min" in response.text
     assert 'id="film-steps"' in response.text

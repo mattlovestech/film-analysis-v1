@@ -1207,6 +1207,7 @@
           <svg id="chart-plays" viewBox="0 0 320 128" role="img" aria-label="Plays read per minute over time"></svg>
         </figure>
       </div>
+      <ol id="activity-legend" class="stages" aria-label="Film steps">
         <li>Start</li>
         <li>Download</li>
         <li>Save</li>
@@ -2291,6 +2292,115 @@
       }
       activityJobs = jobs;
       paintActivitySummary(jobs);
+      paintCharts(jobs);
+    }
+
+    function paintCharts(jobs) {
+      const rows = chartRows(jobs);
+      const timeRows = rows.filter((row) => row.total > 0);
+      const playRows = rows.filter((row) => row.perMin != null);
+      const charts = document.querySelector("#activity-charts");
+      charts.hidden = timeRows.length < 2 && playRows.length < 2;
+      drawChart(document.querySelector("#chart-time"), timeRows, (row) => row.total / 60, "#ffd60a");
+      drawChart(document.querySelector("#chart-plays"), playRows, (row) => row.perMin, "#0a84ff");
+      document.querySelector("#chart-time-value").textContent = timeRows.length
+        ? stepLength(timeRows[timeRows.length - 1].total, false)
+        : "";
+      const latest = playRows.length ? playRows[playRows.length - 1].perMin : null;
+      document.querySelector("#chart-plays-value").textContent = latest == null
+        ? ""
+        : latest >= 10 ? `${Math.round(latest)} / min` : `${latest.toFixed(1)} / min`;
+    }
+
+    function chartRows(jobs) {
+      const rows = jobs
+        .map((job) => {
+          const at = Date.parse(job.updated || "");
+          const steps = Array.isArray(job.steps) ? job.steps : [];
+          const seconds = steps.reduce((sum, step) => sum + (Number(step.seconds) || 0), 0);
+          const read = steps.find((step) => step.name === "scanning");
+          const readWork = read ? Number(read.seconds) || 0 : 0;
+          const plays = Number(job.play_count) || 0;
+          const perMin = readWork >= 1 && plays > 0 ? plays / (readWork / 60) : null;
+          return { at, name: job.name || "Film", seconds, perMin };
+        })
+        .filter((row) => Number.isFinite(row.at) && row.seconds >= 1)
+        .sort((a, b) => a.at - b.at);
+      let total = 0;
+      return rows.map((row) => {
+        total += row.seconds;
+        return { ...row, total };
+      });
+    }
+
+    function drawChart(svg, rows, valueOf, color) {
+      svg.replaceChildren();
+      if (rows.length < 2) return;
+      const width = 320;
+      const height = 128;
+      const left = 34;
+      const right = 8;
+      const top = 12;
+      const bottom = 22;
+      const values = rows.map(valueOf);
+      const max = Math.max(...values, 0.1);
+      const start = rows[0].at;
+      const span = Math.max(1, rows[rows.length - 1].at - start);
+      const xOf = (at) => left + ((at - start) / span) * (width - left - right);
+      const yOf = (value) => top + (1 - value / max) * (height - top - bottom);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      line.setAttribute("fill", "none");
+      line.setAttribute("stroke", color);
+      line.setAttribute("stroke-width", "2");
+      line.setAttribute("stroke-linejoin", "round");
+      line.setAttribute("stroke-linecap", "round");
+      line.setAttribute("points", rows.map((row, index) => `${xOf(row.at)},${yOf(values[index])}`).join(" "));
+      const area = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      const floor = height - bottom;
+      area.setAttribute("fill", color);
+      area.setAttribute("opacity", "0.16");
+      area.setAttribute("points", [
+        `${xOf(rows[0].at)},${floor}`,
+        ...rows.map((row, index) => `${xOf(row.at)},${yOf(values[index])}`),
+        `${xOf(rows[rows.length - 1].at)},${floor}`,
+      ].join(" "));
+      svg.append(area, line, axisLabel(4, yOf(max) + 4, chartTick(max)), axisLabel(4, floor, "0"));
+      svg.append(
+        axisLabel(left, height - 6, chartDay(rows[0].at), "start"),
+        axisLabel(width - right, height - 6, chartDay(rows[rows.length - 1].at), "end"),
+      );
+      rows.forEach((row, index) => {
+        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        dot.setAttribute("cx", String(xOf(row.at)));
+        dot.setAttribute("cy", String(yOf(values[index])));
+        dot.setAttribute("r", "2.5");
+        dot.setAttribute("fill", color);
+        const tip = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        tip.textContent = `${row.name}: ${chartTick(values[index])}`;
+        dot.append(tip);
+        svg.append(dot);
+      });
+    }
+
+    function axisLabel(x, y, text, anchor) {
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", String(x));
+      label.setAttribute("y", String(y));
+      label.setAttribute("fill", "#9c968c");
+      label.setAttribute("font-size", "10");
+      if (anchor) label.setAttribute("text-anchor", anchor);
+      label.textContent = text;
+      return label;
+    }
+
+    function chartTick(value) {
+      if (value >= 100) return String(Math.round(value));
+      if (value >= 10) return value.toFixed(0);
+      return value.toFixed(1);
+    }
+
+    function chartDay(at) {
+      return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(at);
     }
 
     function paintWorkers(count) {
