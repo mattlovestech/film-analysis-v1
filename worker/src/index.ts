@@ -29,48 +29,62 @@ function containerEnv(env: Env): Record<string, string> {
     R2_BUCKET: env.R2_BUCKET,
     FILM_INTERNAL_TOKEN: env.FILM_INTERNAL_TOKEN,
     FILM_ANALYSIS_HOST: "0.0.0.0",
+    FILM_ANALYSIS_PORT: "8000",
     FILM_ANALYSIS_DATA: "/tmp/film-data",
   };
 }
 
-export class Website extends Container<Env> {
+const PORT_READY_MS = 120_000;
+
+class FilmContainer extends Container<Env> {
   defaultPort = 8000;
-  sleepAfter = "10m";
+  enableInternet = true;
   pingEndpoint = "container/ping";
-  entrypoint = ["uv", "run", "--no-dev", "film-analysis"];
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.envVars = containerEnv(env);
+  }
+
+  override async fetch(request: Request): Promise<Response> {
+    try {
+      await this.startAndWaitForPorts({
+        startOptions: {
+          envVars: this.envVars,
+          entrypoint: this.entrypoint,
+          enableInternet: true,
+        },
+        ports: this.defaultPort,
+        cancellationOptions: {
+          instanceGetTimeoutMS: 60_000,
+          portReadyTimeoutMS: PORT_READY_MS,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start the container.";
+      return new Response(`Failed to start container: ${message}`, { status: 500 });
+    }
+    return super.fetch(request);
   }
 }
 
-export class Cutter extends Container<Env> {
-  defaultPort = 8000;
-  sleepAfter = "24h";
-  pingEndpoint = "container/ping";
-  entrypoint = ["uv", "run", "--no-dev", "film-cutter"];
+export class Website extends FilmContainer {
+  sleepAfter = "10m";
+  entrypoint = ["/app/.venv/bin/film-analysis"];
+}
 
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    this.envVars = containerEnv(env);
-  }
+export class Cutter extends FilmContainer {
+  sleepAfter = "24h";
+  entrypoint = ["/app/.venv/bin/film-cutter"];
 }
 
 Cutter.outboundByHost = {
   "film.internal": (request, env) => routeTask(request, env as Env),
 };
 
-export class Task extends Container<Env> {
-  defaultPort = 8000;
+export class Task extends FilmContainer {
   sleepAfter = "5m";
-  pingEndpoint = "container/ping";
-  entrypoint = ["uv", "run", "--no-dev", "film-task"];
-
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    this.envVars = containerEnv(env);
-  }
+  entrypoint = ["/app/.venv/bin/film-task"];
 }
 
 export default {

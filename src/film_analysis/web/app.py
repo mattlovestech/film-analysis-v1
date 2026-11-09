@@ -615,7 +615,7 @@ def main() -> None:
 
     _load_dotenv()
     host = os.environ.get("FILM_ANALYSIS_HOST", "127.0.0.1")
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(os.environ.get("FILM_ANALYSIS_PORT") or os.environ.get("PORT") or "8000")
     uvicorn.run(create_app(store=catalog_from_env()), host=host, port=port)
 
 

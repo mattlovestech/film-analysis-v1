@@ -8,6 +8,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
-ENV FILM_ANALYSIS_HOST=0.0.0.0
+ENV PATH="/app/.venv/bin:$PATH" \
+    FILM_ANALYSIS_HOST=0.0.0.0 \
+    FILM_ANALYSIS_PORT=8000
 EXPOSE 8000
-CMD ["uv", "run", "--no-dev", "film-analysis"]
+# The image already has uv as a tool. Run the installed command so startup
+# does not sync again and exit before the port is open.
+ENTRYPOINT []
+CMD ["film-analysis"]
