@@ -48,29 +48,41 @@ _MODS = frozenset({"dark", "light"})
 _PLAYER_PROMPT = (
     "The reference photo is a football player from this team's game film. "
     "Turn that player into one Madden-style video-game render. "
-    "Follow the player's build, stance, helmet, and uniform from the photo. "
+    "Match the colors and the style of the uniform in the reference photo. "
+    "Copy the exact clothes: the same jersey, pants, helmet, "
+    "stripes, sleeves, socks, and shoe colors. "
     "Stylized 3D football video-game player, helmet on, not a photograph, "
     "standing full length, facing the camera, both feet on the ground, arms relaxed, "
-    "{jersey} jersey, {pants} pants, {helmet} helmet, shoulder pads, "
-    "only the number 00 on the jersey, no other text, cleats, "
-    "plain dark studio background, entire body from helmet to cleats in frame, "
+    "{jersey} jersey {jersey_hex}, {pants} pants {pants_hex}, {pants_style}, "
+    "{helmet} helmet {helmet_hex}, {helmet_style}, jersey numbers {number_hex}, "
+    "only the number 00 on the jersey, no other text, do not write color codes, "
+    "cleats, plain dark studio background, entire body from helmet to cleats in frame, "
     "no field, no crowd, no badges."
 )
 _DETECT_PROMPT = (
     'These frames are from the football film "{title}". '
     "Two teams are in the plays. "
+    "One team wears a white jersey, usually the away team. "
+    "The other wears a solid color jersey, usually the home team. "
+    "Identify those two uniforms. "
     "The left team is lined up on the left side of the frame. "
     "The right team is lined up on the right side of the frame. "
     "Name each team the way a high school roster would: the school, then the mascot. "
     "Use that shape: Johns Creek Gladiators, HF Wildcats, Walton Raiders. "
     "Read jerseys, helmets, the scoreboard, and the field. "
     "A short school name is right when that is what is written. "
-    "Describe jersey, pants, and helmet with color words only, "
-    "such as white, dark blue, or gold. "
-    "Do not put a logo or a jersey number in the color words. "
+    "For each side give jersey, pants, and helmet as color words. "
+    "Also give jersey_hex, pants_hex, helmet_hex, and number_hex as #rrggbb. "
+    "number_hex is the color of the digits on the jersey. "
+    "helmet_style is the shell, such as solid or striped. "
+    "pants_style is the cut and stripe, such as solid or striped. "
     "Reply with JSON only, no markdown: "
-    '{"left":{"name":"","jersey":"","pants":"","helmet":""},'
-    '"right":{"name":"","jersey":"","pants":"","helmet":""}}'
+    '{{"left":{{"name":"","jersey":"","jersey_hex":"#000000",'
+    '"pants":"","pants_hex":"#000000","pants_style":"",'
+    '"helmet":"","helmet_hex":"#000000","helmet_style":"","number_hex":"#000000"}},'
+    '"right":{{"name":"","jersey":"","jersey_hex":"#000000",'
+    '"pants":"","pants_hex":"#000000","pants_style":"",'
+    '"helmet":"","helmet_hex":"#000000","helmet_style":"","number_hex":"#000000"}}}}'
 )
 
 
@@ -82,6 +94,13 @@ class Uniform:
     jersey: str
     pants: str
     helmet: str
+    number: str = ""
+    helmet_style: str = ""
+    pants_style: str = ""
+    jersey_hex: str = ""
+    pants_hex: str = ""
+    helmet_hex: str = ""
+    number_hex: str = ""
 
 
 def lineup_moment(plays: Sequence[PlayRecord]) -> float:
@@ -188,17 +207,31 @@ def colors_from_pixels(pixels: Sequence[tuple[int, int, int]]) -> tuple[str, str
     return _hex(jersey), _FALLBACK[1] if pants is None else _hex(pants)
 
 
-def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 3) -> list[bytes]:
-    """A lineup frame from each of the first scrimmage plays."""
+def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 4) -> list[bytes]:
+    """A few lineup frames spread through the film, not only the opening plays."""
 
-    chosen = [play for play in plays if play.family == "scrimmage"] or list(plays)
     frames: list[bytes] = []
-    for play in chosen[:limit]:
+    for play in sample_plays(plays, limit):
         try:
             frames.append(_frame(video, lineup_moment((play,))))
         except (VideoAnalysisError, OSError):
             continue
     return frames
+
+
+def sample_plays(plays: Sequence[PlayRecord], limit: int = 4) -> list[PlayRecord]:
+    """Scrimmage plays spaced across the film, so a handful of frames covers both uniforms."""
+
+    chosen = [play for play in plays if play.family == "scrimmage"] or list(plays)
+    if limit < 1 or not chosen:
+        return []
+    if len(chosen) <= limit:
+        return chosen
+    if limit == 1:
+        return [chosen[0]]
+    step = (len(chosen) - 1) / (limit - 1)
+    indexes = sorted({round(index * step) for index in range(limit)})
+    return [chosen[index] for index in indexes]
 
 
 def detect_uniforms(
@@ -209,7 +242,7 @@ def detect_uniforms(
 ) -> tuple[Uniform, Uniform]:
     """Ask the model which two teams are in the plays, then keep a color fallback."""
 
-    found = _ask_uniforms(frames, title)
+    found = _ask_uniforms(frames, title, left_still, right_still)
     if found is not None:
         return found
     return _color_uniforms(title, left_still, right_still)
@@ -249,25 +282,45 @@ def decode_uniforms(value: str) -> tuple[Uniform, Uniform] | None:
 def uniform_line(uniform: Uniform) -> str:
     """One short line for the uniform the standing player will wear."""
 
-    return f"{uniform.jersey} jersey, {uniform.pants} pants, {uniform.helmet} helmet"
+    jersey = _labeled(uniform.jersey, uniform.jersey_hex)
+    pants = _labeled(uniform.pants, uniform.pants_hex, uniform.pants_style)
+    helmet = _labeled(uniform.helmet, uniform.helmet_hex, uniform.helmet_style)
+    return f"{jersey} jersey, {pants} pants, {helmet} helmet"
 
 
-def make_portrait(uniform: Uniform, still: bytes | None = None) -> tuple[bytes, str]:
-    """A Madden-style player based on this side of the film, wearing the uniform."""
-
-    image = _render(player_prompt(uniform), still)
-    if image is not None:
-        return image, ".jpg"
-    return roster_svg(_swatch(uniform.jersey), _swatch(uniform.pants)), ".svg"
+def _labeled(color: str, hex_code: str = "", style: str = "") -> str:
+    parts = [part for part in (color, style, hex_code) if part]
+    return " ".join(parts)
 
 
 def player_prompt(uniform: Uniform) -> str:
-    """The one standing-player prompt. Only the uniform colors change."""
+    """The one standing-player prompt. It requires the clothes in the play photo."""
 
     jersey = color_phrase(uniform.jersey) or "white"
     pants = color_phrase(uniform.pants) or "white"
     helmet = color_phrase(uniform.helmet) or jersey
-    return _PLAYER_PROMPT.format(jersey=jersey, pants=pants, helmet=helmet)
+    return _PLAYER_PROMPT.format(
+        jersey=jersey,
+        pants=pants,
+        helmet=helmet,
+        jersey_hex=_hex_color(uniform.jersey_hex) or "from the photo",
+        pants_hex=_hex_color(uniform.pants_hex) or "from the photo",
+        helmet_hex=_hex_color(uniform.helmet_hex) or "from the photo",
+        number_hex=_hex_color(uniform.number_hex) or "from the photo",
+        helmet_style=style_phrase(uniform.helmet_style) or "as in the photo",
+        pants_style=style_phrase(uniform.pants_style) or "as in the photo",
+    )
+
+
+def make_portrait(uniform: Uniform, still: bytes | None = None) -> tuple[bytes, str]:
+    """A Madden player in number 00, matching this side's uniform and the play photo."""
+
+    image = _render(player_prompt(uniform), still)
+    if image is not None:
+        return image, ".jpg"
+    shirt = _swatch(uniform.jersey_hex or uniform.jersey)
+    legs = _swatch(uniform.pants_hex or uniform.pants)
+    return roster_svg(shirt, legs), ".svg"
 
 
 def color_phrase(value: str) -> str:
@@ -285,6 +338,47 @@ def color_phrase(value: str) -> str:
     if not any(word in _COLORS for word in kept):
         return ""
     return " ".join(kept)
+
+
+def _hex_note(value: str) -> str:
+    color = _hex_color(value)
+    return f" {color}" if color else ""
+
+
+def _extra(style: str, hex_color: str) -> str:
+    parts = [part for part in (style_phrase(style), _hex_color(hex_color)) if part]
+    return f" {' '.join(parts)}" if parts else ""
+
+
+def style_phrase(value: str) -> str:
+    """A few style words, so a logo or a school name cannot enter the prompt."""
+
+    words = re.findall(r"[a-z]+", value.lower())
+    kept = [word for word in words if word in _STYLES][:4]
+    return " ".join(kept)
+
+
+_STYLES = frozenset(
+    {
+        "solid",
+        "stripe",
+        "stripes",
+        "striped",
+        "glossy",
+        "matte",
+        "shell",
+        "center",
+        "side",
+        "two",
+        "tone",
+        "dark",
+        "light",
+        "white",
+        "black",
+        "gold",
+        "silver",
+    }
+)
 
 
 _TEAM_PROMPT = """
@@ -569,24 +663,38 @@ def _frame(video: Path, at: float) -> bytes:
         return dest.read_bytes()
 
 
-def _ask_uniforms(frames: Sequence[bytes], title: str) -> tuple[Uniform, Uniform] | None:
-    jpegs = [frame for frame in frames if frame.startswith(b"\xff\xd8\xff")][:3]
+def _ask_uniforms(
+    frames: Sequence[bytes],
+    title: str,
+    left_still: bytes | None = None,
+    right_still: bytes | None = None,
+) -> tuple[Uniform, Uniform] | None:
+    labeled: list[tuple[str, bytes]] = []
+    for frame in frames:
+        if len(labeled) >= 4:
+            break
+        if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff"):
+            labeled.append((f"Play frame {len(labeled) + 1}", frame))
+    if left_still and left_still.startswith(b"\xff\xd8\xff"):
+        labeled.append(("Left team, closer on the players", focus_player(left_still, "left")))
+    if right_still and right_still.startswith(b"\xff\xd8\xff"):
+        labeled.append(("Right team, closer on the players", focus_player(right_still, "right")))
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not jpegs or not api_key:
+    if not labeled or not api_key:
         return None
-    hint = " ".join(title.split())[:120] or "this film"
+    hint = " ".join(title.split()).replace("{", "").replace("}", "")[:120] or "this film"
     content: list[dict[str, object]] = []
-    for index, frame in enumerate(jpegs, start=1):
-        content.append({"type": "text", "text": f"Play frame {index}"})
+    for label, frame in labeled:
+        content.append({"type": "text", "text": label})
         content.append(_image_block(frame))
-    content.append({"type": "text", "text": _DETECT_PROMPT.format(title=hint)})
     try:
+        content.append({"type": "text", "text": _DETECT_PROMPT.format(title=hint)})
         import anthropic
 
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model=os.environ.get("FILM_ANALYSIS_MODEL", DEFAULT_MODEL),
-            max_tokens=400,
+            max_tokens=700,
             messages=[{"role": "user", "content": content}],
         )
     except Exception:
@@ -619,19 +727,60 @@ def _uniform_from_colors(name: str, still: bytes | None) -> Uniform:
         shirt = "dark blue"
     if legs == "the color in the photo":
         legs = "white"
-    return Uniform(name, shirt, legs, shirt)
+    return Uniform(
+        name,
+        shirt,
+        legs,
+        shirt,
+        jersey_hex=jersey if _hex_color(jersey) else "",
+        pants_hex=pants if _hex_color(pants) else "",
+        helmet_hex=jersey if _hex_color(jersey) else "",
+    )
+
+
+def _hex_color(value: object) -> str:
+    text = str(value or "").strip()
+    return text.lower() if _COLOR.fullmatch(text) else ""
+
+
+def _style(value: object) -> str:
+    return style_phrase(str(value or ""))
 
 
 def _uniform_from_model(value: object, fallback_name: str) -> Uniform | None:
     if not isinstance(value, dict):
         return None
-    jersey = color_phrase(str(value.get("jersey") or ""))
-    pants = color_phrase(str(value.get("pants") or ""))
-    helmet = color_phrase(str(value.get("helmet") or "")) or jersey
+    jersey_hex = _hex_color(value.get("jersey_hex"))
+    pants_hex = _hex_color(value.get("pants_hex"))
+    helmet_hex = _hex_color(value.get("helmet_hex"))
+    number_hex = _hex_color(value.get("number_hex"))
+    jersey = color_phrase(str(value.get("jersey") or "")) or (
+        color_words(jersey_hex) if jersey_hex else ""
+    )
+    pants = color_phrase(str(value.get("pants") or "")) or (
+        color_words(pants_hex) if pants_hex else ""
+    )
+    helmet = color_phrase(str(value.get("helmet") or "")) or (
+        color_words(helmet_hex) if helmet_hex else ""
+    ) or jersey
     if not jersey or not pants:
         return None
     name = _school_name(value.get("name")) or fallback_name
-    return Uniform(name, jersey, pants, helmet)
+    return Uniform(
+        name,
+        jersey,
+        pants,
+        helmet,
+        number=color_phrase(str(value.get("number") or "")) or (
+            color_words(number_hex) if number_hex else ""
+        ),
+        helmet_style=_style(value.get("helmet_style")),
+        pants_style=_style(value.get("pants_style")),
+        jersey_hex=jersey_hex,
+        pants_hex=pants_hex,
+        helmet_hex=helmet_hex,
+        number_hex=number_hex,
+    )
 
 
 def _uniform_dict(uniform: Uniform) -> dict[str, str]:
@@ -640,6 +789,13 @@ def _uniform_dict(uniform: Uniform) -> dict[str, str]:
         "jersey": uniform.jersey,
         "pants": uniform.pants,
         "helmet": uniform.helmet,
+        "number": uniform.number,
+        "jersey_hex": uniform.jersey_hex,
+        "pants_hex": uniform.pants_hex,
+        "helmet_hex": uniform.helmet_hex,
+        "number_hex": uniform.number_hex,
+        "helmet_style": uniform.helmet_style,
+        "pants_style": uniform.pants_style,
     }
 
 
@@ -663,6 +819,8 @@ def _json_object(reply: str) -> dict[str, object] | None:
 
 
 def _swatch(phrase: str) -> str:
+    if _COLOR.fullmatch(phrase):
+        return phrase
     text = color_phrase(phrase)
     if text in _SWATCH:
         return _SWATCH[text]
@@ -745,7 +903,7 @@ def _reference_jpeg(still: bytes) -> bytes | None:
                 "-i",
                 str(source),
                 "-vf",
-                "scale=768:1280:force_original_aspect_ratio=decrease",
+                "scale=480:480:force_original_aspect_ratio=decrease",
                 "-q:v",
                 "5",
                 str(dest),

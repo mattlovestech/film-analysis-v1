@@ -662,6 +662,34 @@
     #plays-heading,
     #teams,
     #report { scroll-margin-top: 1rem; }
+    #plays-heading { margin-bottom: 0; }
+    #plays-heading button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-weight: 650;
+    }
+    #plays-heading button:hover:not(:disabled) { filter: none; }
+    #plays-heading .chevron {
+      width: 0.42rem;
+      height: 0.42rem;
+      margin-top: -0.15rem;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg);
+    }
+    #plays-heading button[aria-expanded="false"] .chevron { transform: rotate(-45deg); }
+    #plays-count {
+      color: var(--muted);
+      font-size: 0.85rem;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+    #results[hidden] { display: none; }
     #activity-list li.skeleton {
       display: grid;
       gap: 0.45rem;
@@ -1414,28 +1442,36 @@
         </div>
         <p class="chart-note"></p>
       </nav>
-      <h2 id="plays-heading" hidden>Plays</h2>
-      <ul id="results"></ul>
+      <section id="plays" hidden>
+        <h2 id="plays-heading">
+          <button type="button" id="plays-toggle" aria-expanded="true" aria-controls="results">
+            <span class="chevron" aria-hidden="true"></span>
+            Plays
+            <span id="plays-count"></span>
+          </button>
+        </h2>
+        <ul id="results"></ul>
+      </section>
       <section id="teams" hidden>
         <h2>Teams</h2>
-        <p id="teams-note" class="lead">Each side is named for its school and mascot.</p>
-        <p id="mine-ask" class="mine-ask">Which side is your team?</p>
+        <p id="teams-note" class="lead">A generated player for each school.</p>
+        <p id="mine-ask" class="mine-ask">Which generated player is your team?</p>
         <div class="team-row" role="radiogroup" aria-labelledby="mine-ask">
           <article class="team-card">
-            <p class="team-kicker">Left side</p>
-            <img id="team-left-player" class="player" alt="Madden-style player from the left side of the film" hidden>
+            <p id="team-left-kicker" class="team-kicker">First school</p>
+            <img id="team-left-player" class="player" alt="Generated player for the first school" hidden>
             <p id="team-left-uniform" class="team-uniform" hidden></p>
-            <img id="team-left-still" alt="Left side of the lineup" hidden>
+            <img id="team-left-still" alt="" hidden>
             <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">This is my team</button>
             <label for="team-left-name">Team name
               <input id="team-left-name" maxlength="40" autocomplete="off">
             </label>
           </article>
           <article class="team-card">
-            <p class="team-kicker">Right side</p>
-            <img id="team-right-player" class="player" alt="Madden-style player from the right side of the film" hidden>
+            <p id="team-right-kicker" class="team-kicker">Second school</p>
+            <img id="team-right-player" class="player" alt="Generated player for the second school" hidden>
             <p id="team-right-uniform" class="team-uniform" hidden></p>
-            <img id="team-right-still" alt="Right side of the lineup" hidden>
+            <img id="team-right-still" alt="" hidden>
             <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">This is my team</button>
             <label for="team-right-name">Team name
               <input id="team-right-name" maxlength="40" autocomplete="off">
@@ -1443,7 +1479,7 @@
           </article>
         </div>
         <p id="teams-error" class="lead" hidden></p>
-        <button id="teams-retry" class="retry" type="button" hidden>Read the lineup again</button>
+        <button id="teams-retry" class="retry" type="button" hidden>Generate the players again</button>
         <button id="teams-save" type="button">Save teams</button>
       </section>
       <div id="report" hidden>
@@ -1476,7 +1512,9 @@
     const status = document.querySelector("#status");
     const results = document.querySelector("#results");
     const reviews = document.querySelector("#reviews");
-    const playsHeading = document.querySelector("#plays-heading");
+    const playsSection = document.querySelector("#plays");
+    const playsToggle = document.querySelector("#plays-toggle");
+    const playsCount = document.querySelector("#plays-count");
     const outcome = document.querySelector("#outcome");
     const reviewsHeading = document.querySelector("#reviews-heading");
     const reviewsLead = document.querySelector("#reviews-lead");
@@ -1679,7 +1717,7 @@
         return path;
       }
       // Lineup stills, portraits, and the report run here. The cloud site does not have them yet.
-      if (path.includes("/teams") || path.includes("/report.")) return path;
+      if (path.includes("/teams") || path.includes("/report")) return path;
       if (runningPlace() === "cloud" && onThisComputer()) return `/via-cloud${path}`;
       return path;
     }
@@ -3882,12 +3920,7 @@
       teamsSection.dataset.project = String(projectId);
       for (const side of ["left", "right"]) {
         const still = document.querySelector(`#team-${side}-still`);
-        const stillUrl = teams[`${side}_still`];
-        if (stillUrl && still.dataset.source !== stillUrl) {
-          still.dataset.source = stillUrl;
-          still.src = stillUrl;
-        }
-        still.hidden = !stillUrl;
+        still.hidden = true;
         const player = document.querySelector(`#team-${side}-player`);
         const playerUrl = teams[`${side}_player`];
         if (playerUrl && player.dataset.source !== playerUrl) {
@@ -3901,6 +3934,9 @@
           name.value = saved;
           name.dataset.saved = saved;
         }
+        const school = name.value.trim() || (side === "left" ? "First school" : "Second school");
+        document.querySelector(`#team-${side}-kicker`).textContent = school;
+        player.alt = `Generated player for ${school}`;
         document.querySelector(`#team-${side}-mine`).setAttribute(
           "aria-pressed",
           teams.mine === side ? "true" : "false",
@@ -3912,8 +3948,8 @@
       paintMineChoice();
       teamsRetry.hidden = true;
       teamsNote.textContent = teams.left_player && teams.right_player
-        ? "Madden-style players from each side of the film."
-        : "Each side is named for its school and mascot.";
+        ? "A generated player for each school."
+        : "Building a generated player for each school.";
     }
 
     function paintMineChoice() {
@@ -3925,8 +3961,10 @@
         card.classList.toggle("chosen", selected);
         card.classList.toggle("other", Boolean(chosen) && !selected);
         const name = document.querySelector(`#team-${button.dataset.side}-name`).value.trim();
-        const side = button.dataset.side === "left" ? "Left side" : "Right side";
-        const who = name || side;
+        const who = name || "This school";
+        document.querySelector(`#team-${button.dataset.side}-kicker`).textContent = who === "This school"
+          ? (button.dataset.side === "left" ? "First school" : "Second school")
+          : who;
         if (!chosen) button.textContent = "This is my team";
         else if (selected) button.textContent = "Your team";
         else button.textContent = "Opponent";
@@ -3937,14 +3975,24 @@
       }
     }
 
+    async function readBody(response) {
+      const text = await response.text();
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { detail: text.replace(/\s+/g, " ").slice(0, 180) };
+      }
+    }
+
     async function loadLineup(projectId) {
       teamsSection.dataset.loading = String(projectId);
-      teamsNote.textContent = "Building a Madden-style player for each side.";
+      teamsNote.textContent = "Building a generated player for each school.";
       teamsError.hidden = true;
       teamsRetry.hidden = true;
       try {
         const response = await fetch(`/api/projects/${projectId}/teams/stills`, { method: "POST" });
-        const payload = await response.json();
+        const payload = await readBody(response);
         if (!response.ok) {
           throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not read a lineup.");
         }
@@ -3954,7 +4002,7 @@
         }
       } catch (error) {
         if (results.dataset.project !== String(projectId)) return;
-        teamsNote.textContent = "The lineup stills could not be read.";
+        teamsNote.textContent = "The players could not be generated.";
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not read a lineup.";
         teamsRetry.hidden = false;
@@ -3979,13 +4027,25 @@
     });
     teamsSave.addEventListener("click", () => saveTeams());
     reportGenerate.addEventListener("click", () => enableReportDownload());
+    playsToggle.addEventListener("click", () => {
+      setPlaysOpen(playsToggle.getAttribute("aria-expanded") !== "true");
+    });
     chartProgress.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-target]");
       if (!button) return;
+      if (button.dataset.target === "plays-heading") setPlaysOpen(true);
       if (button.dataset.target === "report") enableReportDownload();
       const target = document.getElementById(button.dataset.target);
       if (target && !target.hidden) target.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+
+    function setPlaysOpen(open) {
+      playsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      results.hidden = !open;
+      if (!open) {
+        for (const video of results.querySelectorAll("video")) video.pause();
+      }
+    }
 
     async function saveTeams() {
       const projectId = results.dataset.project;
@@ -3994,7 +4054,7 @@
       const mine = teamsSection.querySelector('button.mine[aria-pressed="true"]');
       teamsSave.disabled = true;
       teamsError.hidden = true;
-      teamsNote.textContent = "Building a Madden-style player for each side.";
+      teamsNote.textContent = "Building a generated player for each school.";
       try {
         const response = await fetch(`/api/projects/${projectId}/teams`, {
           method: "POST",
@@ -4005,7 +4065,7 @@
             mine: mine ? mine.dataset.side : null,
           }),
         });
-        const payload = await response.json();
+        const payload = await readBody(response);
         if (!response.ok) {
           throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not save those teams.");
         }
@@ -4015,7 +4075,7 @@
       } catch (error) {
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
-        teamsNote.textContent = "Each side is named for its school and mascot.";
+        teamsNote.textContent = "A generated player for each school.";
       } finally {
         teamsSave.disabled = false;
       }
@@ -4063,7 +4123,8 @@
       }
       if (project.status === "scanning") paintScan(project);
       const plays = project.plays || [];
-      playsHeading.hidden = plays.length === 0;
+      playsSection.hidden = plays.length === 0;
+      playsCount.textContent = plays.length ? String(plays.length) : "";
       const seen = new Set(plays.map((play) => String(play.play_number)));
       for (const play of plays) {
         if (results.querySelector(`li[data-play="${play.play_number}"]`)) continue;
@@ -4236,9 +4297,9 @@
       teamsStep.querySelector("span").textContent = teamsDone ? "Done" : "Next";
       reportStep.querySelector("span").textContent = reportReady ? "Done" : teamsDone ? "Ready" : "";
       chartNote.textContent = reportReady
-        ? "The scouting report is ready to download."
+        ? "Each play was read. Download the scouting report."
         : teamsDone
-          ? "Your team is tagged. Generate the scouting report."
+          ? "Your team is tagged. Generate the scouting report from each play."
           : "Review the plays if you want, then tag your team to generate the report.";
       const reviewText = reviewDone
         ? "All plays reviewed."
@@ -4265,6 +4326,7 @@
       if (reportBox.dataset.project !== String(project.project)) {
         reportBox.dataset.project = String(project.project);
         delete reportBox.dataset.ready;
+        delete reportBox.dataset.plays;
         delete reportBox.dataset.labeled;
       }
       if ("teams" in project) {
@@ -4274,33 +4336,61 @@
       }
       const labeled = reportBox.dataset.labeled === "1";
       const ready = labeled && reportBox.dataset.ready === String(project.project);
+      const busy = reportGenerate.dataset.busy === "1";
       reportGenerate.hidden = ready;
-      reportGenerate.disabled = !labeled;
+      reportGenerate.disabled = !labeled || busy;
+      if (!busy) reportGenerate.textContent = "Generate scouting report";
       reportLink.hidden = !ready;
       reportCsv.hidden = !ready;
       reportLink.href = `/api/projects/${project.project}/report.pdf`;
       reportCsv.href = `/api/projects/${project.project}/report.csv`;
+      const count = Number(reportBox.dataset.plays) || 0;
+      const read = count === 1 ? "Read 1 play." : `Read ${count} plays.`;
       reportNote.textContent = ready
-        ? "The scouting report is ready. Download the PDF or the CSV."
+        ? `${read} Download the PDF or the CSV.`
         : labeled
-          ? "Your team is labeled. Generate the scouting report to download it."
+          ? "Your team is labeled. Generate the scouting report from each play."
           : "Label your team, then generate the scouting report.";
     }
 
-    function enableReportDownload() {
+    async function enableReportDownload() {
       const projectId = results.dataset.project;
-      if (!projectId || reportBox.dataset.labeled !== "1") return;
-      reportBox.dataset.project = String(projectId);
-      reportBox.dataset.ready = String(projectId);
-      paintReport({ status: "ready", project: projectId, plays: [{}] });
-      if (chartProgress.hidden) return;
-      const reportStep = chartProgress.querySelector('[data-step="report"]');
-      markChartStep(reportStep, "done");
-      reportStep.querySelector("span").textContent = "Done";
-      chartFill.style.width = "100%";
-      chartTrack.setAttribute("aria-valuenow", "100");
-      chartNote.textContent = "The scouting report is ready to download.";
-      chartTrack.setAttribute("aria-valuetext", "The scouting report is ready to download.");
+      if (!projectId || reportBox.dataset.labeled !== "1" || reportGenerate.dataset.busy === "1") {
+        return;
+      }
+      reportGenerate.dataset.busy = "1";
+      reportGenerate.disabled = true;
+      reportGenerate.textContent = "Reading each play…";
+      reportNote.textContent = "Reading the data on each play.";
+      try {
+        const response = await fetch(`/api/projects/${projectId}/report`, { method: "POST" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(
+            typeof payload.detail === "string" ? payload.detail : "Could not read those plays.",
+          );
+        }
+        reportBox.dataset.project = String(projectId);
+        reportBox.dataset.ready = String(projectId);
+        reportBox.dataset.plays = String(payload.plays || 0);
+        paintReport({ status: "ready", project: projectId, plays: [{}] });
+        if (chartProgress.hidden) return;
+        const reportStep = chartProgress.querySelector('[data-step="report"]');
+        markChartStep(reportStep, "done");
+        reportStep.querySelector("span").textContent = "Done";
+        chartFill.style.width = "100%";
+        chartTrack.setAttribute("aria-valuenow", "100");
+        chartNote.textContent = "Each play was read. Download the scouting report.";
+        chartTrack.setAttribute("aria-valuetext", "Each play was read. Download the scouting report.");
+      } catch (error) {
+        reportNote.textContent = error.message || "Could not read those plays.";
+      } finally {
+        delete reportGenerate.dataset.busy;
+        if (reportBox.dataset.ready !== String(projectId)) {
+          reportGenerate.disabled = reportBox.dataset.labeled !== "1";
+          reportGenerate.textContent = "Generate scouting report";
+        }
+      }
     }
 
     function refreshReport() {

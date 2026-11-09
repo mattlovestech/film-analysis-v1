@@ -22,11 +22,14 @@ def test_the_report_counts_offense_and_defense() -> None:
 
     assert untagged_plays(plays) == 0
     assert "North against South." in text
+    assert "Read from 4 plays: 2 run, 1 pass, 1 kickoff." in text
     assert "North ran 2 offensive snaps." in text
     assert "1 run (50%) and 1 pass (50%)" in text
     assert "North defended 1 snap." in text
     assert "1 kickoff" in text
-    assert "Play 1  0:10-0:16  Run  6s" in text
+    assert "Play 1  0:10-0:16  Run  6s  Offense" in text
+    assert "Play 3  0:40-0:47  Run  7s  Defense" in text
+    assert "Play 4  1:00-1:06  Kickoff  6s  Special teams" in text
 
 
 def test_the_report_names_both_teams_when_yours_is_not_marked() -> None:
@@ -48,6 +51,21 @@ def test_a_scrimmage_play_without_a_side_is_still_open() -> None:
     )
 
     assert untagged_plays(plays) == 1
+
+
+def test_generating_the_report_reads_each_play(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    client = TestClient(create_app(store=store))
+
+    waiting = client.post("/api/projects/1/report")
+    assert waiting.status_code == 400
+    assert "Label your team" in waiting.json()["detail"]
+
+    store.set_film_teams(1, FilmTeams("North", "South", "left"))
+    created = client.post("/api/projects/1/report")
+
+    assert created.status_code == 200
+    assert created.json() == {"project": 1, "plays": 2, "ready": True}
 
 
 def test_the_pdf_is_ready_after_the_team_is_labeled(tmp_path: Path) -> None:

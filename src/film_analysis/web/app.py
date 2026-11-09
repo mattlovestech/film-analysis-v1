@@ -56,7 +56,7 @@ from film_analysis.storage.catalog import (
 )
 from film_analysis.web.cloud import cloud_target
 from film_analysis.web.playback import cut_clip
-from film_analysis.web.report import scouting_csv, scouting_pdf
+from film_analysis.web.report import play_reads, scouting_csv, scouting_pdf
 from film_analysis.web.teams import (
     Uniform,
     decode_uniforms,
@@ -479,24 +479,16 @@ def create_app(
         media = "image/svg+xml" if path.suffix == ".svg" else "image/jpeg"
         return FileResponse(path, media_type=media)
 
+    @app.post("/api/projects/{project_id}/report")
+    def generate_scouting_report(project_id: int) -> dict[str, object]:
+        saved, _teams, plays = _report_film(catalog, project_id)
+        reads = play_reads(plays)
+        return {"project": saved.project, "plays": len(reads), "ready": True}
+
     @app.get("/api/projects/{project_id}/report.pdf")
     def scouting_report(project_id: int) -> Response:
-        saved = _require_project(catalog, project_id)
-        if saved.status != "ready" or not saved.plays:
-            raise HTTPException(
-                status_code=400,
-                detail="The scouting report waits until the plays are identified.",
-            )
-        try:
-            teams = catalog.film_teams(project_id)
-        except CatalogError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
-        if teams is None or teams.mine not in {"left", "right"}:
-            raise HTTPException(
-                status_code=400,
-                detail="Label your team before the scouting report.",
-            )
-        pdf = scouting_pdf(saved.name, teams, _ordered_plays(saved))
+        saved, teams, plays = _report_film(catalog, project_id)
+        pdf = scouting_pdf(saved.name, teams, plays)
         return Response(
             content=pdf,
             media_type="application/pdf",
@@ -505,22 +497,8 @@ def create_app(
 
     @app.get("/api/projects/{project_id}/report.csv")
     def scouting_sheet(project_id: int) -> Response:
-        saved = _require_project(catalog, project_id)
-        if saved.status != "ready" or not saved.plays:
-            raise HTTPException(
-                status_code=400,
-                detail="The scouting report waits until the plays are identified.",
-            )
-        try:
-            teams = catalog.film_teams(project_id)
-        except CatalogError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
-        if teams is None or teams.mine not in {"left", "right"}:
-            raise HTTPException(
-                status_code=400,
-                detail="Label your team before the scouting report.",
-            )
-        sheet = scouting_csv(saved.name, teams, _ordered_plays(saved))
+        saved, teams, plays = _report_film(catalog, project_id)
+        sheet = scouting_csv(saved.name, teams, plays)
         return Response(
             content=sheet,
             media_type="text/csv; charset=utf-8",
@@ -1684,6 +1662,29 @@ def _stamp(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed
+
+
+def _report_film(
+    catalog: Catalog, project_id: int
+) -> tuple[ProjectDetail, FilmTeams, list[PlayRecord]]:
+    """Load a finished film and the chart stored on each play."""
+
+    saved = _require_project(catalog, project_id)
+    if saved.status != "ready" or not saved.plays:
+        raise HTTPException(
+            status_code=400,
+            detail="The scouting report waits until the plays are identified.",
+        )
+    try:
+        teams = catalog.film_teams(project_id)
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if teams is None or teams.mine not in {"left", "right"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Label your team before the scouting report.",
+        )
+    return saved, teams, _ordered_plays(saved)
 
 
 def _require_project(catalog: Catalog, project_id: int) -> ProjectDetail:

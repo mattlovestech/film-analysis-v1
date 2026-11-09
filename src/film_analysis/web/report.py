@@ -1,8 +1,9 @@
-"""A scouting report from the play chart, once a team is labeled."""
+"""A scouting report read from the data stored on each play."""
 
 import csv
 import io
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from fpdf import FPDF
 
@@ -21,6 +22,26 @@ _CALLS = {
 }
 
 
+@dataclass(frozen=True)
+class PlayRead:
+    """The chart fields one play contributes to the report."""
+
+    number: int
+    start_seconds: float
+    end_seconds: float
+    seconds: float
+    call: str
+    call_key: str | None
+    family: str
+    side: str
+
+
+def play_reads(plays: Sequence[PlayRecord]) -> tuple[PlayRead, ...]:
+    """Read the stored chart on each play. The report is built only from these."""
+
+    return tuple(_read_play(play) for play in plays)
+
+
 def untagged_plays(plays: Sequence[PlayRecord]) -> int:
     """How many plays still need an offense or defense tag.
 
@@ -37,18 +58,19 @@ def scouting_blocks(
 ) -> list[tuple[str, str]]:
     """The report as titled sections and lines, before it becomes a PDF."""
 
+    reads = play_reads(plays)
     yours, opponent, owned = _names(teams)
-    offense = [play for play in plays if play.unit == "offense" and not _special(play)]
-    defense = [play for play in plays if play.unit == "defense" and not _special(play)]
-    special = [play for play in plays if _special(play)]
+    offense = [play for play in reads if play.side == "offense"]
+    defense = [play for play in reads if play.side == "defense"]
+    special = [play for play in reads if play.side == "special teams"]
     intro = f"{yours} against {opponent}." if owned else _both_teams(teams)
     blocks: list[tuple[str, str]] = [
         ("title", f"Scouting report: {film_name}"),
         ("body", intro),
-        ("body", _chart_summary(plays)),
-        ("heading", "Plays"),
+        ("body", _chart_summary(reads)),
+        ("heading", "Each play"),
     ]
-    blocks.extend(_play_lines(plays))
+    blocks.extend(_play_lines(reads))
     if offense or defense:
         offense_name = yours if owned else "Offense"
         defense_name = yours if owned else "Defense"
@@ -116,23 +138,35 @@ def scouting_csv(
             "side",
         ]
     )
-    for play in plays:
-        span = max(0.0, play.end_seconds - play.start_seconds)
+    for play in play_reads(plays):
         writer.writerow(
             [
                 film_name,
                 yours,
                 opponent,
-                play.play_number,
+                play.number,
                 _csv_number(play.start_seconds),
                 _csv_number(play.end_seconds),
-                _csv_number(span),
-                _call(play),
+                _csv_number(play.seconds),
+                play.call,
                 play.family,
-                _side(play),
+                play.side,
             ]
         )
     return buffer.getvalue()
+
+
+def _read_play(play: PlayRecord) -> PlayRead:
+    return PlayRead(
+        number=play.play_number,
+        start_seconds=play.start_seconds,
+        end_seconds=play.end_seconds,
+        seconds=max(0.0, play.end_seconds - play.start_seconds),
+        call=_call(play),
+        call_key=play.play_type,
+        family=play.family,
+        side=_side(play),
+    )
 
 
 def _needs_unit(play: PlayRecord) -> bool:
@@ -172,27 +206,26 @@ def _both_teams(teams: FilmTeams | None) -> str:
     return f"{teams.left_name} and {teams.right_name}."
 
 
-def _chart_summary(plays: Sequence[PlayRecord]) -> str:
+def _chart_summary(plays: Sequence[PlayRead]) -> str:
     if not plays:
-        return "No plays are in this film."
+        return "Read from no plays."
     counts: dict[str, int] = {}
     for play in plays:
-        name = _call(play)
-        counts[name] = counts.get(name, 0) + 1
+        counts[play.call] = counts.get(play.call, 0) + 1
     pieces = [f"{count} {name.lower()}" for name, count in counts.items()]
     noun = "play" if len(plays) == 1 else "plays"
-    return f"{len(plays)} {noun}: {', '.join(pieces)}."
+    return f"Read from {len(plays)} {noun}: {', '.join(pieces)}."
 
 
-def _side_copy(plays: Sequence[PlayRecord], team: str, unit: str) -> str:
+def _side_copy(plays: Sequence[PlayRead], team: str, unit: str) -> str:
     if not plays:
         side = "offensive" if unit == "offense" else "defensive"
         return f"{team} has no {side} snaps in this film."
     snaps = len(plays)
-    runs = sum(1 for play in plays if play.play_type == "run")
-    passes = sum(1 for play in plays if play.play_type == "pass")
+    runs = sum(1 for play in plays if play.call_key == "run")
+    passes = sum(1 for play in plays if play.call_key == "pass")
     charted = runs + passes
-    average = sum(max(0.0, play.end_seconds - play.start_seconds) for play in plays) / snaps
+    average = sum(play.seconds for play in plays) / snaps
     snap_word = "snap" if snaps == 1 else "snaps"
     if unit == "offense":
         lead = f"{team} ran {snaps} offensive {snap_word}."
@@ -209,31 +242,30 @@ def _side_copy(plays: Sequence[PlayRecord], team: str, unit: str) -> str:
             f"{_calls(passes, 'pass', 'passes')} ({_percent(passes, charted)}) "
             f"among the {charted} {_noun(charted, 'snap', 'snaps')} charted as a run or a pass."
         )
-    order = ", ".join(_call(play) for play in plays)
+    order = ", ".join(play.call for play in plays)
     return f"{lead}{mix} The snaps average {_seconds(average)}. In order: {order}."
 
 
-def _special_copy(plays: Sequence[PlayRecord]) -> str:
+def _special_copy(plays: Sequence[PlayRead]) -> str:
     if not plays:
         return "No special-teams plays are tagged."
     counts: dict[str, int] = {}
     for play in plays:
-        name = _call(play)
-        counts[name] = counts.get(name, 0) + 1
+        counts[play.call] = counts.get(play.call, 0) + 1
     pieces = [f"{count} {name.lower()}" for name, count in counts.items()]
     noun = "play" if len(plays) == 1 else "plays"
     return f"{len(plays)} special-teams {noun}: {', '.join(pieces)}."
 
 
-def _play_lines(plays: Sequence[PlayRecord]) -> list[tuple[str, str]]:
+def _play_lines(plays: Sequence[PlayRead]) -> list[tuple[str, str]]:
     return [("row", _play_line(play)) for play in plays]
 
 
-def _play_line(play: PlayRecord) -> str:
-    span = max(0.0, play.end_seconds - play.start_seconds)
+def _play_line(play: PlayRead) -> str:
+    side = f"  {play.side.capitalize()}" if play.side else ""
     return (
-        f"Play {play.play_number}  {_clock(play.start_seconds)}-{_clock(play.end_seconds)}"
-        f"  {_call(play)}  {_seconds(span)}"
+        f"Play {play.number}  {_clock(play.start_seconds)}-{_clock(play.end_seconds)}"
+        f"  {play.call}  {_seconds(play.seconds)}{side}"
     )
 
 

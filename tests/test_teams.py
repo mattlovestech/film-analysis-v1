@@ -48,6 +48,7 @@ def test_player_prompt_asks_for_a_standing_player() -> None:
     prompt = player_prompt(Uniform("North", "dark blue", "white", "dark blue"))
 
     assert "standing full length" in prompt
+    assert "exact clothes" in prompt
     assert "reference photo is a football player" in prompt
     assert "Madden-style" in prompt
     assert "00" in prompt
@@ -82,6 +83,47 @@ def test_a_model_reply_becomes_two_uniforms() -> None:
     assert right.pants == "gold"
     assert "with a logo" not in player_prompt(right)
     assert "purple jersey" in player_prompt(right)
+
+
+def test_a_uniform_keeps_hex_colors_and_style() -> None:
+    from film_analysis.web.teams import parse_uniforms
+
+    reply = (
+        '{"left":{"name":"Pike County Pirates","jersey":"white","jersey_hex":"#f4f1ea",'
+        '"pants":"black","pants_hex":"#1a1a1a","pants_style":"solid",'
+        '"helmet":"white","helmet_hex":"#f7f4ee","helmet_style":"solid shell",'
+        '"number":"black","number_hex":"#111111"},'
+        '"right":{"name":"ACE Charter Gryphons","jersey":"red","jersey_hex":"#b42318",'
+        '"pants":"white","pants_hex":"#f4f1ea","pants_style":"striped",'
+        '"helmet":"red","helmet_hex":"#b42318","helmet_style":"center stripe",'
+        '"number_hex":"#f4f1ea"}}'
+    )
+
+    left, right = parse_uniforms(reply, "Pike County vs ACE Charter")
+    prompt = player_prompt(left)
+
+    assert left.jersey_hex == "#f4f1ea"
+    assert left.pants_style == "solid"
+    assert left.helmet_style == "solid shell"
+    assert left.number == "black"
+    assert right.helmet_style == "center stripe"
+    assert "#f4f1ea" in prompt
+    assert "solid shell" in prompt
+    assert "00" in prompt
+    assert "Pike" not in prompt
+    assert "do not write color codes" in prompt
+
+
+def test_play_samples_are_spread_across_the_film() -> None:
+    from film_analysis.web.teams import sample_plays
+
+    plays = tuple(
+        PlayRecord(number, float(number), float(number) + 1, "scrimmage") for number in range(1, 9)
+    )
+
+    picked = sample_plays(plays, 4)
+
+    assert [play.play_number for play in picked] == [1, 3, 6, 8]
 
 
 def test_portrait_falls_back_to_a_drawing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,6 +179,18 @@ def test_split_lineup_crops_each_side(tmp_path: Path) -> None:
     assert colors_from_pixels(_pixels(right))[0].startswith("#e000") or colors_from_pixels(
         _pixels(right)
     )[0].startswith("#c000")
+
+
+def test_the_uniform_prompt_keeps_the_json_example() -> None:
+    from film_analysis.web.teams import _DETECT_PROMPT
+
+    text = _DETECT_PROMPT.format(title="Pike County")
+
+    assert "Pike County" in text
+    assert '"left"' in text
+    assert '"right"' in text
+    assert "white jersey" in text
+    assert "jersey_hex" in text
 
 
 def test_a_still_without_a_photo_stays_whole() -> None:
