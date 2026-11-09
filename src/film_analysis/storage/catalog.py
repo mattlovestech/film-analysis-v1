@@ -6,6 +6,7 @@ import shutil
 import threading
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +18,16 @@ class CatalogError(Exception):
 
 
 _TIMED_PHASES = frozenset({"starting", "downloading", "saving", "scanning", "checking"})
-TEAM_IMAGE_KINDS = frozenset({"left", "right", "left-player", "right-player"})
+TEAM_IMAGE_KINDS = frozenset(
+    {
+        "left",
+        "right",
+        "left-player",
+        "right-player",
+        "left-reference",
+        "right-reference",
+    }
+)
 
 
 def team_media(kind: str, suffix: str) -> tuple[str, str]:
@@ -192,6 +202,7 @@ class PlayRecord:
     play_type: str | None = None
     reviewed: bool = False
     unit: str | None = None
+    formation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -203,13 +214,33 @@ class SpanRecord:
 
 @dataclass(frozen=True)
 class ReadNote:
-    """One stretch the model could not read, with what was sent and what came back."""
+    """One model read of a stretch, or a stretch the model could not read."""
 
     start_seconds: float
     end_seconds: float
     frames: int
     nbytes: int
     detail: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    model: str = ""
+
+
+@dataclass(frozen=True)
+class ReportAnalysis:
+    """One play's place in a scouting-report generation."""
+
+    play_number: int
+    status: str
+    call: str = ""
+    side: str = ""
+    formation: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    model: str = ""
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -280,6 +311,12 @@ class Catalog(Protocol):
 
     def set_worker_count(self, count: int) -> None:
         """Remember how many labelers may read one film at once."""
+
+    def formation_reads(self) -> bool:
+        """Whether the experimental formation read is on for new reports."""
+
+    def set_formation_reads(self, enabled: bool) -> None:
+        """Turn the experimental formation read on or off."""
 
     def job_place(self) -> str | None:
         """Return where new jobs run, or nothing when it has not been chosen."""
@@ -353,6 +390,24 @@ class Catalog(Protocol):
     def clear_reads(self, project_id: int) -> None:
         """Drop failed-read notes before a film is read again from the start."""
 
+    def play_read_costs(self) -> dict[int, list[tuple[int, float]]]:
+        """Each play's share of the model reads that covered it, in dollars."""
+
+    def read_spend(self) -> dict[int, tuple[float, int, int, str]]:
+        """Each film's read cost, input tokens, output tokens, and model names."""
+
+    def clear_report_analysis(self, project_id: int) -> None:
+        """Drop a prior scouting-report pass before a new one starts."""
+
+    def set_report_analysis(self, project_id: int, note: ReportAnalysis) -> None:
+        """Save one play's progress while the scouting report is being built."""
+
+    def list_report_analysis(self, project_id: int) -> list[ReportAnalysis]:
+        """Return each play's scouting-report row, in play order."""
+
+    def report_spend(self) -> dict[int, tuple[float, int, int, str]]:
+        """Each film's scouting-report cost, tokens, and model names."""
+
     def save_source(self, project_id: int, source: Path) -> None:
         """Keep the film the plays were cut from."""
 
@@ -379,8 +434,23 @@ class Catalog(Protocol):
     def set_reviewed(self, project_id: int, play_number: int, reviewed: bool) -> None:
         """Remember whether this play has been checked."""
 
-    def set_play_unit(self, project_id: int, play_number: int, unit: str) -> None:
+    def set_play_unit(
+        self, project_id: int, play_number: int, unit: str, *, mark_reviewed: bool = True
+    ) -> None:
         """Remember whether this play is your offense or your defense."""
+
+    def set_play_formation(self, project_id: int, play_number: int, formation: str) -> None:
+        """Remember the formation read on one offensive play."""
+
+    def set_play_bounds(
+        self,
+        project_id: int,
+        play_number: int,
+        start: float,
+        end: float,
+        clip: Path,
+    ) -> None:
+        """Recut one play to a tighter window and keep the new clip."""
 
     def drop_play(self, project_id: int, play_number: int) -> None:
         """Remove a play the user has marked as not a play."""
@@ -405,6 +475,12 @@ class Catalog(Protocol):
 
     def clip_file(self, project_id: int, play_number: int) -> Path | None:
         """Return the play clip, when it is still on disk."""
+
+    def save_poster(self, project_id: int, data: bytes) -> None:
+        """Store the action still used as this film's thumbnail."""
+
+    def poster_file(self, project_id: int) -> Path | None:
+        """Return that still, when it has been stored."""
 
 
 class ClipStore(Protocol):
@@ -433,6 +509,12 @@ class ClipStore(Protocol):
 
     def team_image(self, project_id: int, kind: str) -> Path | None:
         """Return a local file for a team image, when one exists."""
+
+    def save_poster(self, project_id: int, data: bytes) -> str:
+        """Store the action still and return its key."""
+
+    def poster_path(self, project_id: int) -> Path | None:
+        """Return the action still, when it has been stored."""
 
 
 class ClipDirectory:
@@ -489,6 +571,18 @@ class ClipDirectory:
         ]
         return matches[0] if matches else None
 
+    def save_poster(self, project_id: int, data: bytes) -> str:
+        dest = self._project(project_id) / "poster.jpg"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        return dest.relative_to(self.root).as_posix()
+
+    def poster_path(self, project_id: int) -> Path | None:
+        path = self._project(project_id) / "poster.jpg"
+        if path.is_file() and path.stat().st_size:
+            return path
+        return None
+
     def _project(self, project_id: int) -> Path:
         return self.root / "projects" / str(project_id)
 
@@ -503,9 +597,11 @@ class MemoryCatalog:
         self._created: dict[int, str] = {}
         self._activity: dict[int, ActivityRecord] = {}
         self._workers = 4
+        self._formations = False
         self._place: str | None = None
         self._teams: dict[int, FilmTeams] = {}
         self._reads: dict[int, list[ReadNote]] = {}
+        self._report: dict[int, dict[int, ReportAnalysis]] = {}
         self._next = 1
         self._lock = threading.Lock()
 
@@ -550,6 +646,14 @@ class MemoryCatalog:
         with self._lock:
             self._workers = count
 
+    def formation_reads(self) -> bool:
+        with self._lock:
+            return self._formations
+
+    def set_formation_reads(self, enabled: bool) -> None:
+        with self._lock:
+            self._formations = enabled
+
     def job_place(self) -> str | None:
         with self._lock:
             return self._place
@@ -576,6 +680,16 @@ class MemoryCatalog:
 
     def team_image(self, project_id: int, kind: str) -> Path | None:
         return self._clips.team_image(project_id, kind)
+
+    def save_poster(self, project_id: int, data: bytes) -> None:
+        if not data.startswith(b"\xff\xd8\xff"):
+            raise CatalogError("Could not store that thumbnail.")
+        with self._lock:
+            self._require(project_id)
+        self._clips.save_poster(project_id, data)
+
+    def poster_file(self, project_id: int) -> Path | None:
+        return self._clips.poster_path(project_id)
 
     def list_projects(self) -> list[ProjectSummary]:
         with self._lock:
@@ -756,6 +870,78 @@ class MemoryCatalog:
         with self._lock:
             self._reads.pop(project_id, None)
 
+    def read_spend(self) -> dict[int, tuple[float, int, int, str]]:
+        from film_analysis.agents.cost import summarize_reads
+
+        with self._lock:
+            rows = [
+                (
+                    project_id,
+                    note.cost_usd,
+                    note.input_tokens,
+                    note.output_tokens,
+                    note.model,
+                )
+                for project_id, notes in self._reads.items()
+                for note in notes
+            ]
+        return summarize_reads(rows)
+
+    def clear_report_analysis(self, project_id: int) -> None:
+        with self._lock:
+            self._report.pop(project_id, None)
+
+    def set_report_analysis(self, project_id: int, note: ReportAnalysis) -> None:
+        with self._lock:
+            self._require(project_id)
+            self._report.setdefault(project_id, {})[note.play_number] = note
+
+    def list_report_analysis(self, project_id: int) -> list[ReportAnalysis]:
+        with self._lock:
+            notes = list(self._report.get(project_id, {}).values())
+        notes.sort(key=lambda note: note.play_number)
+        return notes
+
+    def report_spend(self) -> dict[int, tuple[float, int, int, str]]:
+        from film_analysis.agents.cost import summarize_reads
+
+        with self._lock:
+            rows = [
+                (
+                    project_id,
+                    note.cost_usd,
+                    note.input_tokens,
+                    note.output_tokens,
+                    note.model,
+                )
+                for project_id, notes in self._report.items()
+                for note in notes.values()
+            ]
+        return summarize_reads(rows)
+
+    def play_read_costs(self) -> dict[int, list[tuple[int, float]]]:
+        from film_analysis.agents.cost import cost_per_play
+
+        with self._lock:
+            projects = list(self._projects)
+            reads = {project_id: list(notes) for project_id, notes in self._reads.items()}
+        costs: dict[int, list[tuple[int, float]]] = {}
+        for project in projects:
+            project_id = project.project
+            shares = cost_per_play(
+                [
+                    (note.start_seconds, note.end_seconds, note.cost_usd)
+                    for note in reads.get(project_id, [])
+                ],
+                [
+                    (play.play_number, play.start_seconds, play.end_seconds)
+                    for play in project.plays
+                ],
+            )
+            if shares:
+                costs[project_id] = shares
+        return costs
+
     def save_source(self, project_id: int, source: Path) -> None:
         with self._lock:
             self._require(project_id)
@@ -803,12 +989,38 @@ class MemoryCatalog:
                 raise CatalogError("That play is no longer available.")
             self._replace(project_id, replace(current, plays=updated))
 
-    def set_play_unit(self, project_id: int, play_number: int, unit: str) -> None:
+    def set_play_unit(
+        self, project_id: int, play_number: int, unit: str, *, mark_reviewed: bool = True
+    ) -> None:
         if unit not in {"offense", "defense"}:
             raise CatalogError("Mark the play as offense or defense.")
         with self._lock:
             current = self._require(project_id)
-            updated = _mark_unit(current.plays, play_number, unit)
+            updated = _mark_unit(current.plays, play_number, unit, mark_reviewed)
+            if updated is None:
+                raise CatalogError("That play is no longer available.")
+            self._replace(project_id, replace(current, plays=updated))
+
+    def set_play_formation(self, project_id: int, play_number: int, formation: str) -> None:
+        with self._lock:
+            current = self._require(project_id)
+            updated = _mark_formation(current.plays, play_number, formation)
+            if updated is None:
+                raise CatalogError("That play is no longer available.")
+            self._replace(project_id, replace(current, plays=updated))
+
+    def set_play_bounds(
+        self,
+        project_id: int,
+        play_number: int,
+        start: float,
+        end: float,
+        clip: Path,
+    ) -> None:
+        self._clips.save_play(project_id, play_number, clip)
+        with self._lock:
+            current = self._require(project_id)
+            updated = _mark_bounds(current.plays, play_number, start, end)
             if updated is None:
                 raise CatalogError("That play is no longer available.")
             self._replace(project_id, replace(current, plays=updated))
@@ -875,6 +1087,7 @@ class MemoryCatalog:
             self._activity.pop(project_id, None)
             self._teams.pop(project_id, None)
             self._reads.pop(project_id, None)
+            self._report.pop(project_id, None)
         self._clips.remove(project_id)
 
     def clip_file(self, project_id: int, play_number: int) -> Path | None:
@@ -963,35 +1176,34 @@ class D1Catalog:
         ]
 
     def get_project(self, project_id: int) -> ProjectDetail | None:
-        rows = self._query(
-            """
+        project_sql = """
             select id, name, youtube_url, status, duration_seconds, scanned_seconds, error,
                    channel, downloaded_bytes, total_bytes, retries, retries_done
             from projects where id = ?
-            """,
-            [project_id],
-        )
-        if not rows:
-            return None
-        project = rows[0]
-        plays = self._query(
             """
-            select play_number, start_seconds, end_seconds, family, play_type, reviewed, unit
+        plays_sql = """
+            select play_number, start_seconds, end_seconds, family, play_type, reviewed, unit,
+                   formation
             from plays
             where project_id = ?
             order by play_number
-            """,
-            [project_id],
-        )
-        spans = self._query(
             """
+        spans_sql = """
             select kind, start_seconds, end_seconds
             from spans
             where project_id = ?
             order by start_seconds
-            """,
-            [project_id],
-        )
+            """
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            project_rows = pool.submit(self._query, project_sql, [project_id])
+            play_rows = pool.submit(self._query, plays_sql, [project_id])
+            span_rows = pool.submit(self._query, spans_sql, [project_id])
+            rows = project_rows.result()
+            plays = play_rows.result()
+            spans = span_rows.result()
+        if not rows:
+            return None
+        project = rows[0]
         return ProjectDetail(
             project=int(project["id"]),
             name=str(project["name"]),
@@ -1106,6 +1318,21 @@ class D1Catalog:
             [str(count)],
         )
 
+    def formation_reads(self) -> bool:
+        rows = self._query("select value from settings where key = 'formations'")
+        if not rows:
+            return False
+        return str(rows[0]["value"]) == "1"
+
+    def set_formation_reads(self, enabled: bool) -> None:
+        self._execute(
+            """
+            insert into settings (key, value) values ('formations', ?)
+            on conflict(key) do update set value = excluded.value
+            """,
+            ["1" if enabled else "0"],
+        )
+
     def job_place(self) -> str | None:
         rows = self._query("select value from settings where key = 'place'")
         if not rows:
@@ -1165,6 +1392,16 @@ class D1Catalog:
 
     def team_image(self, project_id: int, kind: str) -> Path | None:
         return self._clips.team_image(project_id, kind)
+
+    def save_poster(self, project_id: int, data: bytes) -> None:
+        if not data.startswith(b"\xff\xd8\xff"):
+            raise CatalogError("Could not store that thumbnail.")
+        if self.get_project(project_id) is None:
+            raise CatalogError("That analysis is no longer available.")
+        self._clips.save_poster(project_id, data)
+
+    def poster_file(self, project_id: int) -> Path | None:
+        return self._clips.poster_path(project_id)
 
     def set_progress(
         self,
@@ -1265,10 +1502,11 @@ class D1Catalog:
         play_type: str | None,
         family: str,
     ) -> None:
+        clear_unit = ", unit = null" if family == "special_teams" else ""
         result = self._execute(
-            """
+            f"""
             update plays
-            set family = ?, play_type = ?, reviewed = 1
+            set family = ?, play_type = ?, reviewed = 1{clear_unit}
             where project_id = ? and play_number = ?
             """,
             [family, play_type, project_id, play_number],
@@ -1276,16 +1514,54 @@ class D1Catalog:
         if not _changed(result):
             raise CatalogError("That play is no longer available.")
 
-    def set_play_unit(self, project_id: int, play_number: int, unit: str) -> None:
+    def set_play_unit(
+        self, project_id: int, play_number: int, unit: str, *, mark_reviewed: bool = True
+    ) -> None:
         if unit not in {"offense", "defense"}:
             raise CatalogError("Mark the play as offense or defense.")
+        reviewed = ", reviewed = 1" if mark_reviewed else ""
         result = self._execute(
-            """
+            f"""
             update plays
-            set unit = ?, reviewed = 1
+            set unit = ?{reviewed},
+                family = case when family = 'special_teams' then 'scrimmage' else family end,
+                play_type = case when family = 'special_teams' then null else play_type end
             where project_id = ? and play_number = ?
             """,
             [unit, project_id, play_number],
+        )
+        if not _changed(result):
+            raise CatalogError("That play is no longer available.")
+
+    def set_play_formation(self, project_id: int, play_number: int, formation: str) -> None:
+        result = self._execute(
+            """
+            update plays
+            set formation = ?
+            where project_id = ? and play_number = ?
+            """,
+            [formation, project_id, play_number],
+        )
+        if not _changed(result):
+            raise CatalogError("That play is no longer available.")
+
+    def set_play_bounds(
+        self,
+        project_id: int,
+        play_number: int,
+        start: float,
+        end: float,
+        clip: Path,
+    ) -> None:
+        key = self._clips.save_play(project_id, play_number, clip)
+        result = self._execute(
+            """
+            update plays
+            set start_seconds = ?, end_seconds = ?, clip_key = ?,
+                formation = null, reviewed = 1
+            where project_id = ? and play_number = ?
+            """,
+            [start, end, key, project_id, play_number],
         )
         if not _changed(result):
             raise CatalogError("That play is no longer available.")
@@ -1369,9 +1645,11 @@ class D1Catalog:
             raise CatalogError(f"Project {project_id} was not found.")
         self._execute(
             """
-            insert into reads
-                (project_id, start_seconds, end_seconds, frames, nbytes, detail)
-            values (?, ?, ?, ?, ?, ?)
+            insert into reads (
+                project_id, start_seconds, end_seconds, frames, nbytes, detail,
+                input_tokens, output_tokens, cost_usd, model
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 project_id,
@@ -1380,36 +1658,169 @@ class D1Catalog:
                 note.frames,
                 note.nbytes,
                 note.detail,
+                note.input_tokens,
+                note.output_tokens,
+                note.cost_usd,
+                note.model,
             ],
         )
 
     def list_reads(self, project_id: int) -> list[ReadNote]:
         rows = self._query(
             """
-            select start_seconds, end_seconds, frames, nbytes, detail
+            select start_seconds, end_seconds, frames, nbytes, detail,
+                input_tokens, output_tokens, cost_usd, model
             from reads
             where project_id = ?
             order by start_seconds, end_seconds
             """,
             [project_id],
         )
-        return [
-            ReadNote(
-                float(row.get("start_seconds") or 0),
-                float(row.get("end_seconds") or 0),
-                int(row.get("frames") or 0),
-                int(row.get("nbytes") or 0),
-                str(row.get("detail") or ""),
+        return [_read_note(row) for row in rows]
+
+    def read_spend(self) -> dict[int, tuple[float, int, int, str]]:
+        from film_analysis.agents.cost import summarize_reads
+
+        rows = self._query(
+            """
+            select project_id, cost_usd, input_tokens, output_tokens, model
+            from reads
+            """
+        )
+        return summarize_reads(
+            [
+                (
+                    int(row.get("project_id") or 0),
+                    float(row.get("cost_usd") or 0),
+                    int(row.get("input_tokens") or 0),
+                    int(row.get("output_tokens") or 0),
+                    str(row.get("model") or ""),
+                )
+                for row in rows
+            ]
+        )
+
+    def play_read_costs(self) -> dict[int, list[tuple[int, float]]]:
+        from film_analysis.agents.cost import cost_per_play
+
+        read_rows = self._query(
+            """
+            select project_id, start_seconds, end_seconds, cost_usd
+            from reads
+            where cost_usd > 0
+            """
+        )
+        play_rows = self._query(
+            """
+            select project_id, play_number, start_seconds, end_seconds
+            from plays
+            """
+        )
+        reads: dict[int, list[tuple[float, float, float]]] = {}
+        for row in read_rows:
+            project_id = int(row.get("project_id") or 0)
+            reads.setdefault(project_id, []).append(
+                (
+                    float(row.get("start_seconds") or 0),
+                    float(row.get("end_seconds") or 0),
+                    float(row.get("cost_usd") or 0),
+                )
             )
-            for row in rows
-        ]
+        plays: dict[int, list[tuple[int, float, float]]] = {}
+        for row in play_rows:
+            project_id = int(row.get("project_id") or 0)
+            plays.setdefault(project_id, []).append(
+                (
+                    int(row.get("play_number") or 0),
+                    float(row.get("start_seconds") or 0),
+                    float(row.get("end_seconds") or 0),
+                )
+            )
+        return {
+            project_id: shares
+            for project_id, group in plays.items()
+            if (shares := cost_per_play(reads.get(project_id, []), group))
+        }
 
     def clear_reads(self, project_id: int) -> None:
         self._execute("delete from reads where project_id = ?", [project_id])
 
+    def clear_report_analysis(self, project_id: int) -> None:
+        self._execute("delete from scouting_analysis where project_id = ?", [project_id])
+
+    def set_report_analysis(self, project_id: int, note: ReportAnalysis) -> None:
+        self._execute(
+            """
+            insert into scouting_analysis (
+                project_id, play_number, status, call, side, formation,
+                input_tokens, output_tokens, cost_usd, model, detail
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(project_id, play_number) do update set
+                status = excluded.status,
+                call = excluded.call,
+                side = excluded.side,
+                formation = excluded.formation,
+                input_tokens = excluded.input_tokens,
+                output_tokens = excluded.output_tokens,
+                cost_usd = excluded.cost_usd,
+                model = excluded.model,
+                detail = excluded.detail
+            """,
+            [
+                project_id,
+                note.play_number,
+                note.status,
+                note.call,
+                note.side,
+                note.formation,
+                note.input_tokens,
+                note.output_tokens,
+                note.cost_usd,
+                note.model,
+                note.detail,
+            ],
+        )
+
+    def list_report_analysis(self, project_id: int) -> list[ReportAnalysis]:
+        rows = self._query(
+            """
+            select play_number, status, call, side, formation,
+                   input_tokens, output_tokens, cost_usd, model, detail
+            from scouting_analysis
+            where project_id = ?
+            order by play_number
+            """,
+            [project_id],
+        )
+        return [_report_analysis(row) for row in rows]
+
+    def report_spend(self) -> dict[int, tuple[float, int, int, str]]:
+        from film_analysis.agents.cost import summarize_reads
+
+        rows = self._query(
+            """
+            select project_id, cost_usd, input_tokens, output_tokens, model
+            from scouting_analysis
+            """
+        )
+        return summarize_reads(
+            [
+                (
+                    int(row.get("project_id") or 0),
+                    float(row.get("cost_usd") or 0),
+                    int(row.get("input_tokens") or 0),
+                    int(row.get("output_tokens") or 0),
+                    str(row.get("model") or ""),
+                )
+                for row in rows
+            ]
+        )
+
     def delete_project(self, project_id: int) -> None:
         self._execute("delete from activity where project_id = ?", [project_id])
         self._execute("delete from reads where project_id = ?", [project_id])
+        self._execute("delete from scouting_analysis where project_id = ?", [project_id])
         self._execute("delete from spans where project_id = ?", [project_id])
         self._execute("delete from plays where project_id = ?", [project_id])
         self._execute("delete from teams where project_id = ?", [project_id])
@@ -1475,6 +1886,7 @@ class D1Catalog:
             "alter table plays add column play_type text",
             "alter table plays add column reviewed integer not null default 0",
             "alter table plays add column unit text",
+            "alter table plays add column formation text",
             """
             create table if not exists spans (
                 project_id integer not null,
@@ -1505,7 +1917,31 @@ class D1Catalog:
                 end_seconds real not null,
                 frames integer not null,
                 nbytes integer not null,
-                detail text not null
+                detail text not null,
+                input_tokens integer not null default 0,
+                output_tokens integer not null default 0,
+                cost_usd real not null default 0,
+                model text not null default ''
+            )
+            """,
+            "alter table reads add column input_tokens integer not null default 0",
+            "alter table reads add column output_tokens integer not null default 0",
+            "alter table reads add column cost_usd real not null default 0",
+            "alter table reads add column model text not null default ''",
+            """
+            create table if not exists scouting_analysis (
+                project_id integer not null,
+                play_number integer not null,
+                status text not null,
+                call text not null default '',
+                side text not null default '',
+                formation text not null default '',
+                input_tokens integer not null default 0,
+                output_tokens integer not null default 0,
+                cost_usd real not null default 0,
+                model text not null default '',
+                detail text not null default '',
+                primary key (project_id, play_number)
             )
             """,
             """
@@ -1553,6 +1989,35 @@ def _clips_from_env(directory: Path) -> ClipStore:
     return ClipDirectory(directory)
 
 
+def _read_note(row: dict[str, object]) -> ReadNote:
+    return ReadNote(
+        float(row.get("start_seconds") or 0),
+        float(row.get("end_seconds") or 0),
+        int(row.get("frames") or 0),
+        int(row.get("nbytes") or 0),
+        str(row.get("detail") or ""),
+        input_tokens=int(row.get("input_tokens") or 0),
+        output_tokens=int(row.get("output_tokens") or 0),
+        cost_usd=float(row.get("cost_usd") or 0),
+        model=str(row.get("model") or ""),
+    )
+
+
+def _report_analysis(row: dict[str, object]) -> ReportAnalysis:
+    return ReportAnalysis(
+        int(row.get("play_number") or 0),
+        str(row.get("status") or "pending"),
+        str(row.get("call") or ""),
+        str(row.get("side") or ""),
+        str(row.get("formation") or ""),
+        int(row.get("input_tokens") or 0),
+        int(row.get("output_tokens") or 0),
+        float(row.get("cost_usd") or 0),
+        str(row.get("model") or ""),
+        str(row.get("detail") or ""),
+    )
+
+
 def _optional_text(value: object) -> str | None:
     if value is None or value == "":
         return None
@@ -1580,6 +2045,7 @@ def _play_record(play: dict[str, object]) -> PlayRecord:
         _optional_text(play.get("play_type")),
         reviewed=bool(play.get("reviewed")),
         unit=_play_unit(play.get("unit")),
+        formation=_optional_text(play.get("formation")),
     )
 
 
@@ -1594,13 +2060,70 @@ def _mark_unit(
     plays: tuple[PlayRecord, ...],
     play_number: int,
     unit: str,
+    mark_reviewed: bool = True,
 ) -> tuple[PlayRecord, ...] | None:
     found = False
     updated: list[PlayRecord] = []
     for play in plays:
         if play.play_number == play_number:
             found = True
-            updated.append(replace(play, unit=unit, reviewed=True))
+            reviewed = True if mark_reviewed else play.reviewed
+            family = "scrimmage" if play.family == "special_teams" else play.family
+            play_type = None if play.family == "special_teams" else play.play_type
+            updated.append(
+                replace(
+                    play,
+                    unit=unit,
+                    reviewed=reviewed,
+                    family=family,
+                    play_type=play_type,
+                )
+            )
+        else:
+            updated.append(play)
+    if not found:
+        return None
+    return tuple(updated)
+
+
+def _mark_formation(
+    plays: tuple[PlayRecord, ...],
+    play_number: int,
+    formation: str,
+) -> tuple[PlayRecord, ...] | None:
+    found = False
+    updated: list[PlayRecord] = []
+    for play in plays:
+        if play.play_number == play_number:
+            found = True
+            updated.append(replace(play, formation=formation))
+        else:
+            updated.append(play)
+    if not found:
+        return None
+    return tuple(updated)
+
+
+def _mark_bounds(
+    plays: tuple[PlayRecord, ...],
+    play_number: int,
+    start: float,
+    end: float,
+) -> tuple[PlayRecord, ...] | None:
+    found = False
+    updated: list[PlayRecord] = []
+    for play in plays:
+        if play.play_number == play_number:
+            found = True
+            updated.append(
+                replace(
+                    play,
+                    start_seconds=start,
+                    end_seconds=end,
+                    formation=None,
+                    reviewed=True,
+                )
+            )
         else:
             updated.append(play)
     if not found:
@@ -1619,7 +2142,16 @@ def _retitle(
     for play in plays:
         if play.play_number == play_number:
             found = True
-            updated.append(replace(play, family=family, play_type=play_type, reviewed=True))
+            unit = None if family == "special_teams" else play.unit
+            updated.append(
+                replace(
+                    play,
+                    family=family,
+                    play_type=play_type,
+                    unit=unit,
+                    reviewed=True,
+                )
+            )
         else:
             updated.append(play)
     if not found:

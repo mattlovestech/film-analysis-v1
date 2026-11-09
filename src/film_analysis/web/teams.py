@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -20,6 +20,8 @@ from film_analysis.storage.catalog import PlayRecord
 from film_analysis.web.players import (
     PlayerColors,
     colors_on_crop,
+    full_body_shot,
+    lone_players,
     team_colors_from_players,
     uniform_crops,
 )
@@ -28,6 +30,8 @@ _FALLBACK = ("#1c3f73", "#f2efe6")
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 _SCHNELL = "@cf/black-forest-labs/flux-1-schnell"
+_PORTRAIT_WIDTH = "512"
+_PORTRAIT_HEIGHT = "768"
 _COLORS = frozenset(
     {
         "white",
@@ -57,6 +61,7 @@ _DETECT_PROMPT = (
     "One team wears a white jersey, usually the away team. "
     "The other wears a solid color jersey, usually the home team. "
     "Identify those two uniforms. "
+    "A referee wears a black-and-white striped shirt and is not either team. "
     "The two jerseys are different colors. Never give both teams the same jersey color. "
     "The left team is lined up on the left side of the frame. "
     "The right team is lined up on the right side of the frame. "
@@ -193,6 +198,90 @@ def colors_from_pixels(pixels: Sequence[tuple[int, int, int]]) -> tuple[str, str
     return _hex(jersey), _FALLBACK[1] if pants is None else _hex(pants)
 
 
+def player_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 48) -> list[bytes]:
+    """Full-size frames spread through the film, so each uniform is large enough to crop."""
+
+    if limit < 1 or not plays or not video.is_file() or video.stat().st_size < 4096:
+        return []
+    start = min(play.start_seconds for play in plays)
+    end = max(play.end_seconds for play in plays)
+    span = end - start
+    if span <= 1:
+        moments = [start]
+    elif span <= 200:
+        return _clip_frames(video, start, end, "fps=1,scale=1280:-2")
+    else:
+        count = min(limit, 40)
+        moments = [start + span * (index + 0.5) / count for index in range(count)]
+    frames: list[bytes] = []
+    for at in moments:
+        try:
+            frames.append(_frame(video, at, "scale=1280:-2"))
+        except (VideoAnalysisError, OSError):
+            continue
+    return frames
+
+
+def _clip_frames(video: Path, start: float, end: float, scale: str) -> list[bytes]:
+    """One pass over a short film. A lone player can be in frame for only a second."""
+
+    if shutil.which("ffmpeg") is None:
+        return []
+    with tempfile.TemporaryDirectory() as folder:
+        dest = Path(folder) / "%03d.jpg"
+        try:
+            _run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    f"{max(0.0, start):.3f}",
+                    "-to",
+                    f"{max(0.0, end):.3f}",
+                    "-i",
+                    str(video),
+                    "-vf",
+                    scale,
+                    "-q:v",
+                    "4",
+                    str(dest),
+                ]
+            )
+        except VideoAnalysisError:
+            return []
+        return [path.read_bytes() for path in sorted(Path(folder).glob("*.jpg"))]
+
+
+def team_cards(
+    frames: Sequence[bytes],
+    left: Uniform,
+    right: Uniform,
+) -> tuple[bytes | None, bytes | None]:
+    """A cropped player for each side. White jersey and solid color, with nobody else in frame."""
+
+    white, colored = lone_players(frames)
+    if _lighter(left) and not _lighter(right):
+        return white, colored
+    if _lighter(right) and not _lighter(left):
+        return colored, white
+    return white, colored
+
+
+def _lighter(uniform: Uniform) -> bool:
+    words = color_phrase(uniform.jersey)
+    if "white" in words.split():
+        return True
+    hex_color = _hex_color(uniform.jersey_hex)
+    if not hex_color:
+        return False
+    red = int(hex_color[1:3], 16)
+    green = int(hex_color[3:5], 16)
+    blue = int(hex_color[5:7], 16)
+    return max(red, green, blue) > 185 and max(red, green, blue) - min(red, green, blue) < 55
+
+
 def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 4) -> list[bytes]:
     """A few lineup frames spread through the film, not only the opening plays."""
 
@@ -203,6 +292,99 @@ def play_frames(video: Path, plays: Sequence[PlayRecord], limit: int = 4) -> lis
         except (VideoAnalysisError, OSError):
             continue
     return frames
+
+
+def action_moments(plays: Sequence[PlayRecord], limit: int = 8) -> list[tuple[int, float]]:
+    """Seconds into sampled plays, after the snap and before the whistle.
+
+    A lineup is the opening of a play. Live action is further in. Longer
+    scrimmage plays are kept ahead of a short snap, and each of those plays
+    contributes two moments so a sideline cut can be skipped.
+    """
+
+    chosen = [play for play in plays if play.family == "scrimmage"] or list(plays)
+    long = [play for play in chosen if play.end_seconds - play.start_seconds >= 4]
+    pool = long or chosen
+    moments: list[tuple[int, float]] = []
+    for play in sample_plays(pool, min(4, max(1, limit))):
+        length = max(0.0, play.end_seconds - play.start_seconds)
+        for offset in _live_offsets(length):
+            moments.append((play.play_number, offset))
+            if len(moments) >= limit:
+                return moments
+    return moments
+
+
+def _live_offsets(length: float) -> list[float]:
+    """Moments after the snap and before the whistle, inside one play."""
+
+    if length <= 0:
+        return []
+    if length < 3:
+        return [min(length * 0.5, max(0.3, length - 0.15))]
+    start = min(max(1.5, length * 0.32), length - 0.8)
+    later = min(max(start + 0.8, length * 0.58), length - 0.4)
+    if later - start < 0.4:
+        return [start]
+    return [start, later]
+
+
+def still_frame(video: Path, at: float) -> bytes:
+    """One wide JPEG from a film or a play clip."""
+
+    return _frame(video, at, "scale=1280:-2")
+
+
+def choose_action_shot(frames: Sequence[bytes]) -> bytes | None:
+    """The frame that looks most like live play, not a graphic or a turf closeup."""
+
+    best: bytes | None = None
+    best_score = -1.0
+    for frame in frames:
+        if not isinstance(frame, bytes) or not frame.startswith(b"\xff\xd8\xff"):
+            continue
+        score = score_field_shot(frame)
+        if score > best_score:
+            best = frame
+            best_score = score
+    return best
+
+
+def score_field_shot(jpeg: bytes) -> float:
+    """Higher when players are on the grass, not a title card or empty turf."""
+
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return 1.0
+    array = np.frombuffer(jpeg, dtype=np.uint8)
+    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    if image is None or image.size == 0:
+        return 0.0
+    small = cv2.resize(image, (160, 90), interpolation=cv2.INTER_AREA)
+    blue, green, red = cv2.split(small)
+    grass_mask = (
+        (green.astype(np.int16) > red.astype(np.int16) + 12)
+        & (green.astype(np.int16) > blue.astype(np.int16) + 8)
+        & (green > 40)
+    )
+    field = grass_mask[24:82, 8:152]
+    grass = float(np.count_nonzero(field)) / field.size
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    sharp = float(cv2.Laplacian(gray, cv2.CV_32F).var()) / 180.0
+    field_gray = gray[24:82, 8:152]
+    players = (~field) & (field_gray > 28) & (field_gray < 245)
+    player = float(np.count_nonzero(players)) / players.size
+    columns = np.count_nonzero(players, axis=0)
+    active = np.flatnonzero(columns > 0)
+    spread = 0.0 if active.size == 0 else float(active[-1] - active[0]) / players.shape[1]
+    if grass < 0.12:
+        return min(sharp, 2.0) * 0.15
+    if grass > 0.9 and player < 0.04:
+        return 0.3
+    bodies = max(0.0, 1.0 - abs(player - 0.16) / 0.16)
+    return grass * 1.4 + bodies * 1.6 + min(sharp, 2.0) * 0.5 + spread
 
 
 def sample_plays(plays: Sequence[PlayRecord], limit: int = 4) -> list[PlayRecord]:
@@ -339,11 +521,41 @@ def make_portrait(
 
     wearing = _colors_from_crop(uniform, still)
     image = _render(player_prompt(wearing, other), still)
+    sent = getattr(_render, "last_reference", None)
+    make_portrait.last_reference = sent if isinstance(sent, bytes) else None
     if image is not None:
-        return image, ".jpg"
+        return _fit_portrait(image), ".jpg"
     shirt = _swatch(uniform.jersey_hex or uniform.jersey)
     legs = _swatch(uniform.pants_hex or uniform.pants)
     return roster_svg(shirt, legs), ".svg"
+
+
+def _fit_portrait(data: bytes) -> bytes:
+    """Keep a generated player inside the 512 by 768 frame."""
+
+    if not data.startswith(b"\xff\xd8\xff"):
+        return data
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return data
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return data
+    height, width = image.shape[:2]
+    if width <= 512 and height <= 768:
+        return data
+    scale = min(512 / width, 768 / height)
+    resized = cv2.resize(
+        image,
+        (max(1, round(width * scale)), max(1, round(height * scale))),
+        interpolation=cv2.INTER_AREA,
+    )
+    ok, encoded = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    if not ok:
+        return data
+    return encoded.tobytes()
 
 
 def color_phrase(value: str) -> str:
@@ -659,12 +871,68 @@ def player_photo(
     return photos[0] if photos else None
 
 
+def team_player_shot(
+    frames: Sequence[bytes],
+    uniform: Uniform,
+    other: Uniform | None = None,
+) -> bytes | None:
+    """One full-body photo of this team, with the other uniform left out."""
+
+    target = _hex_color(uniform.jersey_hex) or _swatch(uniform.jersey)
+    if not _hex_color(target):
+        return None
+    other_hex = ""
+    if other is not None:
+        other_hex = _hex_color(other.jersey_hex) or _swatch(other.jersey)
+        if not _hex_color(other_hex):
+            other_hex = ""
+    return full_body_shot(frames, target, other_hex)
+
+
+def player_picture(
+    frames: Sequence[bytes],
+    uniform: Uniform,
+    other: Uniform | None,
+    draw: Callable[..., tuple[bytes, str]],
+) -> tuple[bytes, str]:
+    """This team's full-body film shot, or one generated player when that shot is missing."""
+
+    shot = team_player_shot(frames, uniform, other)
+    if shot is not None:
+        return shot, ".jpg"
+    photos = player_photos(frames, uniform, other)[:1]
+    if not photos:
+        photos = [
+            frame
+            for frame in frames
+            if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff")
+        ][:1]
+    return draw(uniform, photos, other)
+
+
+def reference_for_model(
+    frames: Sequence[bytes],
+    uniform: Uniform,
+    other: Uniform | None = None,
+) -> bytes | None:
+    """The JPEG handed to the image model for this team."""
+
+    photos = player_photos(frames, uniform, other)[:1]
+    if not photos:
+        photos = [
+            frame
+            for frame in frames
+            if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff")
+        ][:1]
+    return sent_reference(photos)
+
+
 def player_photos(
     frames: Sequence[bytes],
     uniform: Uniform,
     other: Uniform | None = None,
 ) -> list[bytes]:
-    """Player photos of this team only, chosen after the two uniforms are known."""
+    """The clearest photo of this team only, chosen after the two uniforms are known."""
 
     target = _hex_color(uniform.jersey_hex) or _swatch(uniform.jersey)
     if not _hex_color(target):
@@ -694,7 +962,7 @@ def player_photos(
                 continue
             ranked.append((own, piece))
     ranked.sort(key=lambda item: item[0])
-    return [piece for _score, piece in ranked[:2]]
+    return [piece for _score, piece in ranked[:1]]
 
 
 def _colors_from_crop(
@@ -757,7 +1025,7 @@ def _safe_color(value: str, fallback: str) -> str:
     return value if _COLOR.fullmatch(value) else fallback
 
 
-def _frame(video: Path, at: float) -> bytes:
+def _frame(video: Path, at: float, scale: str = "scale=640:-2") -> bytes:
     if shutil.which("ffmpeg") is None:
         raise VideoAnalysisError("Could not read a lineup from that film.")
     with tempfile.TemporaryDirectory() as folder:
@@ -775,7 +1043,7 @@ def _frame(video: Path, at: float) -> bytes:
                 "-frames:v",
                 "1",
                 "-vf",
-                "scale=640:-2",
+                scale,
                 "-q:v",
                 "4",
                 str(dest),
@@ -1011,32 +1279,39 @@ _SWATCH = {
 def _render(prompt: str, still: bytes | Sequence[bytes] | None = None) -> bytes | None:
     account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
     token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+    reference = sent_reference(still)
+    _render.last_reference = reference
     if not account or not token:
         return None
-    references: list[bytes] = []
-    for photo in _photo_list(still):
-        jpeg = _reference_jpeg(photo)
-        if jpeg is None or jpeg in references:
-            continue
-        references.append(jpeg)
-        if len(references) == 4:
-            break
+    references = [reference] if reference is not None else []
     if references:
         body, content_type = _form(
             [
                 ("prompt", prompt),
-                ("width", "768"),
-                ("height", "1280"),
+                ("width", _PORTRAIT_WIDTH),
+                ("height", _PORTRAIT_HEIGHT),
                 ("guidance", "3"),
             ],
             references,
         )
         return _post_image(account, token, _KLEIN, body, content_type)
-    body, content_type = _fields([("prompt", prompt), ("width", "768"), ("height", "1280")])
+    body, content_type = _fields(
+        [("prompt", prompt), ("width", _PORTRAIT_WIDTH), ("height", _PORTRAIT_HEIGHT)]
+    )
     image = _post_image(account, token, _KLEIN, body, content_type)
     if image is not None:
         return image
     return _run_prompt(account, token, prompt)
+
+
+def sent_reference(still: bytes | Sequence[bytes] | None) -> bytes | None:
+    """The first photo the image model actually receives."""
+
+    for photo in _photo_list(still):
+        jpeg = _reference_jpeg(photo)
+        if jpeg is not None:
+            return jpeg
+    return None
 
 
 def _photo_list(still: bytes | Sequence[bytes] | None) -> list[bytes]:

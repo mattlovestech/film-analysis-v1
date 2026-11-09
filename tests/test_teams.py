@@ -2,12 +2,13 @@
 
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from film_analysis.storage.catalog import MemoryCatalog, PlayRecord
+from film_analysis.storage.catalog import FilmTeams, MemoryCatalog, PlayRecord
 from film_analysis.web.app import create_app
 from film_analysis.web.teams import (
     Uniform,
@@ -277,6 +278,51 @@ def test_a_uniform_keeps_hex_colors_and_style() -> None:
     assert "do not write color codes" in prompt
 
 
+def test_action_moments_are_after_the_snap_on_longer_plays() -> None:
+    from film_analysis.web.teams import action_moments
+
+    plays = (
+        PlayRecord(1, 0.0, 2.0, "scrimmage"),
+        PlayRecord(2, 10.0, 18.0, "scrimmage"),
+        PlayRecord(3, 30.0, 34.0, "special"),
+        PlayRecord(4, 40.0, 48.0, "scrimmage"),
+        PlayRecord(5, 70.0, 78.0, "scrimmage"),
+    )
+
+    moments = action_moments(plays)
+
+    assert {number for number, _offset in moments} == {2, 4, 5}
+    by_play: dict[int, list[float]] = {}
+    for number, offset in moments:
+        assert 1.2 < offset < 7.7
+        by_play.setdefault(number, []).append(offset)
+    assert all(len(offsets) == 2 for offsets in by_play.values())
+    assert all(offsets[1] - offsets[0] >= 0.5 for offsets in by_play.values())
+
+
+def test_an_action_frame_beats_a_graphic_and_empty_turf() -> None:
+    import cv2
+    import numpy as np
+
+    from film_analysis.web.teams import choose_action_shot, score_field_shot
+
+    def jpeg(image: np.ndarray) -> bytes:
+        ok, encoded = cv2.imencode(".jpg", image)
+        assert ok
+        return encoded.tobytes()
+
+    action = np.full((180, 320, 3), (50, 160, 40), np.uint8)
+    for left, color in ((40, (30, 40, 160)), (140, (230, 230, 230)), (230, (40, 50, 20))):
+        action[70:130, left : left + 36] = color
+    graphic = np.full((180, 320, 3), (40, 30, 20), np.uint8)
+    turf = np.full((180, 320, 3), (50, 160, 40), np.uint8)
+    shots = (jpeg(graphic), jpeg(turf), jpeg(action))
+
+    assert score_field_shot(shots[2]) > score_field_shot(shots[1])
+    assert score_field_shot(shots[2]) > score_field_shot(shots[0])
+    assert choose_action_shot(shots) == shots[2]
+
+
 def test_play_samples_are_spread_across_the_film() -> None:
     from film_analysis.web.teams import sample_plays
 
@@ -341,12 +387,13 @@ def test_a_reference_photo_is_sent_as_image_zero(monkeypatch: pytest.MonkeyPatch
     assert b"Match image 0." in body
 
 
-def test_player_photos_from_one_team_are_all_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_one_reference_photo_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
     from film_analysis.web.teams import _render
 
     sent: list[bytes] = []
 
     def post(account: str, token: str, model: str, body: bytes, content_type: str) -> bytes:
+        del account, token, model, content_type
         sent.append(body)
         return b"\xff\xd8\xffok"
 
@@ -361,9 +408,66 @@ def test_player_photos_from_one_team_are_all_sent(monkeypatch: pytest.MonkeyPatc
     _render("This team wears white.", [b"\xff\xd8\xffone", b"\xff\xd8\xfftwo"])
 
     assert b'name="input_image_0"' in sent[0]
-    assert b'name="input_image_1"' in sent[0]
+    assert b'name="input_image_1"' not in sent[0]
     assert b"\xff\xd8\xffone" in sent[0]
-    assert b"\xff\xd8\xfftwo" in sent[0]
+    assert b"\xff\xd8\xfftwo" not in sent[0]
+    assert b"512" in sent[0]
+    assert b"1280" not in sent[0]
+
+
+def test_a_full_body_shot_is_shown_instead_of_a_generated_player(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from film_analysis.web.teams import player_picture
+
+    calls: list[object] = []
+
+    def draw(uniform: Uniform, still: object = None, other: object = None) -> tuple[bytes, str]:
+        calls.append(still)
+        return b"generated", ".jpg"
+
+    monkeypatch.setattr(
+        "film_analysis.web.teams.team_player_shot",
+        lambda frames, uniform, other=None: b"\xff\xd8\xffplayer",
+    )
+
+    image, suffix = player_picture(
+        [b"\xff\xd8\xffframe"],
+        Uniform("Home", "white", "white", "white", jersey_hex="#f4f1ea"),
+        Uniform("Away", "red", "white", "red", jersey_hex="#b42318"),
+        draw,
+    )
+
+    assert calls == []
+    assert image == b"\xff\xd8\xffplayer"
+    assert suffix == ".jpg"
+
+
+def test_a_missing_full_body_shot_sends_one_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+    from film_analysis.web.teams import player_picture
+
+    seen: list[object] = []
+
+    def draw(uniform: Uniform, still: object = None, other: object = None) -> tuple[bytes, str]:
+        seen.append(still)
+        return b"\xff\xd8\xffmade", ".jpg"
+
+    monkeypatch.setattr("film_analysis.web.teams.team_player_shot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "film_analysis.web.teams.player_photos",
+        lambda frames, uniform, other=None: [b"\xff\xd8\xffbest", b"\xff\xd8\xffextra"],
+    )
+
+    image, suffix = player_picture(
+        [b"\xff\xd8\xffframe"],
+        Uniform("Home", "white", "white", "white"),
+        None,
+        draw,
+    )
+
+    assert image == b"\xff\xd8\xffmade"
+    assert suffix == ".jpg"
+    assert seen == [[b"\xff\xd8\xffbest"]]
 
 
 def test_a_failed_reference_does_not_drop_the_photo(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -511,6 +615,29 @@ def test_a_title_does_not_guess_school_names() -> None:
     assert suggest_team_names("Pike County vs. Lamar", b"left", b"right") == ("Home", "Away")
 
 
+def test_the_reference_sent_to_the_model_is_kept(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+
+    def portrait(uniform: Uniform, still: object = None, other: object = None) -> tuple[bytes, str]:
+        sent = b"\xff\xd8\xff" + uniform.name.encode()
+        portrait.last_reference = sent  # type: ignore[attr-defined]
+        return b"\xff\xd8\xffplayer", ".jpg"
+
+    client = TestClient(
+        create_app(
+            store=store,
+            lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
+            portrait=portrait,
+        )
+    )
+
+    teams = client.post("/api/projects/1/teams/stills").json()["teams"]
+
+    assert client.get(teams["left_reference"]).content == b"\xff\xd8\xffHome"
+    assert client.get(teams["right_reference"]).content == b"\xff\xd8\xffAway"
+    assert client.get(teams["left_player"]).content == b"\xff\xd8\xffplayer"
+
+
 def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     client = TestClient(
@@ -562,6 +689,187 @@ def test_naming_teams_saves_stills_and_portraits(tmp_path: Path) -> None:
     assert client.get("/projects/1/teams/neither").status_code == 404
 
 
+def test_a_visit_keeps_the_saved_players_until_generate_again(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    count = {"n": 0}
+
+    def portrait(uniform, still=b"", other=None):
+        del uniform, still, other
+        count["n"] += 1
+        return f"<svg>{count['n']}</svg>".encode(), ".svg"
+
+    client = TestClient(
+        create_app(
+            store=store,
+            lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
+            portrait=portrait,
+        )
+    )
+
+    first = client.post("/api/projects/1/teams/stills")
+    assert first.status_code == 200
+    saved = client.get(first.json()["teams"]["left_player"]).content
+    made = count["n"]
+    assert made > 0
+
+    visit = client.get("/api/projects/1")
+    assert visit.status_code == 200
+    assert client.get(visit.json()["teams"]["left_player"]).content == saved
+    assert count["n"] == made
+
+    again = client.post("/api/projects/1/teams/stills?again=true")
+    assert again.status_code == 200
+    assert count["n"] > made
+    assert client.get(again.json()["teams"]["left_player"]).content != saved
+
+
+def test_one_team_photo_can_be_regenerated(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    count = {"n": 0}
+
+    def portrait(uniform, still=b"", other=None):
+        del uniform, still, other
+        count["n"] += 1
+        return f"<svg>{count['n']}</svg>".encode(), ".svg"
+
+    client = TestClient(
+        create_app(
+            store=store,
+            lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
+            portrait=portrait,
+        )
+    )
+    first = client.post("/api/projects/1/teams/stills")
+    assert first.status_code == 200
+    left = client.get(first.json()["teams"]["left_player"]).content
+    right = client.get(first.json()["teams"]["right_player"]).content
+    made = count["n"]
+
+    again = client.post("/api/projects/1/teams/stills?again=true&side=right")
+    assert again.status_code == 200
+    assert count["n"] == made + 1
+    assert client.get(again.json()["teams"]["left_player"]).content == left
+    assert client.get(again.json()["teams"]["right_player"]).content != right
+
+
+def test_opening_a_film_replaces_the_old_generated_players(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    store.save_team_image(1, "left", b"left-jpeg", ".jpg")
+    store.save_team_image(1, "right", b"right-jpeg", ".jpg")
+    old = _jpeg_claiming(768, 1280)
+    store.save_team_image(1, "left-player", old, ".jpg")
+    store.save_team_image(1, "right-player", old, ".jpg")
+    store.set_film_teams(1, FilmTeams("North", "South", "left", ""))
+    count = {"n": 0}
+
+    def portrait(uniform, still=b"", other=None):
+        del uniform, still, other
+        count["n"] += 1
+        return b"new-player", ".svg"
+
+    client = TestClient(
+        create_app(
+            store=store,
+            lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
+            portrait=portrait,
+        )
+    )
+
+    visit = _wait_for_player(client, b"new-player")
+
+    assert visit.status_code == 200
+    assert count["n"] == 2
+    teams = visit.json()["teams"]
+    assert client.get(teams["left_player"]).content == b"new-player"
+    assert client.get(teams["right_player"]).content == b"new-player"
+
+    second = client.get("/api/projects/1")
+
+    assert second.status_code == 200
+    assert count["n"] == 2
+
+
+def test_opening_a_film_replaces_a_shot_that_is_too_small(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    tiny = _jpeg_claiming(40, 72)
+    kept = _jpeg_claiming(512, 768)
+    store.save_team_image(1, "left", b"left-jpeg", ".jpg")
+    store.save_team_image(1, "right", b"right-jpeg", ".jpg")
+    store.save_team_image(1, "left-player", tiny, ".jpg")
+    store.save_team_image(1, "right-player", kept, ".jpg")
+    store.set_film_teams(1, FilmTeams("North", "South", None, ""))
+    count = {"n": 0}
+
+    def portrait(uniform, still=b"", other=None):
+        del uniform, still, other
+        count["n"] += 1
+        return b"clear-player", ".svg"
+
+    client = TestClient(
+        create_app(
+            store=store,
+            lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
+            portrait=portrait,
+        )
+    )
+
+    visit = _wait_for_player(client, b"clear-player")
+
+    assert visit.status_code == 200
+    assert count["n"] == 1
+    teams = visit.json()["teams"]
+    assert client.get(teams["left_player"]).content == b"clear-player"
+    assert client.get(teams["right_player"]).content == kept
+
+
+def test_opening_a_film_keeps_a_player_at_512_by_768(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    current = _jpeg_claiming(512, 768)
+    store.save_team_image(1, "left", b"left-jpeg", ".jpg")
+    store.save_team_image(1, "right", b"right-jpeg", ".jpg")
+    store.save_team_image(1, "left-player", current, ".jpg")
+    store.save_team_image(1, "right-player", current, ".jpg")
+    store.set_film_teams(1, FilmTeams("North", "South", None, ""))
+    count = {"n": 0}
+
+    def portrait(uniform, still=b"", other=None):
+        del uniform, still, other
+        count["n"] += 1
+        return b"new-player", ".svg"
+
+    client = TestClient(
+        create_app(
+            store=store,
+            lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
+            portrait=portrait,
+        )
+    )
+
+    visit = client.get("/api/projects/1")
+
+    assert visit.status_code == 200
+    assert count["n"] == 0
+    assert client.get(visit.json()["teams"]["left_player"]).content == current
+
+
+def test_a_generated_player_fits_inside_512_by_768() -> None:
+    cv2 = pytest.importorskip("cv2")
+    numpy = pytest.importorskip("numpy")
+    from film_analysis.web.teams import _fit_portrait
+
+    image = numpy.zeros((1280, 768, 3), dtype=numpy.uint8)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    fitted = _fit_portrait(encoded.tobytes())
+    decoded = cv2.imdecode(numpy.frombuffer(fitted, numpy.uint8), cv2.IMREAD_COLOR)
+
+    assert decoded is not None
+    height, width = decoded.shape[:2]
+    assert width <= 512
+    assert height <= 768
+    assert max(width, height) == 768
+
+
 def test_teams_wait_until_plays_are_identified(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     store.set_progress(1, status="scanning", duration_seconds=30, scanned_seconds=4, error=None)
@@ -590,6 +898,36 @@ def _ready_film(tmp_path: Path) -> MemoryCatalog:
     clip.write_bytes(b"clip")
     store.add_play(project_id, 1, 2.0, 8.0, clip, "scrimmage")
     return store
+
+
+def _wait_for_player(client: TestClient, expected: bytes) -> object:
+    deadline = time.monotonic() + 3
+    visit = client.get("/api/projects/1")
+    while time.monotonic() < deadline:
+        assert visit.status_code == 200
+        teams = visit.json().get("teams") or {}
+        url = teams.get("left_player")
+        if url:
+            try:
+                got = client.get(url)
+                if got.status_code == 200 and got.content == expected:
+                    return visit
+            except (OSError, RuntimeError):
+                pass
+        time.sleep(0.02)
+        visit = client.get("/api/projects/1")
+    return visit
+
+
+def _jpeg_claiming(width: int, height: int) -> bytes:
+    return (
+        b"\xff\xd8"
+        b"\xff\xc0\x00\x0b\x08"
+        + height.to_bytes(2, "big")
+        + width.to_bytes(2, "big")
+        + b"\x01\x01\x11\x00"
+        b"\xff\xd9"
+    )
 
 
 def _pixels(still: bytes) -> list[tuple[int, int, int]]:

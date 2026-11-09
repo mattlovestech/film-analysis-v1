@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from film_analysis.agents.cost import read_cost
 from film_analysis.agents.errors import VideoAnalysisError
 from film_analysis.agents.frames import video_duration
 from film_analysis.agents.play_boundaries import agent_from_env
@@ -46,7 +47,15 @@ def run(job: Job, authorization: str | None = Header(default=None)) -> dict[str,
         if job.kind == "ingest":
             return {"duration": _ingest(job)}
         if job.kind == "label":
-            return {"spans": _label(job)}
+            spans, usage, model = _label(job)
+            incoming, outgoing = usage
+            return {
+                "spans": spans,
+                "input_tokens": incoming,
+                "output_tokens": outgoing,
+                "cost_usd": read_cost(model, incoming, outgoing),
+                "model": model,
+            }
         if job.kind == "cut":
             _cut(job)
             return {"ok": True}
@@ -89,13 +98,13 @@ def _ingest(job: Job) -> float:
         shutil.rmtree(owned, ignore_errors=True)
 
 
-def _label(job: Job) -> list[dict[str, object]]:
+def _label(job: Job) -> tuple[list[dict[str, object]], tuple[int, int], str]:
     if job.end <= job.start:
         raise VideoAnalysisError("A stretch must end after it starts.")
     samples = extract_window_url(source_url(job.project_id), job.start, job.end - job.start)
     agent = agent_from_env()
     spans = agent.review_window(samples) if job.review else agent.label_window(samples)
-    return [_span_payload(span) for span in spans]
+    return [_span_payload(span) for span in spans], agent.last_usage, agent.model
 
 
 def _cut(job: Job) -> None:

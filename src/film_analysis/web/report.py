@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from fpdf import FPDF
 
 from film_analysis.storage.catalog import FilmTeams, PlayRecord
+from film_analysis.web.formation import formation_label
 
 _CALLS = {
     "run": "Run",
@@ -16,7 +17,9 @@ _CALLS = {
     "spike": "Spike",
     "two_point": "Two-point",
     "kickoff": "Kickoff",
+    "kick_return": "Kick return",
     "punt": "Punt",
+    "punt_return": "Punt return",
     "field_goal": "Field goal",
     "extra_point": "Extra point",
 }
@@ -34,6 +37,68 @@ class PlayRead:
     call_key: str | None
     family: str
     side: str
+    formation: str = ""
+
+
+REPORT_SECTIONS = frozenset({"calls", "special", "tendencies", "plays", "formations"})
+_DEFAULT_SECTIONS = frozenset({"calls", "special", "tendencies", "plays"})
+
+
+def report_sections(names: Sequence[str] | None) -> frozenset[str]:
+    """Every section when the caller did not choose. Unknown names are dropped."""
+
+    if names is None:
+        return _DEFAULT_SECTIONS
+    chosen = frozenset(name for name in names if name in REPORT_SECTIONS)
+    if not chosen:
+        raise ValueError("Choose what the report should include.")
+    return chosen
+
+
+def chart_kinds(sections: frozenset[str]) -> frozenset[str]:
+    """The play kinds that have to be read before these sections can be written."""
+
+    kinds: set[str] = set()
+    if sections & {"calls", "tendencies", "plays", "formations"}:
+        kinds.add("scrimmage")
+    if sections & {"special", "plays"}:
+        kinds.add("special_teams")
+    return frozenset(kinds)
+
+
+def live_snapshot(
+    teams: FilmTeams | None,
+    plays: Sequence[PlayRecord],
+    sections: Sequence[str] | None = None,
+) -> dict[str, object]:
+    """The rows and run-pass counts available so far, while plays are still being read."""
+
+    chosen = report_sections(sections)
+    label, snaps = _opponent_offense(play_reads(plays), teams)
+    runs = sum(1 for play in snaps if play.call_key == "run")
+    passes = sum(1 for play in snaps if play.call_key == "pass")
+    rows: list[dict[str, object]] = []
+    for play in plays:
+        if _kind(play) not in chart_kinds(chosen):
+            continue
+        read = _read_play(play)
+        rows.append(
+            {
+                "play": read.number,
+                "side": _shown_side(read.side, teams),
+                "call": read.call if read.call_key else "",
+                "formation": read.formation,
+                "reading": _reading(play, chosen),
+            }
+        )
+    return {
+        "live": True,
+        "label": f"{label} on offense.",
+        "counts": {"run": runs, "pass": passes, "offense": len(snaps)},
+        "rows": rows,
+        "tendency": "tendencies" in chosen,
+        "formation": "formations" in chosen,
+    }
 
 
 def play_reads(plays: Sequence[PlayRecord]) -> tuple[PlayRead, ...]:
@@ -55,9 +120,11 @@ def scouting_blocks(
     film_name: str,
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
+    sections: Sequence[str] | None = None,
 ) -> list[tuple[str, str]]:
     """The report as titled sections and lines, before it becomes a PDF."""
 
+    chosen = report_sections(sections)
     reads = play_reads(plays)
     yours, opponent, owned = _names(teams)
     offense = [play for play in reads if play.side == "offense"]
@@ -67,27 +134,46 @@ def scouting_blocks(
     blocks: list[tuple[str, str]] = [
         ("title", f"Scouting report: {film_name}"),
         ("body", intro),
-        ("body", _chart_summary(reads)),
     ]
-    tendencies = tendency_lines(teams, plays)
-    if tendencies:
-        blocks.append(("heading", "Tendencies"))
-        blocks.extend(("body", line) for line in tendencies)
-    blocks.append(("heading", "Each play"))
-    blocks.extend(_play_lines(reads))
-    if offense or defense:
-        offense_name = yours if owned else "Offense"
-        defense_name = yours if owned else "Defense"
-        blocks.append(("heading", f"{offense_name} offense" if owned else "Offense"))
-        blocks.append(("body", _side_copy(offense, offense_name, "offense")))
-        blocks.extend(_play_lines(offense))
-        blocks.append(("heading", f"{defense_name} defense" if owned else "Defense"))
-        blocks.append(("body", _side_copy(defense, defense_name, "defense")))
-        blocks.extend(_play_lines(defense))
-    blocks.append(("heading", "Special teams"))
-    blocks.append(("body", _special_copy(special)))
-    if special:
-        blocks.extend(_play_lines(special))
+    if "tendencies" in chosen:
+        label, snaps = _opponent_offense(reads, teams)
+        blocks.append(("heading", "Play tendency"))
+        blocks.append(("body", f"{label} on offense."))
+        blocks.append(("table", _tendency_table(snaps)))
+    visible = _reads_for(reads, chosen)
+    if visible and chosen & {"calls", "special", "plays"}:
+        blocks.append(("body", _chart_summary(visible, teams)))
+    if "plays" in chosen:
+        blocks.append(("heading", "Each play"))
+        blocks.extend(_play_lines(reads, teams))
+    if "calls" in chosen and (offense or defense):
+        if owned:
+            blocks.append(("heading", f"{opponent} offense"))
+            blocks.append(("body", _side_copy(defense, opponent, "offense")))
+            blocks.extend(_play_lines(defense, teams))
+            blocks.append(("heading", f"{opponent} defense"))
+            blocks.append(("body", _side_copy(offense, opponent, "defense", against_you=True)))
+            blocks.extend(_play_lines(offense, teams))
+        else:
+            blocks.append(("heading", "Offense"))
+            blocks.append(("body", _side_copy(offense, "Offense", "offense")))
+            blocks.extend(_play_lines(offense, teams))
+            blocks.append(("heading", "Defense"))
+            blocks.append(("body", _side_copy(defense, "Defense", "defense")))
+            blocks.extend(_play_lines(defense, teams))
+    if "special" in chosen:
+        blocks.append(("heading", "Special teams"))
+        blocks.append(("body", _special_copy(special)))
+        if special:
+            blocks.extend(_play_lines(special, teams))
+    if "formations" in chosen:
+        formed_plays = defense if owned else offense
+        formed_name = opponent if owned else "Offense"
+        blocks.append(("heading", "Formations"))
+        blocks.append(("body", _formation_copy(formed_plays, formed_name)))
+        formed = [play for play in formed_plays if play.formation]
+        if formed:
+            blocks.extend(_play_lines(formed, teams))
     return blocks
 
 
@@ -95,6 +181,7 @@ def scouting_pdf(
     film_name: str,
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
+    sections: Sequence[str] | None = None,
 ) -> bytes:
     """Render the scouting report as a PDF."""
 
@@ -102,7 +189,7 @@ def scouting_pdf(
     pdf.set_compression(False)
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    for kind, text in scouting_blocks(film_name, teams, plays):
+    for kind, text in scouting_blocks(film_name, teams, plays, sections):
         safe = text.encode("latin-1", "replace").decode("latin-1")
         if kind == "title":
             pdf.set_font("Helvetica", "B", 18)
@@ -112,6 +199,8 @@ def scouting_pdf(
             pdf.ln(3)
             pdf.set_font("Helvetica", "B", 13)
             pdf.multi_cell(0, 7, safe, new_x="LMARGIN", new_y="NEXT")
+        elif kind == "table":
+            _pdf_table(pdf, text)
         else:
             pdf.set_font("Helvetica", size=11)
             pdf.multi_cell(0, 6, safe, new_x="LMARGIN", new_y="NEXT")
@@ -122,42 +211,111 @@ def scouting_csv(
     film_name: str,
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
+    sections: Sequence[str] | None = None,
 ) -> str:
     """One row per play, for a spreadsheet."""
 
     yours, opponent, _owned = _names(teams)
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(
-        [
-            "film",
-            "your_team",
-            "opponent",
-            "play",
-            "start_seconds",
-            "end_seconds",
-            "seconds",
-            "call",
-            "family",
-            "side",
+    chosen = report_sections(sections)
+    show_formation = "formations" in chosen
+    header = [
+        "film",
+        "your_team",
+        "opponent",
+        "play",
+        "start_seconds",
+        "end_seconds",
+        "seconds",
+        "call",
+        "family",
+        "side",
+    ]
+    if show_formation:
+        header.append("formation")
+    writer.writerow(header)
+    for play in _reads_for(play_reads(plays), chosen):
+        row = [
+            film_name,
+            yours,
+            opponent,
+            play.number,
+            _csv_number(play.start_seconds),
+            _csv_number(play.end_seconds),
+            _csv_number(play.seconds),
+            play.call,
+            play.family,
+            _shown_side(play.side, teams),
         ]
-    )
-    for play in play_reads(plays):
-        writer.writerow(
-            [
-                film_name,
-                yours,
-                opponent,
-                play.number,
-                _csv_number(play.start_seconds),
-                _csv_number(play.end_seconds),
-                _csv_number(play.seconds),
-                play.call,
-                play.family,
-                play.side,
-            ]
-        )
+        if show_formation:
+            row.append(play.formation)
+        writer.writerow(row)
     return buffer.getvalue()
+
+
+def _reads_for(reads: Sequence[PlayRead], sections: frozenset[str]) -> list[PlayRead]:
+    """Plays that belong in the sections the user asked for."""
+
+    kept: list[PlayRead] = []
+    specials, calls = _covered(sections)
+    for play in reads:
+        special = play.side == "special teams"
+        if (special and specials) or (not special and calls):
+            kept.append(play)
+    return kept
+
+
+def _covered(sections: frozenset[str]) -> tuple[bool, bool]:
+    """Whether special teams, then scrimmage, belong in this report."""
+
+    specials = "special" in sections
+    calls = "calls" in sections or "formations" in sections
+    if not specials and not calls and sections & {"tendencies", "plays"}:
+        return True, True
+    return specials, calls
+
+
+def _opponent_offense(
+    reads: Sequence[PlayRead],
+    teams: FilmTeams | None,
+) -> tuple[str, list[PlayRead]]:
+    """The other team's offensive snaps. Those are the plays this side defended."""
+
+    _yours, opponent, owned = _names(teams)
+    if owned:
+        return opponent, [play for play in reads if play.side == "defense"]
+    return "Offense", [play for play in reads if play.side == "offense"]
+
+
+def _tendency_table(snaps: Sequence[PlayRead]) -> str:
+    """Runs, passes, and the offensive play count, as tab-separated rows."""
+
+    runs = sum(1 for play in snaps if play.call_key == "run")
+    passes = sum(1 for play in snaps if play.call_key == "pass")
+    charted = runs + passes
+    rows = [
+        "Call\tPlays\tShare",
+        f"Run\t{runs}\t{_share(runs, charted)}",
+        f"Pass\t{passes}\t{_share(passes, charted)}",
+        f"Offense\t{len(snaps)}\t",
+    ]
+    return "\n".join(rows)
+
+
+def _share(count: int, total: int) -> str:
+    if total == 0:
+        return "0%"
+    return _percent(count, total)
+
+
+def _pdf_table(pdf: FPDF, text: str) -> None:
+    rows = [line.split("\t") for line in text.splitlines() if line]
+    for index, row in enumerate(rows):
+        pdf.set_font("Helvetica", "B" if index == 0 else "", 11)
+        for cell in row:
+            pdf.cell(42, 7, cell, border=1)
+        pdf.ln(7)
 
 
 def _read_play(play: PlayRecord) -> PlayRead:
@@ -170,6 +328,7 @@ def _read_play(play: PlayRecord) -> PlayRead:
         call_key=play.play_type,
         family=play.family,
         side=_side(play),
+        formation=formation_label(play.formation),
     )
 
 
@@ -179,6 +338,47 @@ def _needs_unit(play: PlayRecord) -> bool:
 
 def _special(play: PlayRecord) -> bool:
     return play.family == "special_teams"
+
+
+def _kind(play: PlayRecord) -> str:
+    return "special_teams" if _special(play) else "scrimmage"
+
+
+def _side_label(side: str) -> str:
+    return {"offense": "Offense", "defense": "Defense", "special teams": "Special teams"}.get(
+        side, ""
+    )
+
+
+def _reading(play: PlayRecord, chosen: frozenset[str]) -> list[str]:
+    """Fields this play still needs before its row is finished."""
+
+    fields: list[str] = []
+    if _kind(play) == "scrimmage":
+        if play.unit not in {"offense", "defense"}:
+            fields.append("side")
+        if play.play_type not in {"run", "pass"}:
+            fields.append("call")
+        open_side = play.unit not in {"offense", "defense"}
+        if (
+            "formations" in chosen
+            and not play.formation
+            and play.unit != "offense"
+            and (play.unit == "defense" or open_side)
+        ):
+            fields.append("formation")
+        return fields
+    specials = {
+        "kickoff",
+        "kick_return",
+        "punt",
+        "punt_return",
+        "field_goal",
+        "extra_point",
+    }
+    if play.play_type not in specials:
+        fields.append("call")
+    return fields
 
 
 def _side(play: PlayRecord) -> str:
@@ -214,42 +414,92 @@ def tendency_lines(
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
 ) -> list[str]:
-    """Run and pass rates for the user's offense and for the plays they defended."""
+    """Run and pass rates for the opponent's offense and the opponent's defense."""
 
     reads = play_reads(plays)
-    yours, _opponent, owned = _names(teams)
+    yours, opponent, owned = _names(teams)
     lines: list[str] = []
-    for unit, label in (("offense", "offense"), ("defense", "defense")):
-        side = [play for play in reads if play.side == unit]
+    groups = (("defense", "offense"), ("offense", "defense")) if owned else (
+        ("offense", "offense"),
+        ("defense", "defense"),
+    )
+    for stored, spoken in groups:
+        side = [play for play in reads if play.side == stored]
         runs = sum(1 for play in side if play.call_key == "run")
         passes = sum(1 for play in side if play.call_key == "pass")
         charted = runs + passes
         if charted == 0:
             continue
-        team = yours if owned else label.capitalize()
+        team = opponent if owned else spoken.capitalize()
         mix = (
             f"{_calls(runs, 'run', 'runs')} ({_percent(runs, charted)}) and "
             f"{_calls(passes, 'pass', 'passes')} ({_percent(passes, charted)})"
         )
-        if unit == "offense":
-            lines.append(f"{team} offense: {mix}.")
-        else:
-            lines.append(f"{team} defense, from the plays the offense ran: {mix}.")
+        lines.append(f"{team} {spoken}: {mix}.")
+    special = [play for play in reads if play.side == "special teams" and play.call_key]
+    if special:
+        team = yours if owned else "Special teams"
+        counts: dict[str, int] = {}
+        for play in special:
+            counts[play.call] = counts.get(play.call, 0) + 1
+        pieces = [f"{count} {name.lower()}" for name, count in counts.items()]
+        lines.append(f"{team} special teams: {', '.join(pieces)}.")
     return lines
 
 
-def _chart_summary(plays: Sequence[PlayRead]) -> str:
+def _chart_summary(plays: Sequence[PlayRead], teams: FilmTeams | None) -> str:
     if not plays:
         return "Read from no plays."
+    yours, opponent, owned = _names(teams)
     counts: dict[str, int] = {}
     for play in plays:
-        counts[play.call] = counts.get(play.call, 0) + 1
-    pieces = [f"{count} {name.lower()}" for name, count in counts.items()]
+        label = _ball_label(play.side, yours, opponent, owned)
+        counts[label] = counts.get(label, 0) + 1
+    pieces = [f"{count} {name}" for name, count in counts.items()]
     noun = "play" if len(plays) == 1 else "plays"
-    return f"Read from {len(plays)} {noun}: {', '.join(pieces)}."
+    calls: dict[str, int] = {}
+    for play in plays:
+        if play.call_key and play.call:
+            calls[play.call.lower()] = calls.get(play.call.lower(), 0) + 1
+    call_text = ", ".join(f"{count} {name}" for name, count in calls.items())
+    summary = f"Read from {len(plays)} {noun}: {', '.join(pieces)}."
+    if call_text:
+        summary = f"{summary} {call_text}."
+    return summary
 
 
-def _side_copy(plays: Sequence[PlayRead], team: str, unit: str) -> str:
+def _ball_label(side: str, yours: str, opponent: str, owned: bool) -> str:
+    """Whose offense or defense this snap is, using the labeled teams."""
+
+    del yours
+    if side == "special teams":
+        return "special teams"
+    if owned and side == "defense":
+        return f"{opponent} offense"
+    if owned and side == "offense":
+        return f"{opponent} defense"
+    if side == "offense":
+        return "offense"
+    if side == "defense":
+        return "defense"
+    return "not read"
+
+
+def _shown_side(side: str, teams: FilmTeams | None) -> str:
+    """The side to show, named for the opponent when that team is known."""
+
+    yours, opponent, owned = _names(teams)
+    label = _ball_label(side, yours, opponent, owned)
+    if label == "not read":
+        return ""
+    if label == "special teams":
+        return "Special teams"
+    return label[0].upper() + label[1:] if label else ""
+
+
+def _side_copy(
+    plays: Sequence[PlayRead], team: str, unit: str, *, against_you: bool = False
+) -> str:
     if not plays:
         side = "offensive" if unit == "offense" else "defensive"
         return f"{team} has no {side} snaps in this film."
@@ -262,10 +512,12 @@ def _side_copy(plays: Sequence[PlayRead], team: str, unit: str) -> str:
     if unit == "offense":
         lead = f"{team} ran {snaps} offensive {snap_word}."
     else:
-        lead = (
-            f"{team} defended {snaps} {snap_word}. "
-            "The call on each snap is what the offense ran."
+        detail = (
+            "The call on each snap is what your offense ran against them."
+            if against_you
+            else "The call on each snap is what the offense ran."
         )
+        lead = f"{team} defended {snaps} {snap_word}. {detail}"
     if charted == 0:
         mix = " None of these snaps are charted as a run or a pass."
     else:
@@ -274,8 +526,9 @@ def _side_copy(plays: Sequence[PlayRead], team: str, unit: str) -> str:
             f"{_calls(passes, 'pass', 'passes')} ({_percent(passes, charted)}) "
             f"among the {charted} {_noun(charted, 'snap', 'snaps')} charted as a run or a pass."
         )
-    order = ", ".join(play.call for play in plays)
-    return f"{lead}{mix} The snaps average {_seconds(average)}. In order: {order}."
+    order = ", ".join(play.call for play in plays if play.call)
+    sequence = f" In order: {order}." if order else ""
+    return f"{lead}{mix} The snaps average {_seconds(average)}.{sequence}"
 
 
 def _special_copy(plays: Sequence[PlayRead]) -> str:
@@ -289,16 +542,31 @@ def _special_copy(plays: Sequence[PlayRead]) -> str:
     return f"{len(plays)} special-teams {noun}: {', '.join(pieces)}."
 
 
-def _play_lines(plays: Sequence[PlayRead]) -> list[tuple[str, str]]:
-    return [("row", _play_line(play)) for play in plays]
+def _play_lines(
+    plays: Sequence[PlayRead], teams: FilmTeams | None = None
+) -> list[tuple[str, str]]:
+    return [("row", _play_line(play, teams)) for play in plays]
 
 
-def _play_line(play: PlayRead) -> str:
-    side = f"  {play.side.capitalize()}" if play.side else ""
+def _play_line(play: PlayRead, teams: FilmTeams | None = None) -> str:
+    shown = _shown_side(play.side, teams) or "Not read"
+    call = f"  {play.call}" if play.call_key and play.call else ""
+    formed = f"  {play.formation}" if play.formation else ""
     return (
         f"Play {play.number}  {_clock(play.start_seconds)}-{_clock(play.end_seconds)}"
-        f"  {play.call}  {_seconds(play.seconds)}{side}"
+        f"  {shown}{call}  {_seconds(play.seconds)}{formed}"
     )
+
+
+def _formation_copy(plays: Sequence[PlayRead], team: str) -> str:
+    named = [play for play in plays if play.formation]
+    if not named:
+        return f"No formation was read for {team} offense. This read is experimental."
+    counts: dict[str, int] = {}
+    for play in named:
+        counts[play.formation] = counts.get(play.formation, 0) + 1
+    pieces = [f"{count} {name}" for name, count in counts.items()]
+    return f"{team} offense: {', '.join(pieces)}. This read is experimental."
 
 
 def _call(play: PlayRecord) -> str:
@@ -306,7 +574,7 @@ def _call(play: PlayRecord) -> str:
         return _CALLS[play.play_type]
     if _special(play):
         return "Special teams"
-    return "Scrimmage"
+    return ""
 
 
 def _calls(count: int, singular: str, plural: str) -> str:

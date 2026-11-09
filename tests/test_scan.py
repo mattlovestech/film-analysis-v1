@@ -136,6 +136,41 @@ def test_unsure_footage_is_reviewed_after_the_film() -> None:
     assert spans == [("junk", 30.0)]
 
 
+def test_the_first_cut_is_announced_before_the_second_look() -> None:
+    order: list[str] = []
+
+    def frames(path: Path, start: float, seconds: float) -> list[tuple[float, bytes]]:
+        del path, seconds
+        return [(start, b"jpeg")]
+
+    def label(samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+        start = samples[0][0]
+        if start < 1:
+            return (FilmSpan(kind="uncertain", start_seconds=0, end_seconds=8),)
+        return (FilmSpan(kind="uncertain", start_seconds=30, end_seconds=40),)
+
+    def review(samples: list[tuple[float, bytes]]) -> tuple[FilmSpan, ...]:
+        order.append("review")
+        start = samples[0][0]
+        return (FilmSpan(kind="scrimmage", start_seconds=start, end_seconds=start + 8),)
+
+    scan_film(
+        Path("film.mp4"),
+        70,
+        label,
+        frames,
+        lambda source, start, end, dest: dest.write_bytes(b"clip"),
+        lambda number, start, end, clip, family: None,
+        lambda kind, start, end: None,
+        lambda seconds: None,
+        review=review,
+        on_cut=lambda: order.append("cut"),
+    )
+
+    assert order[0] == "cut"
+    assert "review" in order
+
+
 def test_windows_run_at_the_same_time() -> None:
     started = threading.Event()
     seen: list[float] = []

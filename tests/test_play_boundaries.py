@@ -10,13 +10,17 @@ from film_analysis.agents.play_boundaries import AnthropicPlayAgent, agent_from_
 
 
 class _Messages:
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, usage: object = None) -> None:
         self.text = text
+        self.usage = usage
         self.calls: list[dict[str, object]] = []
 
     def create(self, **kwargs: object) -> SimpleNamespace:
         self.calls.append(kwargs)
-        return SimpleNamespace(content=[SimpleNamespace(type="text", text=self.text)])
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=self.text)],
+            usage=self.usage,
+        )
 
 
 class _Client:
@@ -64,6 +68,26 @@ def test_label_window_sorts_scrimmage_before_junk(tmp_path: Path) -> None:
     assert "Offensive or defensive" in prompt
     assert "special teams" in prompt
     assert "uncertain" in prompt
+
+
+def test_a_successful_read_records_its_tokens() -> None:
+    notes: list[tuple[object, ...]] = []
+    messages = _Messages(
+        '{"spans": [{"kind": "scrimmage", "start_seconds": 1, "end_seconds": 3}]}',
+        usage=SimpleNamespace(input_tokens=1000, output_tokens=100),
+    )
+    agent = AnthropicPlayAgent(
+        api_key="test-key",
+        client=_Client(messages),
+        frames=_frames,
+        note_unreadable=lambda *args: notes.append(args),
+    )
+
+    agent.label_window([(1.0, b"jpeg-a"), (5.0, b"jpeg-b")])
+
+    assert notes == [
+        (1.0, 5.0, 2, len(b"jpeg-a") + len(b"jpeg-b"), "", "", (1000, 100, "claude-sonnet-5-5"))
+    ]
 
 
 def test_review_window_looks_again_at_a_held_stretch() -> None:

@@ -25,8 +25,8 @@ from film_analysis.agents.scan import (
     window_bounds,
 )
 from film_analysis.agents.segments import FilmSpan
-from film_analysis.storage.catalog import Catalog, CatalogError, catalog_from_env
-from film_analysis.web.app import _job_error, _load_dotenv, _progress
+from film_analysis.storage.catalog import Catalog, CatalogError, ReadNote, catalog_from_env
+from film_analysis.web.app import _job_error, _load_dotenv, _progress, _store_action_poster
 
 app = FastAPI(title="film-cutter", docs_url=None, redoc_url=None, openapi_url=None)
 _lock = threading.Lock()
@@ -128,9 +128,10 @@ def _label_task(
     start: float,
     end: float,
     review: bool,
+    catalog: Catalog,
 ) -> dict[str, object]:
     with slots as slot:
-        return _task(
+        payload = _task(
             worker,
             token,
             f"task-{project_id}-{slot}",
@@ -143,6 +144,44 @@ def _label_task(
             },
             900,
         )
+    _remember_spend(catalog, project_id, start, end, payload)
+    return payload
+
+
+def _remember_spend(
+    catalog: Catalog,
+    project_id: int,
+    start: float,
+    end: float,
+    payload: dict[str, object],
+) -> None:
+    usd = payload.get("cost_usd")
+    incoming = payload.get("input_tokens")
+    outgoing = payload.get("output_tokens")
+    model = payload.get("model")
+    if not isinstance(usd, (int, float)) or usd <= 0:
+        return
+    if not isinstance(incoming, int) or not isinstance(outgoing, int):
+        incoming, outgoing = 0, 0
+    if not isinstance(model, str):
+        model = ""
+    try:
+        catalog.add_read(
+            project_id,
+            ReadNote(
+                start,
+                end,
+                0,
+                0,
+                "",
+                input_tokens=incoming,
+                output_tokens=outgoing,
+                cost_usd=float(usd),
+                model=model,
+            ),
+        )
+    except CatalogError:
+        return
 
 
 def _mark(
@@ -210,6 +249,7 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
                     start,
                     end,
                     False,
+                    catalog,
                 )
                 for index, (start, end) in enumerate(bounds)
             ]
@@ -256,9 +296,11 @@ def _cut_film(catalog: Catalog, body: Start, token: str) -> None:
                 )
 
         spans = [span for group in collected.values() for span in group]
+        _store_action_poster(catalog, project_id, force=True)
         if review_ranges(spans):
             _mark(catalog, project_id, "checking", workers=slots.get())
         _review(catalog, body, token, spans, kept, published, play_number, slots, duration)
+        _store_action_poster(catalog, project_id, force=True)
         _progress(catalog, project_id, "ready", duration, duration, None)
         _mark(catalog, project_id, "ready", running=False)
     finally:
@@ -311,6 +353,7 @@ def _review(
                 start,
                 end,
                 True,
+                catalog,
             )
             for index, (start, end) in enumerate(held)
         ]

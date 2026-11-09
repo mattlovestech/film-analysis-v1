@@ -117,7 +117,10 @@ def thumbnail_url(url: str | None) -> str | None:
 
     if not url:
         return None
-    video_id = parse_qs(urlparse(url).query).get("v", [""])[0]
+    try:
+        video_id = parse_qs(urlparse(canonical_youtube_url(url)).query)["v"][0]
+    except (ValueError, KeyError, IndexError):
+        return None
     if _VIDEO_ID.fullmatch(video_id) is None:
         return None
     return f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"

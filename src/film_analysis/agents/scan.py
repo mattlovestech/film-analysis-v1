@@ -332,11 +332,13 @@ def scan_film(
     already: list[tuple[float, float]] | None = None,
     on_review: Callable[[], None] | None = None,
     on_counts: Callable[[int, int], None] | None = None,
+    on_cut: Callable[[], None] | None = None,
 ) -> None:
     """Label the film from start to end. Publish each play once its end has settled.
 
     `resume_at` is the settled point from an earlier pass. Windows before that
-    stay as they were, and new plays continue from `next_number`.
+    stay as they were, and new plays continue from `next_number`. `on_cut`
+    runs once that first pass has published its plays, before the second look.
     """
 
     slots = limit or WorkerLimit(workers)
@@ -389,6 +391,8 @@ def scan_film(
                 progress(stable)
                 _report_counts(on_counts, retry_found, 0)
         spans = [span for group in collected.values() for span in group]
+        if on_cut is not None:
+            on_cut()
         if review_ranges(spans) and on_review is not None:
             on_review()
         _review_held(

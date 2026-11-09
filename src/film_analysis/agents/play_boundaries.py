@@ -77,7 +77,7 @@ _WINDOW = 40
 
 FrameSampler = Callable[[Path], list[tuple[float, bytes]]]
 Downloader = Callable[[str, Path], Path]
-ReadNote = Callable[[float, float, int, int, str, str], None]
+ReadNote = Callable[..., None]
 _READS: contextvars.ContextVar[ReadNote | None] = contextvars.ContextVar(
     "film_read_note",
     default=None,
@@ -131,6 +131,7 @@ class AnthropicPlayAgent:
         self._frames = frames or extract_frames
         self._downloader = downloader or download_youtube
         self.note_unreadable = note_unreadable
+        self.last_usage: tuple[int, int] = (0, 0)
 
     def segment(self, video_path: Path) -> tuple[PlaySegment, ...]:
         if not video_path.is_file():
@@ -172,7 +173,7 @@ class AnthropicPlayAgent:
         reply = ""
         try:
             reply = self._ask(samples, template.format(start=start, end=end))
-            return parse_film_spans(reply)
+            spans = parse_film_spans(reply)
         except ValueError as error:
             self._miss(start, end, samples, str(error), reply)
             if end <= start:
@@ -185,6 +186,8 @@ class AnthropicPlayAgent:
             if end <= start:
                 return ()
             return (FilmSpan(kind=UNCERTAIN, start_seconds=start, end_seconds=end),)
+        self._bill(start, end, samples)
+        return spans
 
     def _miss(
         self,
@@ -213,6 +216,20 @@ class AnthropicPlayAgent:
         except Exception:
             _LOG.warning("could not record the failed read at %.1f–%.1f", start, end, exc_info=True)
 
+    def _bill(self, start: float, end: float, samples: list[tuple[float, bytes]]) -> None:
+        incoming, outgoing = self.last_usage
+        if incoming <= 0 and outgoing <= 0:
+            return
+        note = _READS.get() or self.note_unreadable
+        if note is None:
+            return
+        frames = len(samples)
+        nbytes = sum(len(jpeg) for _, jpeg in samples)
+        try:
+            note(start, end, frames, nbytes, "", "", (incoming, outgoing, self.model))
+        except Exception:
+            _LOG.warning("could not record the read at %.1f–%.1f", start, end, exc_info=True)
+
     def segment_youtube(self, url: str) -> tuple[PlaySegment, ...]:
         try:
             canonical = canonical_youtube_url(url)
@@ -224,6 +241,7 @@ class AnthropicPlayAgent:
             return self.segment(video)
 
     def _ask(self, samples: list[tuple[float, bytes]], prompt: str = PROMPT) -> str:
+        self.last_usage = (0, 0)
         client = self._client or _anthropic_client(self._api_key)
         content: list[dict[str, object]] = []
         for seconds, jpeg in samples:
@@ -250,6 +268,11 @@ class AnthropicPlayAgent:
         except Exception as error:
             raise VideoAnalysisError(_model_failure(error)) from error
 
+        usage = getattr(message, "usage", None)
+        self.last_usage = (
+            _token_count(usage, "input_tokens"),
+            _token_count(usage, "output_tokens"),
+        )
         texts = [
             block.text
             for block in getattr(message, "content", [])
@@ -307,6 +330,17 @@ def _stops_the_film(error: BaseException) -> bool:
     if any(code in text for code in ("http 401", "http 402", "http 413")):
         return True
     return "request_too_large" in text or "request too large" in text
+
+
+def _token_count(usage: object, name: str) -> int:
+    if isinstance(usage, dict):
+        value = usage.get(name, 0)
+    else:
+        value = getattr(usage, name, 0) if usage is not None else 0
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _excerpt(reply: str) -> str:

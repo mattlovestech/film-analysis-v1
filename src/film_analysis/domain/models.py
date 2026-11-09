@@ -23,6 +23,8 @@ class PlayType(StrEnum):
     SPIKE = "spike"
     PUNT = "punt"
     KICKOFF = "kickoff"
+    KICK_RETURN = "kick_return"
+    PUNT_RETURN = "punt_return"
     FIELD_GOAL = "field_goal"
     EXTRA_POINT = "extra_point"
     TWO_POINT = "two_point"

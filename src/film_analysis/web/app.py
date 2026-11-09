@@ -3,22 +3,34 @@
 import asyncio
 import contextlib
 import inspect
+import json
 import logging
 import os
+import queue
 import shutil
 import tempfile
 import threading
+import time
 import traceback
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from film_analysis.agents.cost import read_cost
 from film_analysis.agents.errors import MissingApiKeyError, VideoAnalysisError
 from film_analysis.agents.frames import extract_window, video_duration
 from film_analysis.agents.play_boundaries import PlayBoundaryAgent, agent_from_env, bind_read_note
@@ -42,6 +54,7 @@ from film_analysis.agents.youtube import (
 from film_analysis.domain.models import PlayType
 from film_analysis.storage.catalog import (
     TEAM_IMAGE_KINDS,
+    ActivityRecord,
     ActivityStep,
     Catalog,
     CatalogError,
@@ -51,14 +64,33 @@ from film_analysis.storage.catalog import (
     ProjectDetail,
     ProjectSummary,
     ReadNote,
+    ReportAnalysis,
     SpanRecord,
     catalog_from_env,
 )
+from film_analysis.web.chart import SPECIAL_CALLS, ChartedPlay, chart_play
 from film_analysis.web.cloud import cloud_target
+from film_analysis.web.formation import (
+    FORMATIONS,
+    FormationRead,
+    formation_label,
+    read_formation,
+)
 from film_analysis.web.playback import cut_clip
-from film_analysis.web.report import play_reads, scouting_csv, scouting_pdf
+from film_analysis.web.report import (
+    chart_kinds,
+    live_snapshot,
+    play_reads,
+    report_sections,
+    scouting_blocks,
+    scouting_csv,
+    scouting_pdf,
+    tendency_lines,
+)
 from film_analysis.web.teams import (
     Uniform,
+    action_moments,
+    choose_action_shot,
     decode_uniforms,
     detect_uniforms,
     encode_uniforms,
@@ -67,12 +99,15 @@ from film_analysis.web.teams import (
     lineup_moment,
     make_portrait,
     play_frames,
-    player_photos,
+    player_frames,
+    player_picture,
     portrait_uniform,
+    reference_for_model,
     split_lineup,
+    still_frame,
     suggest_team_names,
+    team_cards,
     uniform_line,
-    uniforms_collapsed,
 )
 
 _PAGE = Path(__file__).with_name("index.html")
@@ -87,6 +122,9 @@ _Cutter = Callable[[Path, float, float, Path], None]
 _Duration = Callable[[Path], float]
 _Frames = Callable[[Path, float, float], list[tuple[float, bytes]]]
 _Details = Callable[[str], FilmInfo | None]
+_Still = Callable[[Path, float], bytes]
+_poster_lock = threading.Lock()
+_poster_wait: dict[tuple[int, int], float] = {}
 
 
 class _ReviewDecision(BaseModel):
@@ -111,6 +149,8 @@ class _ReviewDecision(BaseModel):
 _SPECIAL_PLAY_TYPES = {
     PlayType.PUNT.value,
     PlayType.KICKOFF.value,
+    PlayType.KICK_RETURN.value,
+    PlayType.PUNT_RETURN.value,
     PlayType.FIELD_GOAL.value,
     PlayType.EXTRA_POINT.value,
 }
@@ -120,6 +160,7 @@ _PLAY_LABELS = {item.value for item in PlayType} | {"scrimmage", "special_teams"
 class _WorkerSetting(BaseModel):
     workers: int | None = Field(default=None, ge=1, le=MAX_WORKERS)
     place: str | None = None
+    formations: bool | None = None
 
     @field_validator("place")
     @classmethod
@@ -132,7 +173,7 @@ class _WorkerSetting(BaseModel):
 
     @model_validator(mode="after")
     def _has_change(self) -> "_WorkerSetting":
-        if self.workers is None and self.place is None:
+        if self.workers is None and self.place is None and self.formations is None:
             raise ValueError("Choose where jobs run, or how many workers.")
         return self
 
@@ -159,6 +200,14 @@ class _TeamNames(BaseModel):
         if value not in {"left", "right"}:
             raise ValueError("Mark which side is your team.")
         return value
+
+
+class _ReportChoice(BaseModel):
+    sections: list[str] = Field(default_factory=list)
+    restart: bool = True
+
+
+_REPORT_BODY = Body(default=None)
 
 
 class _ArchiveFlag(BaseModel):
@@ -195,6 +244,19 @@ class _PlayLabel(BaseModel):
         return self
 
 
+class _PlayTrim(BaseModel):
+    start: float
+    end: float
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "_PlayTrim":
+        if self.start < 0:
+            raise ValueError("A play cannot start before the film.")
+        if self.end - self.start < 0.5:
+            raise ValueError("Keep at least half a second of the play.")
+        return self
+
+
 def _stored_play_label(play_type: str) -> tuple[str, str | None]:
     """Return the family and the specific type stored for a user's choice."""
 
@@ -228,6 +290,13 @@ def create_app(
     details: _Details | None = None,
     lineup: Callable[[Path, float], tuple[bytes, bytes]] | None = None,
     portrait: Callable[..., tuple[bytes, str]] | None = None,
+    chart: (
+        Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None] | None
+    ) = None,
+    formations: (
+        Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None] | None
+    ) = None,
+    still: _Still | None = None,
 ) -> FastAPI:
     """Build the upload app. Pass an agent in tests; otherwise read it from the environment."""
 
@@ -235,6 +304,8 @@ def create_app(
     fetch = downloader or download_youtube
     running: set[int] = set()
     activity: dict[int, str] = {}
+    report_choice: dict[int, frozenset[str]] = {}
+    report_events: dict[int, queue.Queue[str | None]] = {}
     running_lock = threading.Lock()
     split = cut or cut_clip
     probe = duration or video_duration
@@ -243,6 +314,9 @@ def create_app(
     lookup = youtube_details if details is None else details
     draw_lineup = split_lineup if lineup is None else lineup
     draw_portrait = make_portrait if portrait is None else portrait
+    read_play = chart_play if chart is None else chart
+    read_formation_play = read_formation if formations is None else formations
+    grab = still_frame if still is None else still
     if store is None:
         storage = tempfile.TemporaryDirectory(prefix="film-analysis-")
         catalog: Catalog = MemoryCatalog(Path(storage.name))
@@ -317,6 +391,13 @@ def create_app(
         del project_id
         return _page()
 
+    @app.get("/projects/{project_id}/review")
+    @app.get("/projects/{project_id}/select-teams")
+    @app.get("/projects/{project_id}/generate-report")
+    def project_screen(project_id: int) -> HTMLResponse:
+        del project_id
+        return _page()
+
     @app.get("/play/{uid}")
     def play_page(uid: str) -> HTMLResponse:
         del uid
@@ -333,7 +414,7 @@ def create_app(
                 "project": item.project,
                 "name": item.name,
                 "play_count": item.play_count,
-                "thumbnail": thumbnail_url(item.youtube_url),
+                "thumbnail": _thumbnail_for(item, catalog),
                 "status": item.status,
                 "downloaded": item.downloaded_bytes,
                 "total_bytes": item.total_bytes,
@@ -368,6 +449,12 @@ def create_app(
         with running_lock:
             active = set(running)
         seen = {item.project for item in saved}
+        try:
+            play_costs = catalog.play_read_costs()
+            spend = _merged_spend(catalog.read_spend(), catalog.report_spend())
+        except CatalogError:
+            play_costs = {}
+            spend = {}
         dated: list[tuple[str, dict[str, object]]] = []
         for item in saved:
             summary = by_id.get(item.project)
@@ -385,6 +472,9 @@ def create_app(
                         running=working,
                         updated=item.updated_at,
                         steps=item.steps,
+                        play_costs=play_costs.get(item.project, []),
+                        spend=spend.get(item.project),
+                        catalog=catalog,
                     ),
                 )
             )
@@ -393,7 +483,18 @@ def create_app(
                 continue
             stamp = summary.created_at or ""
             dated.append(
-                (stamp, _activity_job(summary, phase="ready", running=False, updated=stamp))
+                (
+                    stamp,
+                    _activity_job(
+                        summary,
+                        phase="ready",
+                        running=False,
+                        updated=stamp,
+                        play_costs=play_costs.get(summary.project, []),
+                        spend=spend.get(summary.project),
+                        catalog=catalog,
+                    ),
+                )
             )
         dated.sort(key=lambda pair: pair[0], reverse=True)
         return {**_run_payload(catalog, slots, request), "jobs": [job for _, job in dated]}
@@ -416,6 +517,8 @@ def create_app(
             if body.workers is not None:
                 catalog.set_worker_count(body.workers)
                 slots.set(body.workers)
+            if body.formations is not None:
+                catalog.set_formation_reads(body.formations)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
         return _run_payload(catalog, slots, request)
@@ -423,29 +526,62 @@ def create_app(
     @app.get("/api/projects/{project_id}")
     def project(project_id: int) -> dict[str, object]:
         try:
-            saved = catalog.get_project(project_id)
+            page = _load_project_page(catalog, project_id)
         except CatalogError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
+        saved = page[0]
         if saved is None:
             raise HTTPException(status_code=404, detail="That analysis is no longer available.")
-        return _project_payload(
+        refreshing = _schedule_portrait_refresh(catalog, saved, draw_lineup, draw_portrait)
+        payload = _project_payload(
             saved,
             running=_running(running, running_lock, project_id),
-            steps=_saved_steps(catalog, project_id),
+            steps=page[1],
             catalog=catalog,
+            film_teams=page[2],
+            read_notes=page[3],
+            prepared=True,
+            still=grab,
+            make_poster=True,
         )
+        teams = payload.get("teams")
+        if refreshing and isinstance(teams, dict):
+            teams["refreshing"] = True
+        return payload
 
     @app.post("/api/projects/{project_id}/teams/stills")
-    def team_stills(project_id: int, again: bool = False) -> dict[str, object]:
+    def team_stills(
+        project_id: int,
+        again: bool = False,
+        side: str | None = None,
+        wait: bool = True,
+    ) -> dict[str, object]:
         saved = _require_project(catalog, project_id)
         _require_identified(saved)
-        run_team_analysis(catalog, saved, draw_lineup, draw_portrait, force=again)
-        return _project_payload(
+        if side is not None and side not in {"left", "right"}:
+            raise HTTPException(status_code=400, detail="Choose the left or right team.")
+        _start_team_build(
+            catalog,
             saved,
+            draw_lineup,
+            draw_portrait,
+            force=again,
+            side=side,
+            wait=wait,
+        )
+        refreshed = catalog.get_project(project_id) or saved
+        payload = _project_payload(
+            refreshed,
             running=_running(running, running_lock, project_id),
             steps=_saved_steps(catalog, project_id),
             catalog=catalog,
         )
+        teams = payload.get("teams")
+        progress = _team_progress_view(project_id)
+        if isinstance(teams, dict) and progress is not None:
+            teams["building"] = bool(progress.get("running"))
+            teams["progress"] = progress
+        return payload
 
     @app.post("/api/projects/{project_id}/teams")
     def save_teams(project_id: int, body: _TeamNames) -> dict[str, object]:
@@ -485,16 +621,143 @@ def create_app(
         media = "image/svg+xml" if path.suffix == ".svg" else "image/jpeg"
         return FileResponse(path, media_type=media)
 
+    @app.get("/api/projects/{project_id}/report")
+    def preview_scouting_report(project_id: int, sections: str = "") -> dict[str, object]:
+        """The report from plays already marked, before a PDF is made."""
+
+        saved, teams, plays = _report_film(catalog, project_id)
+        chosen = _report_sections(sections)
+        return _report_payload(saved, teams, plays, chosen)
+
     @app.post("/api/projects/{project_id}/report")
-    def generate_scouting_report(project_id: int) -> dict[str, object]:
-        saved, _teams, plays = _report_film(catalog, project_id)
-        reads = play_reads(plays)
-        return {"project": saved.project, "plays": len(reads), "ready": True}
+    def generate_scouting_report(
+        project_id: int,
+        body: _ReportChoice | None = _REPORT_BODY,
+    ) -> dict[str, object]:
+        saved, teams, _plays = _report_film(catalog, project_id)
+        try:
+            chosen = report_sections(None if body is None or not body.sections else body.sections)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        restart = True if body is None else body.restart
+        if not _claim(running, running_lock, project_id):
+            raise HTTPException(status_code=409, detail="That report is already reading.")
+        report_choice[project_id] = chosen
+        try:
+            for _event in _live_lines(
+                catalog,
+                saved,
+                teams,
+                chosen,
+                read_play,
+                read_formation_play,
+                slots,
+                restart=restart,
+            ):
+                pass
+        finally:
+            _release(running, running_lock, project_id)
+        saved = _require_project(catalog, project_id)
+        return _report_payload(saved, teams, _ordered_plays(saved), chosen)
+
+    @app.post("/api/projects/{project_id}/report/live")
+    def live_scouting_report(
+        project_id: int,
+        body: _ReportChoice | None = _REPORT_BODY,
+    ) -> StreamingResponse:
+        """Start charting in the background and stream progress until it finishes."""
+
+        saved, teams, _plays = _report_film(catalog, project_id)
+        try:
+            chosen = report_sections(None if body is None or not body.sections else body.sections)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        restart = True if body is None else body.restart
+        already = _running(running, running_lock, project_id)
+        if already and restart:
+            raise HTTPException(status_code=409, detail="That report is already reading.")
+        if not already:
+            if not _claim(running, running_lock, project_id):
+                raise HTTPException(status_code=409, detail="That report is already reading.")
+            report_choice[project_id] = chosen
+            events: queue.Queue[str | None] = queue.Queue()
+            report_events[project_id] = events
+            _start_report(
+                running,
+                running_lock,
+                report_events,
+                events=events,
+                catalog=catalog,
+                saved=saved,
+                teams=teams,
+                chosen=chosen,
+                reader=read_play,
+                formations=read_formation_play,
+                slots=slots,
+                restart=restart,
+            )
+        follow = report_choice.get(project_id, chosen)
+
+        def generate() -> Iterator[str]:
+            yield from _follow_report(
+                catalog,
+                project_id,
+                teams,
+                follow,
+                running,
+                running_lock,
+                report_events,
+                slots,
+            )
+
+        return StreamingResponse(
+            generate(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/projects/{project_id}/report/analysis")
+    def scouting_report_analysis(project_id: int, sections: str = "") -> dict[str, object]:
+        """The scouting-analysis table for a film, plus the live report so far."""
+
+        saved, teams, plays = _report_film(catalog, project_id)
+        stored = report_choice.get(project_id)
+        chosen = _report_sections(sections) or stored or report_sections(None)
+        try:
+            rows = catalog.list_report_analysis(project_id)
+            activity = catalog.get_activity(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        workers = None
+        if activity is not None and activity.steps:
+            workers = activity.steps[-1].workers
+        done = sum(1 for row in rows if row.status in {"ready", "missed"})
+        unfinished = sum(1 for row in rows if row.status in {"pending", "reading"})
+        live = _running(running, running_lock, project_id) or bool(
+            activity and activity.running and activity.phase == "charting"
+        )
+        return {
+            "project": project_id,
+            "running": live,
+            "phase": None if activity is None else activity.phase,
+            "done": done,
+            "total": len(rows)
+            or len([play for play in plays if _play_kind(play) in chart_kinds(chosen)]),
+            "workers": workers if workers is not None else slots.get(),
+            "sections": sorted(chosen),
+            "can_resume": (not live) and unfinished > 0,
+            "analysis": [_analysis_view(row) for row in rows],
+            "snapshot": live_snapshot(teams, plays, chosen),
+        }
 
     @app.get("/api/projects/{project_id}/report.pdf")
-    def scouting_report(project_id: int) -> Response:
+    def scouting_report(project_id: int, sections: str = "") -> Response:
         saved, teams, plays = _report_film(catalog, project_id)
-        pdf = scouting_pdf(saved.name, teams, plays)
+        chosen = _report_sections(sections)
+        pdf = scouting_pdf(saved.name, teams, plays, chosen)
         return Response(
             content=pdf,
             media_type="application/pdf",
@@ -502,9 +765,10 @@ def create_app(
         )
 
     @app.get("/api/projects/{project_id}/report.csv")
-    def scouting_sheet(project_id: int) -> Response:
+    def scouting_sheet(project_id: int, sections: str = "") -> Response:
         saved, teams, plays = _report_film(catalog, project_id)
-        sheet = scouting_csv(saved.name, teams, plays)
+        chosen = _report_sections(sections)
+        sheet = scouting_csv(saved.name, teams, plays, chosen)
         return Response(
             content=sheet,
             media_type="text/csv; charset=utf-8",
@@ -585,6 +849,7 @@ def create_app(
             details=lookup,
             lineup=draw_lineup,
             portrait=draw_portrait,
+            still=grab,
             resume_scan=resume_scan,
             resume_at=saved.scanned_seconds if resume_scan else 0.0,
         )
@@ -592,6 +857,35 @@ def create_app(
         if detail is None:
             raise HTTPException(status_code=502, detail="Could not save that analysis.")
         return _project_payload(detail, running=True, catalog=catalog)
+
+    @app.get("/projects/{project_id}/poster", response_model=None)
+    def project_poster(project_id: int) -> FileResponse | RedirectResponse:
+        """Serve a saved still. Missing posters fall back to YouTube art."""
+
+        try:
+            path = catalog.poster_file(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if path is not None:
+            return FileResponse(
+                path,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        try:
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None or saved.status != "ready" or not saved.plays:
+            raise HTTPException(status_code=404, detail="That picture is not available.")
+        fallback = thumbnail_url(saved.youtube_url)
+        if fallback:
+            return RedirectResponse(
+                fallback,
+                status_code=302,
+                headers={"Cache-Control": "public, max-age=300"},
+            )
+        raise HTTPException(status_code=404, detail="That picture is not available.")
 
     @app.get("/projects/{project_id}/source")
     def source(project_id: int) -> FileResponse:
@@ -701,6 +995,69 @@ def create_app(
             raise HTTPException(status_code=404, detail="That play is no longer available.")
         return payload
 
+    @app.post("/api/plays/{uid}/trim")
+    def trim_play(uid: str, choice: _PlayTrim) -> dict[str, object]:
+        """Cut a tighter window so later reads look at the live play only."""
+
+        parsed = _parse_play_uid(uid)
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        project_id, play_number = parsed
+        try:
+            saved = catalog.get_project(project_id)
+        except CatalogError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        if saved is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        play = next((item for item in saved.plays if item.play_number == play_number), None)
+        if play is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        start = round(choice.start, 3)
+        end = round(choice.end, 3)
+        if start < play.start_seconds - 0.05 or end > play.end_seconds + 0.05:
+            raise HTTPException(
+                status_code=400,
+                detail="Trim stays inside the current play.",
+            )
+        start = max(play.start_seconds, start)
+        end = min(play.end_seconds, end)
+        if end - start < 0.5:
+            raise HTTPException(
+                status_code=400,
+                detail="Keep at least half a second of the play.",
+            )
+        if abs(start - play.start_seconds) < 0.05 and abs(end - play.end_seconds) < 0.05:
+            payload = _play_payload(saved, play_number)
+            if payload is None:
+                raise HTTPException(status_code=404, detail="That play is no longer available.")
+            return payload
+        film = catalog.source_file(project_id)
+        clip = catalog.clip_file(project_id, play_number)
+        if film is None and clip is None:
+            raise HTTPException(status_code=400, detail="That film is no longer available.")
+        folder = Path(tempfile.mkdtemp(prefix="film-trim-"))
+        dest = folder / "clip.mp4"
+        try:
+            if film is not None:
+                split(film, start, end, dest)
+            else:
+                assert clip is not None
+                split(clip, start - play.start_seconds, end - play.start_seconds, dest)
+            catalog.set_play_bounds(project_id, play_number, start, end, dest)
+            with contextlib.suppress(CatalogError):
+                catalog.clear_report_analysis(project_id)
+            saved = catalog.get_project(project_id)
+        except (VideoAnalysisError, CatalogError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        if saved is None:
+            raise HTTPException(status_code=502, detail="Could not save that play.")
+        payload = _play_payload(saved, play_number)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="That play is no longer available.")
+        return payload
+
     @app.get("/projects/{project_id}/plays/{play_number}")
     def play(project_id: int, play_number: int) -> FileResponse:
         path = catalog.clip_file(project_id, play_number)
@@ -756,6 +1113,7 @@ def create_app(
                 request=request,
                 lineup=draw_lineup,
                 portrait=draw_portrait,
+                still=grab,
             )
         canonical = _youtube_url(link) if link else None
         upload_path: Path | None = None
@@ -813,6 +1171,7 @@ def create_app(
             details=lookup,
             lineup=draw_lineup,
             portrait=draw_portrait,
+            still=grab,
         )
         detail = catalog.get_project(project_id)
         if detail is None:
@@ -939,6 +1298,36 @@ def _start_film(
     threading.Thread(target=run, daemon=True).start()
 
 
+def _start_report(
+    running: set[int],
+    lock: threading.Lock,
+    report_events: dict[int, queue.Queue[str | None]],
+    **kwargs: object,
+) -> None:
+    """Chart the scouting report on a daemon thread so the page can leave and return."""
+
+    project_id = int(kwargs["saved"].project)  # type: ignore[attr-defined]
+    events: queue.Queue[str | None] = kwargs.pop("events")  # type: ignore[assignment]
+
+    def run() -> None:
+        try:
+            for event in _live_lines(**kwargs):  # type: ignore[arg-type]
+                events.put(event)
+        except Exception:
+            _LOG.exception("scouting report %s failed", project_id)
+            with contextlib.suppress(CatalogError):
+                catalog = kwargs["catalog"]
+                catalog.record_activity(project_id, "stopped", running=False)  # type: ignore[union-attr]
+        finally:
+            events.put(None)
+            with lock:
+                if report_events.get(project_id) is events:
+                    report_events.pop(project_id, None)
+            _release(running, lock, project_id)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def _watch_film(
     activity: dict[int, str],
     lock: threading.Lock,
@@ -955,6 +1344,7 @@ def _watch_film(
     details: _Details,
     lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
     portrait: Callable[..., tuple[bytes, str]] = make_portrait,
+    still: _Still = still_frame,
     resume_scan: bool = False,
     resume_at: float = 0.0,
     limit: WorkerLimit | None = None,
@@ -1098,7 +1488,18 @@ def _watch_film(
             nbytes: int,
             reason: str,
             reply: str,
+            usage: object = None,
         ) -> None:
+            priced = _priced_read(usage)
+            if priced is not None and not reason:
+                try:
+                    catalog.add_read(
+                        project_id,
+                        ReadNote(start, end, frames, nbytes, "", *priced),
+                    )
+                except CatalogError:
+                    return
+                return
             detail = _read_detail(frames, nbytes, reason, reply)
             try:
                 already = catalog.list_reads(project_id)
@@ -1133,7 +1534,9 @@ def _watch_film(
             already=already,
             on_review=mark_review,
             on_counts=on_counts,
+            on_cut=lambda: _store_action_poster(catalog, project_id, path, still, force=True),
         )
+        _store_action_poster(catalog, project_id, path, still, force=True)
         start_team_analysis(catalog, project_id, lineup, portrait)
         _progress(catalog, project_id, "ready", length, length, None)
         _save_activity(catalog, project_id, "ready", running=False)
@@ -1260,12 +1663,15 @@ def _run_payload(catalog: Catalog, slots: WorkerLimit, request: Request) -> dict
     place = _request_place(request)
     try:
         workers = catalog.worker_count()
+        formations_on = catalog.formation_reads()
     except CatalogError:
         workers = slots.get()
+        formations_on = False
     return {
         "workers": workers,
         "place": place,
         "cloud": place == "cloud",
+        "formations": formations_on,
     }
 
 
@@ -1494,7 +1900,9 @@ def _clock(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-_LIVE_PHASES = frozenset({"starting", "downloading", "saving", "scanning", "checking"})
+_LIVE_PHASES = frozenset(
+    {"starting", "downloading", "saving", "scanning", "checking", "charting"}
+)
 
 
 def _activity_state(phase: str, running: bool, active: bool) -> tuple[str, bool]:
@@ -1507,6 +1915,115 @@ def _activity_state(phase: str, running: bool, active: bool) -> tuple[str, bool]
     return "stopped", False
 
 
+def _thumbnail_for(
+    project: ProjectDetail | ProjectSummary,
+    catalog: Catalog | None = None,
+    still: _Still = still_frame,
+    *,
+    make: bool = False,
+) -> str | None:
+    """YouTube art until the first cut has saved an action still from the film.
+
+    A finished film's list row points at the poster without probing storage, so
+    a long library stays fast. While the second look is still running, the
+    saved still replaces the YouTube image on the film page and in the list.
+    """
+
+    count = project.play_count if isinstance(project, ProjectSummary) else len(project.plays)
+    youtube = thumbnail_url(project.youtube_url)
+    if count <= 0:
+        return youtube
+    poster = f"/projects/{project.project}/poster"
+    if project.status == "ready":
+        if catalog is None:
+            return youtube
+        if make:
+            try:
+                if catalog.poster_file(project.project) is None:
+                    _store_action_poster(catalog, project.project, None, still)
+                if catalog.poster_file(project.project) is not None:
+                    return poster
+            except CatalogError:
+                return youtube
+            return youtube
+        return poster
+    if catalog is None:
+        return youtube
+    try:
+        if catalog.poster_file(project.project) is not None:
+            return poster
+    except CatalogError:
+        return youtube
+    return youtube
+
+
+def _store_action_poster(
+    catalog: Catalog,
+    project_id: int,
+    video: Path | None = None,
+    grab: _Still = still_frame,
+    *,
+    force: bool = False,
+) -> None:
+    """Save one action frame from the film. A failed attempt waits before trying again."""
+
+    key = (id(catalog), project_id)
+    now = time.monotonic()
+    if not force and _poster_wait.get(key, 0) > now:
+        return
+    try:
+        with _poster_lock:
+            if catalog.poster_file(project_id) is not None:
+                return
+            saved = catalog.get_project(project_id)
+            if saved is None or not saved.plays:
+                return
+            jpeg = _capture_poster(catalog, saved, grab, video)
+            if jpeg is None:
+                _poster_wait[key] = time.monotonic() + 30
+                return
+            catalog.save_poster(project_id, jpeg)
+            _poster_wait.pop(key, None)
+    except (CatalogError, VideoAnalysisError, OSError):
+        _poster_wait[key] = time.monotonic() + 30
+
+
+def _capture_poster(
+    catalog: Catalog,
+    project: ProjectDetail,
+    grab: _Still,
+    video: Path | None,
+) -> bytes | None:
+    """Frames from the full film when it is local, otherwise from the play clips."""
+
+    picks = action_moments(project.plays)
+    if not picks:
+        return None
+    use_film = video is not None and video.is_file()
+    by_number = {play.play_number: play for play in project.plays}
+    frames: list[bytes] = []
+    for number, offset in picks:
+        play = by_number.get(number)
+        if play is None:
+            continue
+        if use_film:
+            target: Path | None = video
+            at = play.start_seconds + offset
+        else:
+            try:
+                target = catalog.clip_file(project.project, number)
+            except CatalogError:
+                continue
+            at = offset
+        if target is None:
+            continue
+        try:
+            frames.append(grab(target, at))
+        except (VideoAnalysisError, OSError):
+            continue
+    return choose_action_shot(frames)
+
+
 def _activity_job(
     project: ProjectDetail | ProjectSummary,
     *,
@@ -1514,7 +2031,11 @@ def _activity_job(
     running: bool,
     updated: str,
     steps: tuple[ActivityStep, ...] = (),
+    play_costs: list[tuple[int, float]] | None = None,
+    spend: tuple[float, int, int, str] | None = None,
+    catalog: Catalog | None = None,
 ) -> dict[str, object]:
+    cost, incoming, outgoing, model = spend or (0.0, 0, 0, "")
     play_count = (
         project.play_count if isinstance(project, ProjectSummary) else len(project.plays)
     )
@@ -1540,10 +2061,17 @@ def _activity_job(
         "youtube": project.youtube_url is not None,
         "play_count": play_count,
         "review_count": _review_count(project),
-        "thumbnail": thumbnail_url(project.youtube_url),
+        "thumbnail": _thumbnail_for(project, catalog),
         "created": getattr(project, "created_at", None),
         "updated": updated,
         "steps": _step_times(steps),
+        "play_costs": [
+            {"play": number, "usd": round(usd, 6)} for number, usd in play_costs or []
+        ],
+        "read_cost": round(float(cost), 6),
+        "read_model": model,
+        "input_tokens": incoming,
+        "output_tokens": outgoing,
     }
 
 
@@ -1588,6 +2116,7 @@ def _play_summary(project_id: int, play: PlayRecord) -> dict[str, object]:
         "family": play.family,
         "play_type": play.play_type,
         "unit": play.unit,
+        "formation": formation_label(play.formation) or None,
         "reviewed": play.reviewed,
         "video": f"/projects/{project_id}/plays/{play.play_number}",
     }
@@ -1668,6 +2197,467 @@ def _stamp(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed
+
+
+def _chart_play(
+    catalog: Catalog,
+    project: ProjectDetail,
+    play: PlayRecord,
+    mine: Uniform,
+    other: Uniform,
+    reader: Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None],
+    kinds: frozenset[str] | None,
+) -> tuple[int, int, str]:
+    """Add the call. Returns tokens and model used for this read."""
+
+    kind = "special_teams" if play.family == "special_teams" else "scrimmage"
+    if kinds is not None and kind not in kinds:
+        return 0, 0, ""
+    allowed = SPECIAL_CALLS if kind == "special_teams" else {"run", "pass"}
+    needs_call = play.play_type not in allowed
+    needs_side = kind == "scrimmage" and play.unit not in {"offense", "defense"}
+    if not needs_call and not needs_side:
+        return 0, 0, ""
+    call, side, incoming, outgoing, model = _chart_answer(
+        reader(_scrimmage_frames(catalog, project, play), mine, other, kind)
+    )
+    try:
+        if needs_call and call in allowed:
+            catalog.set_play_type(project.project, play.play_number, call, kind)
+        if needs_side and side in {"offense", "defense"}:
+            catalog.set_play_unit(project.project, play.play_number, side, mark_reviewed=False)
+    except CatalogError:
+        return incoming, outgoing, model
+    return incoming, outgoing, model
+
+
+def _chart_answer(value: object) -> tuple[str | None, str | None, int, int, str]:
+    if isinstance(value, str):
+        return value, None, 0, 0, ""
+    call = getattr(value, "call", None)
+    side = getattr(value, "side", None)
+    incoming = int(getattr(value, "input_tokens", 0) or 0)
+    outgoing = int(getattr(value, "output_tokens", 0) or 0)
+    model = str(getattr(value, "model", "") or "")
+    if not isinstance(call, str):
+        return None, None, incoming, outgoing, model
+    if side not in {"offense", "defense"}:
+        side = None
+    return call, side, incoming, outgoing, model
+
+
+def _chart_formation_play(
+    catalog: Catalog,
+    project: ProjectDetail,
+    play: PlayRecord,
+    mine: Uniform,
+    other: Uniform,
+    reader: Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None],
+) -> tuple[int, int, str]:
+    if play.family == "special_teams" or play.unit != "defense" or play.formation:
+        return 0, 0, ""
+    named, incoming, outgoing, model = _formation_answer(
+        reader(_scrimmage_frames(catalog, project, play), other, mine)
+    )
+    if named not in FORMATIONS:
+        return incoming, outgoing, model
+    try:
+        catalog.set_play_formation(project.project, play.play_number, named)
+    except CatalogError:
+        return incoming, outgoing, model
+    return incoming, outgoing, model
+
+
+def _formation_answer(value: object) -> tuple[str | None, int, int, str]:
+    if isinstance(value, str):
+        return value, 0, 0, ""
+    named = getattr(value, "formation", None)
+    incoming = int(getattr(value, "input_tokens", 0) or 0)
+    outgoing = int(getattr(value, "output_tokens", 0) or 0)
+    model = str(getattr(value, "model", "") or "")
+    if not isinstance(named, str):
+        return None, incoming, outgoing, model
+    return named, incoming, outgoing, model
+
+
+def _team_uniforms(teams: FilmTeams) -> tuple[Uniform, Uniform]:
+    """The user's uniform first, then the other team's."""
+
+    pair = decode_uniforms(teams.uniforms)
+    if pair is None:
+        pair = (
+            Uniform(teams.left_name or "Home", "white", "white", "white"),
+            Uniform(teams.right_name or "Away", "dark blue", "white", "dark blue"),
+        )
+    if teams.mine == "right":
+        return pair[1], pair[0]
+    return pair[0], pair[1]
+
+
+def _scrimmage_frames(catalog: Catalog, project: ProjectDetail, play: PlayRecord) -> list[bytes]:
+    try:
+        clip = catalog.clip_file(project.project, play.play_number)
+    except CatalogError:
+        return []
+    if clip is None or not clip.is_file():
+        return []
+    length = max(0.5, play.end_seconds - play.start_seconds)
+    try:
+        return [frame for _time, frame in extract_window(clip, 0, length)]
+    except (VideoAnalysisError, OSError):
+        return []
+
+
+def _seed_report_plays(
+    catalog: Catalog,
+    project_id: int,
+    ordered: list[PlayRecord],
+    *,
+    restart: bool,
+) -> list[PlayRecord]:
+    """Seed the analysis table and return the plays that still need charting."""
+
+    if restart:
+        catalog.clear_report_analysis(project_id)
+        for play in ordered:
+            catalog.set_report_analysis(
+                project_id, ReportAnalysis(play.play_number, "pending")
+            )
+        return list(ordered)
+
+    existing = {
+        row.play_number: row for row in catalog.list_report_analysis(project_id)
+    }
+    todo: list[PlayRecord] = []
+    for play in ordered:
+        row = existing.get(play.play_number)
+        if row is not None and row.status == "ready":
+            continue
+        catalog.set_report_analysis(
+            project_id, ReportAnalysis(play.play_number, "pending")
+        )
+        todo.append(play)
+    return todo
+
+
+def _live_lines(
+    catalog: Catalog,
+    saved: ProjectDetail,
+    teams: FilmTeams,
+    chosen: frozenset[str],
+    reader: Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None],
+    formations: Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None],
+    slots: WorkerLimit,
+    *,
+    restart: bool = True,
+) -> Iterator[str]:
+    """Write the scouting-analysis table, chart plays in parallel, and stream the rows."""
+
+    kinds = chart_kinds(chosen)
+    project_id = saved.project
+    ordered = [play for play in _ordered_plays(saved) if _play_kind(play) in kinds]
+    workers = slots.get()
+    try:
+        todo = _seed_report_plays(catalog, project_id, ordered, restart=restart)
+        catalog.record_activity(
+            project_id, "charting", running=True, stack="local", workers=workers
+        )
+    except CatalogError:
+        todo = list(ordered)
+    total = len(ordered)
+    current = saved
+    done = total - len(todo)
+    yield _live_event(catalog, current, teams, chosen, done, total, workers)
+    if not todo:
+        with contextlib.suppress(CatalogError):
+            catalog.record_activity(project_id, "ready", running=False)
+        yield json.dumps(_report_payload(current, teams, _ordered_plays(current), chosen)) + "\n"
+        return
+
+    mine, other = _team_uniforms(teams)
+    updates: queue.Queue[BaseException | None] = queue.Queue()
+    remaining = len(todo)
+
+    def work(play: PlayRecord) -> None:
+        with slots:
+            try:
+                catalog.set_report_analysis(
+                    project_id, ReportAnalysis(play.play_number, "reading")
+                )
+                updates.put(None)
+                _analyze_report_play(
+                    catalog,
+                    project_id,
+                    play,
+                    mine,
+                    other,
+                    reader,
+                    formations,
+                    kinds,
+                    chosen,
+                )
+                updates.put(None)
+            except BaseException as error:
+                updates.put(error)
+
+    try:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            jobs = [pool.submit(work, play) for play in todo]
+            finished = 0
+            while finished < remaining:
+                error = updates.get()
+                if error is not None:
+                    raise error
+                rows = []
+                with contextlib.suppress(CatalogError):
+                    rows = catalog.list_report_analysis(project_id)
+                finished = sum(
+                    1
+                    for row in rows
+                    if row.status in {"ready", "missed"}
+                    and any(play.play_number == row.play_number for play in todo)
+                )
+                current = _require_project(catalog, project_id)
+                yield _live_event(
+                    catalog,
+                    current,
+                    teams,
+                    chosen,
+                    sum(1 for row in rows if row.status in {"ready", "missed"}),
+                    total,
+                    slots.get(),
+                )
+            for job in jobs:
+                job.result()
+        with contextlib.suppress(CatalogError):
+            catalog.record_activity(project_id, "ready", running=False)
+        current = _require_project(catalog, project_id)
+        yield json.dumps(_report_payload(current, teams, _ordered_plays(current), chosen)) + "\n"
+    except Exception:
+        with contextlib.suppress(CatalogError):
+            catalog.record_activity(project_id, "stopped", running=False)
+        raise
+
+
+def _follow_report(
+    catalog: Catalog,
+    project_id: int,
+    teams: FilmTeams,
+    chosen: frozenset[str],
+    running: set[int],
+    lock: threading.Lock,
+    report_events: dict[int, queue.Queue[str | None]],
+    slots: WorkerLimit,
+) -> Iterator[str]:
+    """Stream progress from the durable chart job until it finishes."""
+
+    with lock:
+        events = report_events.get(project_id)
+    if events is not None:
+        while True:
+            event = events.get()
+            if event is None:
+                return
+            yield event
+
+    last = ""
+    for _ in range(100):
+        try:
+            rows = catalog.list_report_analysis(project_id)
+            activity = catalog.get_activity(project_id)
+            current = _require_project(catalog, project_id)
+        except (CatalogError, HTTPException):
+            return
+        done = sum(1 for row in rows if row.status in {"ready", "missed"})
+        total = len(rows) or len(
+            [
+                play
+                for play in _ordered_plays(current)
+                if _play_kind(play) in chart_kinds(chosen)
+            ]
+        )
+        workers = slots.get()
+        if activity is not None and activity.steps:
+            step_workers = activity.steps[-1].workers
+            if step_workers is not None:
+                workers = step_workers
+        event = _live_event(catalog, current, teams, chosen, done, total, workers)
+        if event != last:
+            yield event
+            last = event
+        live = _running(running, lock, project_id) or bool(
+            activity and activity.running and activity.phase == "charting"
+        )
+        unfinished = any(row.status in {"pending", "reading"} for row in rows)
+        if not live and not unfinished:
+            yield json.dumps(
+                _report_payload(current, teams, _ordered_plays(current), chosen)
+            ) + "\n"
+            return
+        if not live:
+            yield json.dumps(
+                _report_payload(current, teams, _ordered_plays(current), chosen)
+            ) + "\n"
+            return
+        time.sleep(0.1)
+
+
+def _analyze_report_play(
+    catalog: Catalog,
+    project_id: int,
+    play: PlayRecord,
+    mine: Uniform,
+    other: Uniform,
+    reader: Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None],
+    formations: Callable[[Sequence[bytes], Uniform, Uniform], FormationRead | str | None],
+    kinds: frozenset[str],
+    chosen: frozenset[str],
+) -> None:
+    """Chart one play, then write its scouting-analysis row."""
+
+    try:
+        project = _require_project(catalog, project_id)
+        latest = _play_by_number(project, play.play_number) or play
+        incoming, outgoing, model = _chart_play(
+            catalog, project, latest, mine, other, reader, kinds
+        )
+        project = _require_project(catalog, project_id)
+        latest = _play_by_number(project, play.play_number) or latest
+        if "formations" in chosen:
+            more_in, more_out, formed_model = _chart_formation_play(
+                catalog, project, latest, mine, other, formations
+            )
+            incoming += more_in
+            outgoing += more_out
+            model = model or formed_model
+        project = _require_project(catalog, project_id)
+        latest = _play_by_number(project, play.play_number) or latest
+        cost = read_cost(model, incoming, outgoing)
+        learned = bool(latest.play_type or latest.unit)
+        catalog.set_report_analysis(
+            project_id,
+            ReportAnalysis(
+                play.play_number,
+                "ready" if learned else "missed",
+                call=latest.play_type or "",
+                side=latest.unit or "",
+                formation=latest.formation or "",
+                input_tokens=incoming,
+                output_tokens=outgoing,
+                cost_usd=cost,
+                model=model,
+                detail=""
+                if learned
+                else "Could not tell whether the opponent was on offense or defense.",
+            ),
+        )
+    except Exception as error:
+        with contextlib.suppress(CatalogError):
+            catalog.set_report_analysis(
+                project_id,
+                ReportAnalysis(play.play_number, "missed", detail=str(error)[:200]),
+            )
+
+
+def _live_event(
+    catalog: Catalog,
+    project: ProjectDetail,
+    teams: FilmTeams,
+    chosen: frozenset[str],
+    done: int,
+    total: int,
+    workers: int = 1,
+) -> str:
+    snapshot = live_snapshot(teams, _ordered_plays(project), chosen)
+    snapshot["done"] = done
+    snapshot["total"] = total
+    snapshot["workers"] = workers
+    analysis: list[dict[str, object]] = []
+    with contextlib.suppress(CatalogError):
+        analysis = [_analysis_view(row) for row in catalog.list_report_analysis(project.project)]
+    snapshot["analysis"] = analysis
+    return json.dumps(snapshot) + "\n"
+
+
+def _analysis_view(note: ReportAnalysis) -> dict[str, object]:
+    return {
+        "play": note.play_number,
+        "status": note.status,
+        "call": note.call,
+        "side": note.side,
+        "formation": formation_label(note.formation) or note.formation,
+        "input_tokens": note.input_tokens,
+        "output_tokens": note.output_tokens,
+        "cost_usd": round(note.cost_usd, 6),
+        "model": note.model,
+        "detail": note.detail,
+    }
+
+
+def _merged_spend(
+    film: dict[int, tuple[float, int, int, str]],
+    report: dict[int, tuple[float, int, int, str]],
+) -> dict[int, tuple[float, int, int, str]]:
+    merged = dict(film)
+    for project_id, (cost, incoming, outgoing, model) in report.items():
+        if project_id not in merged:
+            merged[project_id] = (cost, incoming, outgoing, model)
+            continue
+        prior_cost, prior_in, prior_out, prior_model = merged[project_id]
+        models = [name for name in (prior_model, model) if name]
+        unique: list[str] = []
+        for name in models:
+            for part in name.split(", "):
+                if part and part not in unique:
+                    unique.append(part)
+        merged[project_id] = (
+            prior_cost + cost,
+            prior_in + incoming,
+            prior_out + outgoing,
+            ", ".join(unique),
+        )
+    return merged
+
+
+def _play_kind(play: PlayRecord) -> str:
+    return "special_teams" if play.family == "special_teams" else "scrimmage"
+
+
+def _play_by_number(project: ProjectDetail, play_number: int) -> PlayRecord | None:
+    for play in project.plays:
+        if play.play_number == play_number:
+            return play
+    return None
+
+
+def _report_payload(
+    saved: ProjectDetail,
+    teams: FilmTeams,
+    plays: list[PlayRecord],
+    chosen: frozenset[str] | None,
+) -> dict[str, object]:
+    sections = report_sections(chosen)
+    reads = play_reads(plays)
+    blocks = scouting_blocks(saved.name, teams, plays, sections)
+    tendencies = " ".join(tendency_lines(teams, plays)) if "tendencies" in sections else ""
+    return {
+        "project": saved.project,
+        "plays": len(reads),
+        "ready": True,
+        "tendencies": tendencies,
+        "sections": sorted(sections),
+        "blocks": [{"kind": kind, "text": text} for kind, text in blocks],
+    }
+
+
+def _report_sections(raw: str) -> frozenset[str] | None:
+    names = [part.strip() for part in raw.split(",") if part.strip()]
+    if not names:
+        return None
+    try:
+        return report_sections(names)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 def _report_film(
@@ -1752,31 +2742,68 @@ def run_team_analysis(
     lineup: Callable[[Path, float], tuple[bytes, bytes]],
     portrait: Callable[..., tuple[bytes, str]],
     force: bool = False,
+    side: str | None = None,
+    attempt: int = 1,
 ) -> None:
     """Read the lineup, name both sides, and draw each player."""
 
     if not project.plays:
         return
     project_id = project.project
-    if _still_bytes(catalog, project_id, "left") is None or _still_bytes(
+    missing_lineup = _still_bytes(catalog, project_id, "left") is None or _still_bytes(
         catalog, project_id, "right"
-    ) is None:
+    ) is None
+    _set_team_progress(
+        project_id,
+        step="read",
+        percent=8,
+        detail="Reading the film for both uniforms.",
+        attempt=attempt,
+    )
+    # Re-grab both lineup stills when regenerating the full pair so a bad half
+    # can change. A single-side retry keeps the current lineup crop.
+    if missing_lineup or (force and side not in {"left", "right"}):
         _store_lineup(catalog, project, lineup)
+    _remember_team_names(catalog, project)
+    redraw = (
+        force
+        or _players_missing(catalog, project_id)
+        or _portraits_need_replacement(catalog, project_id)
+    )
     try:
-        current = catalog.film_teams(project_id)
+        named = catalog.film_teams(project_id)
     except CatalogError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
-    stale = current is None or uniforms_collapsed(current.uniforms)
-    _remember_team_names(catalog, project)
-    if force or stale or _still_bytes(catalog, project_id, "left-player") is None or _still_bytes(
-        catalog, project_id, "right-player"
-    ) is None:
-        try:
-            named = catalog.film_teams(project_id)
-        except CatalogError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from error
-        if named is not None:
-            _store_portraits(catalog, project_id, named, portrait)
+    if named is None:
+        return
+    sides = (side,) if side in {"left", "right"} else ("left", "right")
+    if redraw:
+        _store_portraits(
+            catalog,
+            project_id,
+            named,
+            portrait,
+            keep_current=not force,
+            sides=sides,
+            attempt=attempt,
+        )
+    elif _references_missing(catalog, project_id):
+        _set_team_progress(
+            project_id,
+            step="save",
+            percent=90,
+            detail="Keeping the photos already found.",
+            attempt=attempt,
+        )
+        _store_references(catalog, project_id, named)
+    _set_team_progress(
+        project_id,
+        step="save",
+        percent=100,
+        detail="Team cards are ready.",
+        attempt=attempt,
+        running=False,
+    )
 
 
 def _store_lineup(
@@ -1866,10 +2893,307 @@ def _named_sides(catalog: Catalog, project: ProjectDetail, body: _TeamNames) -> 
     return FilmTeams(left, right, body.mine, uniforms)
 
 
+def _players_missing(catalog: Catalog, project_id: int) -> bool:
+    return _still_bytes(catalog, project_id, "left-player") is None or _still_bytes(
+        catalog, project_id, "right-player"
+    ) is None
+
+
 def _players_saved(catalog: Catalog, project_id: int) -> bool:
     return _still_bytes(catalog, project_id, "left-player") is not None and _still_bytes(
         catalog, project_id, "right-player"
     ) is not None
+
+
+def _load_project_page(
+    catalog: Catalog, project_id: int
+) -> tuple[ProjectDetail | None, tuple[ActivityStep, ...], FilmTeams | None, list[ReadNote]]:
+    """Read the film, its steps, teams, and notes in one round of requests."""
+
+    errors: list[CatalogError] = []
+
+    def run(fn: Callable[[], object]) -> object:
+        try:
+            return fn()
+        except CatalogError as error:
+            errors.append(error)
+            return None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        project_call = pool.submit(run, lambda: catalog.get_project(project_id))
+        activity_call = pool.submit(run, lambda: catalog.get_activity(project_id))
+        teams_call = pool.submit(run, lambda: catalog.film_teams(project_id))
+        reads_call = pool.submit(run, lambda: catalog.list_reads(project_id))
+        project = project_call.result()
+        activity = activity_call.result()
+        teams = teams_call.result()
+        reads = reads_call.result()
+    if errors:
+        raise errors[0]
+    steps = activity.steps if isinstance(activity, ActivityRecord) else ()
+    notes = (
+        [note for note in reads if isinstance(note, ReadNote)] if isinstance(reads, list) else []
+    )
+    saved = project if isinstance(project, ProjectDetail) else None
+    named = teams if isinstance(teams, FilmTeams) else None
+    return saved, steps, named, notes
+
+
+_portrait_refreshing: set[int] = set()
+_portrait_refresh_lock = threading.Lock()
+_team_builds: dict[int, dict[str, object]] = {}
+_team_build_lock = threading.Lock()
+
+
+def _team_progress_view(project_id: int) -> dict[str, object] | None:
+    with _team_build_lock:
+        current = _team_builds.get(project_id)
+        if current is None:
+            return None
+        return dict(current)
+
+
+def _set_team_progress(
+    project_id: int,
+    *,
+    step: str,
+    percent: int,
+    detail: str,
+    attempt: int = 1,
+    running: bool = True,
+    error: str | None = None,
+) -> None:
+    with _team_build_lock:
+        _team_builds[project_id] = {
+            "step": step,
+            "percent": max(0, min(100, percent)),
+            "detail": detail,
+            "attempt": max(1, attempt),
+            "running": running,
+            "error": error,
+            "steps": [
+                {"id": name, "label": label}
+                for name, label in (
+                    ("read", "Read film"),
+                    ("find", "Find players"),
+                    ("save", "Save cards"),
+                )
+            ],
+        }
+
+
+def _next_team_attempt(project_id: int) -> int:
+    with _team_build_lock:
+        current = _team_builds.get(project_id) or {}
+        attempt = int(current.get("attempt") or 0) + 1
+        return attempt
+
+
+def _start_team_build(
+    catalog: Catalog,
+    project: ProjectDetail,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]],
+    portrait: Callable[..., tuple[bytes, str]],
+    *,
+    force: bool = False,
+    side: str | None = None,
+    wait: bool = True,
+) -> None:
+    """Build the team cards now, or in the background so the page can show progress."""
+
+    project_id = project.project
+    with _team_build_lock:
+        current = _team_builds.get(project_id)
+        if not wait and current is not None and current.get("running"):
+            return
+    attempt = _next_team_attempt(project_id)
+    _set_team_progress(
+        project_id,
+        step="read",
+        percent=4,
+        detail="Starting the team cards.",
+        attempt=attempt,
+    )
+
+    def work() -> None:
+        try:
+            run_team_analysis(
+                catalog,
+                project,
+                lineup,
+                portrait,
+                force=force,
+                side=side,
+                attempt=attempt,
+            )
+            _set_team_progress(
+                project_id,
+                step="save",
+                percent=100,
+                detail="Team cards are ready.",
+                attempt=attempt,
+                running=False,
+            )
+        except HTTPException as error:
+            detail = (
+                error.detail
+                if isinstance(error.detail, str)
+                else "Could not build the team cards."
+            )
+            _set_team_progress(
+                project_id,
+                step="save",
+                percent=100,
+                detail=detail,
+                attempt=attempt,
+                running=False,
+                error=detail,
+            )
+        except Exception:
+            _LOG.warning("team cards failed for film %s", project_id, exc_info=True)
+            _set_team_progress(
+                project_id,
+                step="save",
+                percent=100,
+                detail="Could not build the team cards.",
+                attempt=attempt,
+                running=False,
+                error="Could not build the team cards.",
+            )
+
+    if wait:
+        work()
+        return
+    threading.Thread(target=work, name=f"team-cards-{project_id}", daemon=True).start()
+
+
+def _schedule_portrait_refresh(
+    catalog: Catalog,
+    project: ProjectDetail,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]],
+    portrait: Callable[..., tuple[bytes, str]],
+) -> bool:
+    """Replace an old player picture after the page has started to load."""
+
+    project_id = project.project
+    with _portrait_refresh_lock:
+        if project_id in _portrait_refreshing:
+            return True
+        _portrait_refreshing.add(project_id)
+    finished = threading.Event()
+
+    def work() -> None:
+        try:
+            _replace_old_portraits(catalog, project, lineup, portrait)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Could not refresh player photos for project %s",
+                project_id,
+                exc_info=True,
+            )
+        finally:
+            with _portrait_refresh_lock:
+                _portrait_refreshing.discard(project_id)
+            finished.set()
+
+    threading.Thread(target=work, name=f"player-photos-{project_id}", daemon=True).start()
+    finished.wait(0.05)
+    with _portrait_refresh_lock:
+        return project_id in _portrait_refreshing
+
+
+def _replace_old_portraits(
+    catalog: Catalog,
+    project: ProjectDetail,
+    lineup: Callable[[Path, float], tuple[bytes, bytes]],
+    portrait: Callable[..., tuple[bytes, str]],
+) -> ProjectDetail:
+    """Swap 768 by 1280 generated players for a film shot, or one 512 by 768 player."""
+
+    if not _portraits_need_replacement(catalog, project.project):
+        return project
+    try:
+        run_team_analysis(catalog, project, lineup, portrait)
+    except HTTPException as error:
+        logging.getLogger(__name__).warning(
+            "Could not replace the old player pictures for project %s: %s",
+            project.project,
+            error.detail,
+        )
+        return project
+    try:
+        refreshed = catalog.get_project(project.project)
+    except CatalogError:
+        return project
+    return refreshed or project
+
+
+def _portraits_need_replacement(catalog: Catalog, project_id: int) -> bool:
+    checked = _crops_checked(catalog, project_id)
+    for side in ("left-player", "right-player"):
+        image = _still_bytes(catalog, project_id, side)
+        if image is None:
+            continue
+        if _portrait_is_large(image) or _portrait_is_small(image):
+            return True
+        if not checked and _portrait_is_generated(image):
+            return True
+    return False
+
+
+def _portrait_should_replace(data: bytes) -> bool:
+    return _portrait_is_large(data) or _portrait_is_small(data)
+
+
+def _portrait_is_generated(data: bytes) -> bool:
+    """A drawn player is 512 by 768. A crop of a real player is a different shape."""
+
+    return _jpeg_size(data) == (512, 768)
+
+
+def _portrait_is_large(data: bytes) -> bool:
+    """The previous generator saved each player at 768 by 1280."""
+
+    size = _jpeg_size(data)
+    if size is None:
+        return False
+    width, height = size
+    return width >= 700 or height >= 1000
+
+
+def _portrait_is_small(data: bytes) -> bool:
+    """A crop under 90 pixels on the long side is too small to show a uniform."""
+
+    size = _jpeg_size(data)
+    if size is None:
+        return False
+    return max(size) < 90
+
+
+def _jpeg_size(data: bytes) -> tuple[int, int] | None:
+    if not data.startswith(b"\xff\xd8"):
+        return None
+    index = 2
+    while index + 9 < len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        if marker in {0xC0, 0xC1, 0xC2}:
+            height = int.from_bytes(data[index + 5 : index + 7], "big")
+            width = int.from_bytes(data[index + 7 : index + 9], "big")
+            if width > 0 and height > 0:
+                return width, height
+            return None
+        if marker == 0xD9 or marker == 0xDA:
+            return None
+        if index + 4 > len(data):
+            return None
+        length = int.from_bytes(data[index + 2 : index + 4], "big")
+        if length < 2:
+            return None
+        index += 2 + length
+    return None
 
 
 def _still_bytes(catalog: Catalog, project_id: int, kind: str) -> bytes | None:
@@ -1883,6 +3207,52 @@ def _still_bytes(catalog: Catalog, project_id: int, kind: str) -> bytes | None:
         return path.read_bytes()
     except OSError:
         return None
+
+
+def _player_search_frames(catalog: Catalog, project_id: int) -> list[bytes]:
+    """Full-size play frames. The small lineup photos are too small to crop one player."""
+
+    try:
+        project = catalog.get_project(project_id)
+    except CatalogError:
+        return []
+    if project is None or not project.plays:
+        return []
+    try:
+        video, _at = _lineup_video(catalog, project)
+    except HTTPException:
+        return []
+    return player_frames(video, project.plays)
+
+
+def _crops_checked(catalog: Catalog, project_id: int) -> bool:
+    try:
+        path = catalog.team_image(project_id, "left-player")
+    except CatalogError:
+        return False
+    return path is not None and (path.parent / ".player-crops").is_file()
+
+
+def _mark_crops_checked(catalog: Catalog, project_id: int) -> None:
+    try:
+        path = catalog.team_image(project_id, "left-player")
+    except CatalogError:
+        return
+    if path is None:
+        return
+    with contextlib.suppress(OSError):
+        (path.parent / ".player-crops").write_text("1", encoding="utf-8")
+
+
+def _clear_crops_checked(catalog: Catalog, project_id: int) -> None:
+    try:
+        path = catalog.team_image(project_id, "left-player")
+    except CatalogError:
+        return
+    if path is None:
+        return
+    with contextlib.suppress(OSError):
+        (path.parent / ".player-crops").unlink(missing_ok=True)
 
 
 def _team_frames(catalog: Catalog, project_id: int) -> list[bytes]:
@@ -1906,6 +3276,9 @@ def _store_portraits(
     project_id: int,
     teams: FilmTeams,
     draw: Callable[..., tuple[bytes, str]],
+    keep_current: bool = False,
+    sides: Sequence[str] = ("left", "right"),
+    attempt: int = 1,
 ) -> None:
     pair = decode_uniforms(teams.uniforms)
     if pair is None:
@@ -1922,24 +3295,152 @@ def _store_portraits(
         portrait_uniform(pair[0], teams.left_name),
         portrait_uniform(pair[1], teams.right_name),
     )
+    chosen = {side for side in sides if side in {"left", "right"}} or {"left", "right"}
+    if not keep_current:
+        _clear_crops_checked(catalog, project_id)
+    _set_team_progress(
+        project_id,
+        step="read",
+        percent=20,
+        detail="Pulling clear frames from the plays.",
+        attempt=attempt,
+    )
+    search_frames = _player_search_frames(catalog, project_id)
+    _set_team_progress(
+        project_id,
+        step="find",
+        percent=45,
+        detail="Finding one player from each team.",
+        attempt=attempt,
+    )
+    cards = team_cards(search_frames, wearing[0], wearing[1])
     frames = _team_frames(catalog, project_id)
     try:
         for index, (side, uniform) in enumerate(zip(("left", "right"), wearing, strict=True)):
+            if side not in chosen:
+                continue
+            label = teams.left_name if side == "left" else teams.right_name
+            who = label or ("Home" if side == "left" else "Away")
+            shot = cards[index]
+            if shot is not None:
+                _set_team_progress(
+                    project_id,
+                    step="save",
+                    percent=70 + index * 12,
+                    detail=f"Saving the {who} player.",
+                    attempt=attempt,
+                )
+                catalog.save_team_image(project_id, f"{side}-player", shot, ".jpg")
+                catalog.save_team_image(project_id, f"{side}-reference", shot, ".jpg")
+                continue
+            current = _still_bytes(catalog, project_id, f"{side}-player")
+            if keep_current and current is not None and not _portrait_should_replace(current):
+                continue
+            _set_team_progress(
+                project_id,
+                step="find",
+                percent=60 + index * 8,
+                detail=f"No clear crop for {who}. Drawing that player.",
+                attempt=attempt,
+            )
             other = wearing[1 - index]
             still = _still_bytes(catalog, project_id, side) or b""
             focused = focus_player(still, side)
-            photos = player_photos([focused, still, *frames], uniform, other)
-            if not photos and focused.startswith(b"\xff\xd8\xff"):
-                photos = [focused]
-            image, suffix = draw(uniform, photos or still, other)
+            photos = [focused, still, *frames]
+            _clear_reference(draw)
+            image, suffix = player_picture(photos, uniform, other, draw)
+            _set_team_progress(
+                project_id,
+                step="save",
+                percent=80 + index * 8,
+                detail=f"Saving the {who} player.",
+                attempt=attempt,
+            )
             catalog.save_team_image(project_id, f"{side}-player", image, suffix)
+            _save_reference(catalog, project_id, side, draw, photos, uniform, other)
+        _mark_crops_checked(catalog, project_id)
+        _set_team_progress(
+            project_id,
+            step="save",
+            percent=100,
+            detail="Team cards are ready.",
+            attempt=attempt,
+            running=False,
+        )
     except CatalogError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
-def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
+def _store_references(catalog: Catalog, project_id: int, teams: FilmTeams) -> None:
+    """Keep the photo the model is given, without drawing the players again."""
+
+    pair = decode_uniforms(teams.uniforms)
+    if pair is None:
+        return
+    wearing = (
+        portrait_uniform(pair[0], teams.left_name),
+        portrait_uniform(pair[1], teams.right_name),
+    )
+    frames = _team_frames(catalog, project_id)
     try:
-        saved = catalog.film_teams(project_id)
+        for index, (side, uniform) in enumerate(zip(("left", "right"), wearing, strict=True)):
+            if _still_bytes(catalog, project_id, f"{side}-reference") is not None:
+                continue
+            other = wearing[1 - index]
+            still = _still_bytes(catalog, project_id, side) or b""
+            focused = focus_player(still, side)
+            reference = reference_for_model([focused, still, *frames], uniform, other)
+            if not _is_jpeg(reference):
+                continue
+            catalog.save_team_image(project_id, f"{side}-reference", reference, ".jpg")
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+def _save_reference(
+    catalog: Catalog,
+    project_id: int,
+    side: str,
+    draw: Callable[..., tuple[bytes, str]],
+    photos: list[bytes],
+    uniform: Uniform,
+    other: Uniform,
+) -> None:
+    sent = getattr(draw, "last_reference", None)
+    reference = sent if _is_jpeg(sent) else reference_for_model(photos, uniform, other)
+    if not _is_jpeg(reference):
+        return
+    catalog.save_team_image(project_id, f"{side}-reference", reference, ".jpg")
+
+
+def _clear_reference(draw: Callable[..., tuple[bytes, str]]) -> None:
+    try:
+        draw.last_reference = None  # type: ignore[attr-defined]
+    except AttributeError:
+        return
+
+
+def _is_jpeg(data: object) -> bool:
+    return isinstance(data, bytes) and data.startswith(b"\xff\xd8\xff")
+
+
+def _references_missing(catalog: Catalog, project_id: int) -> bool:
+    return _still_bytes(catalog, project_id, "left-reference") is None or _still_bytes(
+        catalog, project_id, "right-reference"
+    ) is None
+
+
+def _teams_view(
+    catalog: Catalog,
+    project_id: int,
+    project: ProjectDetail | None = None,
+    saved: FilmTeams | None = None,
+    *,
+    prepared: bool = False,
+) -> dict[str, object] | None:
+    try:
+        if not prepared:
+            saved = catalog.film_teams(project_id)
         pictures = {kind: catalog.team_image(project_id, kind) for kind in TEAM_IMAGE_KINDS}
     except CatalogError:
         return None
@@ -1952,10 +3453,11 @@ def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
 
     if saved is None and url("left") is None and url("right") is None:
         return None
-    try:
-        project = catalog.get_project(project_id)
-    except CatalogError:
-        project = None
+    if project is None and not prepared:
+        try:
+            project = catalog.get_project(project_id)
+        except CatalogError:
+            project = None
     found = decode_uniforms("" if saved is None else saved.uniforms)
     labeled = None if found is None else label_home_away(*found)
     guessed = (
@@ -1967,7 +3469,8 @@ def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
         suggested = suggest_team_names("" if project is None else project.name)
         left_name = suggested[0] if saved is None or not saved.left_name else saved.left_name
         right_name = suggested[1] if saved is None or not saved.right_name else saved.right_name
-    return {
+    progress = _team_progress_view(project_id)
+    payload: dict[str, object] = {
         "left_name": left_name,
         "right_name": right_name,
         "mine": None if saved is None else saved.mine,
@@ -1977,7 +3480,13 @@ def _teams_view(catalog: Catalog, project_id: int) -> dict[str, object] | None:
         "right_still": url("right"),
         "left_player": url("left-player"),
         "right_player": url("right-player"),
+        "left_reference": url("left-reference"),
+        "right_reference": url("right-reference"),
     }
+    if progress is not None:
+        payload["building"] = bool(progress.get("running"))
+        payload["progress"] = progress
+    return payload
 
 
 def _project_payload(
@@ -1986,6 +3495,11 @@ def _project_payload(
     running: bool = False,
     steps: tuple[ActivityStep, ...] = (),
     catalog: Catalog | None = None,
+    film_teams: FilmTeams | None = None,
+    read_notes: list[ReadNote] | None = None,
+    prepared: bool = False,
+    still: _Still = still_frame,
+    make_poster: bool = False,
 ) -> dict[str, object]:
     return {
         "running": running,
@@ -2005,13 +3519,23 @@ def _project_payload(
         "error": project.error,
         "channel": project.channel,
         "youtube_url": project.youtube_url,
-        "thumbnail": thumbnail_url(project.youtube_url),
+        "thumbnail": _thumbnail_for(project, catalog, still, make=make_poster),
         "downloaded": project.downloaded_bytes,
         "total_bytes": project.total_bytes,
         "steps": _step_times(steps),
-        "teams": None if catalog is None else _teams_view(catalog, project.project),
+        "teams": None
+        if catalog is None
+        else _teams_view(
+            catalog,
+            project.project,
+            project,
+            film_teams,
+            prepared=prepared,
+        ),
         "plays": [_play_summary(project.project, play) for play in _ordered_plays(project)],
-        "reads": [] if catalog is None else _read_views(catalog, project.project),
+        "reads": []
+        if catalog is None
+        else _read_views(catalog, project.project, read_notes if prepared else None),
         "reviews": [
             {
                 "start": span.start_seconds,
@@ -2026,11 +3550,14 @@ def _project_payload(
     }
 
 
-def _read_views(catalog: Catalog, project_id: int) -> list[dict[str, object]]:
-    try:
-        notes = catalog.list_reads(project_id)
-    except CatalogError:
-        return []
+def _read_views(
+    catalog: Catalog, project_id: int, notes: list[ReadNote] | None = None
+) -> list[dict[str, object]]:
+    if notes is None:
+        try:
+            notes = catalog.list_reads(project_id)
+        except CatalogError:
+            return []
     return [
         {
             "start": note.start_seconds,
@@ -2038,7 +3565,21 @@ def _read_views(catalog: Catalog, project_id: int) -> list[dict[str, object]]:
             "detail": note.detail,
         }
         for note in notes
+        if note.detail
     ]
+
+
+def _priced_read(usage: object) -> tuple[int, int, float, str] | None:
+    """Tokens, dollars, and model from a successful read. Empty usage is ignored."""
+
+    if not isinstance(usage, tuple) or len(usage) != 3:
+        return None
+    incoming, outgoing, model = usage
+    if not isinstance(incoming, int) or not isinstance(outgoing, int) or not isinstance(model, str):
+        return None
+    if incoming <= 0 and outgoing <= 0:
+        return None
+    return incoming, outgoing, read_cost(model, incoming, outgoing), model
 
 
 def _read_detail(frames: int, nbytes: int, reason: str, reply: str) -> str:
@@ -2125,6 +3666,7 @@ def _analyze_saved(
     request: Request,
     lineup: Callable[[Path, float], tuple[bytes, bytes]] = split_lineup,
     portrait: Callable[..., tuple[bytes, str]] = make_portrait,
+    still: _Still = still_frame,
 ) -> dict[str, object] | JSONResponse:
     """Start a new analysis from a film that is already stored."""
 
@@ -2178,6 +3720,7 @@ def _analyze_saved(
         youtube=None,
         upload_path=None,
         details=details,
+        still=still,
         resume_scan=True,
         resume_at=0.0,
     )

@@ -3,6 +3,7 @@
 import contextlib
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from botocore.exceptions import ClientError
@@ -25,6 +26,7 @@ class R2Clips:
         self.bucket = bucket
         self.cache = cache
         self._client = client or _client(endpoint, access_key, secret_key)
+        self._missing_posters: dict[int, float] = {}
 
     def save_source(self, project_id: int, source: Path) -> str:
         return self._put(source, f"projects/{project_id}/source.mp4")
@@ -112,6 +114,29 @@ class R2Clips:
             path = self._local(f"projects/{project_id}/teams/{kind}{suffix}")
             if path.is_file() and path.stat().st_size:
                 return path
+        return None
+
+    def save_poster(self, project_id: int, data: bytes) -> str:
+        self._missing_posters.pop(project_id, None)
+        key = f"projects/{project_id}/poster.jpg"
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp:
+            tmp.write(data)
+            tmp.flush()
+            return self._put(Path(tmp.name), key, "image/jpeg")
+
+    def poster_path(self, project_id: int) -> Path | None:
+        cached = self.cache / f"projects/{project_id}/poster.jpg"
+        if cached.is_file() and cached.stat().st_size:
+            self._missing_posters.pop(project_id, None)
+            return cached
+        missed = self._missing_posters.get(project_id)
+        if missed is not None and time.monotonic() - missed < 30:
+            return None
+        path = self._local(f"projects/{project_id}/poster.jpg")
+        if path.is_file() and path.stat().st_size:
+            self._missing_posters.pop(project_id, None)
+            return path
+        self._missing_posters[project_id] = time.monotonic()
         return None
 
     def _put(self, source: Path, key: str, content_type: str = "video/mp4") -> str:

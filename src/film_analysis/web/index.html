@@ -619,8 +619,9 @@
       list-style: none;
     }
     #chart-progress li { counter-increment: stage; min-width: 0; }
-    #chart-progress button {
+    #chart-progress a {
       position: relative;
+      display: block;
       width: 100%;
       padding: 0.1rem 0 0.1rem 1.9rem;
       border: 0;
@@ -632,9 +633,10 @@
       letter-spacing: -0.015em;
       line-height: 1.25;
       text-align: left;
+      text-decoration: none;
       cursor: pointer;
     }
-    #chart-progress button::before {
+    #chart-progress a::before {
       content: counter(stage);
       position: absolute;
       left: 0;
@@ -649,19 +651,19 @@
       font-size: 0.68rem;
       font-weight: 650;
     }
-    #chart-progress li.now button { color: var(--gold); }
-    #chart-progress li.now button::before {
+    #chart-progress li.now a { color: var(--gold); }
+    #chart-progress li.now a::before {
       background: var(--gold);
       color: #111;
       box-shadow: 0 0 0 4px rgba(255, 214, 10, 0.16);
     }
-    #chart-progress li.done button { color: var(--ink); }
-    #chart-progress li.done button::before {
+    #chart-progress li.done a { color: var(--ink); }
+    #chart-progress li.done a::before {
       background: transparent;
       color: var(--gold);
       box-shadow: inset 0 0 0 1.5px var(--gold);
     }
-    #chart-progress button:disabled {
+    #chart-progress a[aria-disabled="true"] {
       opacity: 0.4;
       cursor: default;
     }
@@ -807,6 +809,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       #activity-list .bone,
+      #film-loading .bone,
       #activity-live,
       #studio[data-stage="review"] > #stage-review,
       #studio[data-stage="teams"] > #teams,
@@ -1053,20 +1056,34 @@
       color: #111;
     }
     .unit-tag {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.4rem;
-      margin: 0 0.7rem 0.55rem;
+      margin: 0 0.7rem 0.45rem;
     }
     .unit-tag button {
-      padding: 0.35rem 0.7rem;
+      padding: 0.4rem 0.35rem;
       border: 1px solid var(--line);
+      border-radius: 0.55rem;
       background: transparent;
       color: var(--ink);
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 650;
     }
     .unit-tag button[aria-pressed="true"] {
       border-color: transparent;
       background: var(--gold);
       color: #111;
+    }
+    .play-trim-label,
+    .play-tag-label {
+      margin: 0 0.7rem 0.3rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }
     #report {
       margin-top: 0;
@@ -1092,8 +1109,117 @@
       text-transform: none;
       color: var(--ink);
     }
-    #report .lead { margin: 0.45rem 0 1rem; max-width: 36rem; }
+    #report .lead { margin: 0.45rem 0 1rem; max-width: 40rem; }
+    #report-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin: 0 0 1rem;
+      padding: 0;
+      border: 0;
+    }
+    #report-options legend {
+      width: 100%;
+      margin: 0 0 0.15rem;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #report-options label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    #report-options label:has(input:checked) {
+      border-color: transparent;
+      background: var(--gold);
+      color: #111;
+    }
+    #report-options input { accent-color: currentColor; }
+    #report-view { margin: 1.15rem 0 0.4rem; }
+    #report-view h3 {
+      margin: 1rem 0 0.3rem;
+      font-size: 1.05rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    #report-view h3:first-child { margin-top: 0; }
+    #report-view p { margin: 0.2rem 0; max-width: 40rem; }
+    #report-view .report-row {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    #report-view table {
+      width: 100%;
+      max-width: 28rem;
+      margin: 0.45rem 0 0.8rem;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+    }
+    #report-view th,
+    #report-view td {
+      padding: 0.45rem 0.7rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+    #report-view th {
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #report-view tr:last-child td { font-weight: 650; }
+    #report-view table.plays tr:last-child td { font-weight: 400; }
+    #report-view td.pending,
+    #report-live td.pending { color: var(--muted); }
+    #report-live {
+      margin: 1.15rem 0 0.4rem;
+    }
+    #report-live h3 {
+      margin: 0 0 0.35rem;
+      font-size: 1.05rem;
+    }
+    #report-live-note { margin: 0 0 0.7rem; }
+    #report-live-tendency { margin: 0 0 0.85rem; }
+    #report-live-tendency table {
+      width: 100%;
+      max-width: 28rem;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+    }
+    #report-live-tendency th,
+    #report-live-tendency td,
+    #report-analysis-table th,
+    #report-analysis-table td {
+      padding: 0.45rem 0.7rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+    #report-live-tendency th,
+    #report-analysis-table th {
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #report-analysis-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+    }
+    #report-analysis-table[data-formation="0"] th:nth-child(4),
+    #report-analysis-table[data-formation="0"] td:nth-child(4) { display: none; }
     #report .exports { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    #report .exports[hidden] { display: none; }
+    #report-downloads { margin-top: 1rem; }
     #report-generate { border-radius: 999px; padding: 0.75rem 1.2rem; }
     #report-generate:disabled { cursor: not-allowed; }
     #report a[hidden],
@@ -1113,9 +1239,23 @@
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
     }
     #report a:hover { filter: brightness(1.06); color: #111; }
+    #report a + a:hover { color: var(--ink); }
     .play-card select.play-type {
       width: calc(100% - 1.4rem);
       margin: 0 0.7rem 0.45rem;
+    }
+    .play-card .play-discard {
+      display: block;
+      width: calc(100% - 1.4rem);
+      margin: 0 0.7rem 0.45rem;
+      padding: 0.4rem 0.65rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 0.8rem;
+      font-weight: 650;
     }
     a.view-play {
       display: block;
@@ -1131,6 +1271,61 @@
     }
     a.view-play:hover { filter: brightness(1.06); color: #111; }
     a.view-play:active { transform: scale(0.98); }
+    .play-trim {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+      padding: 0 0.7rem 0.7rem;
+    }
+    .play-trim .trim-save { grid-column: 1 / -1; }
+    .play-trim button {
+      border: 1px solid var(--line);
+      border-radius: 0.55rem;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 650;
+      padding: 0.4rem 0.55rem;
+    }
+    .play-trim button:disabled { opacity: 0.45; }
+    .play-trim .trim-save {
+      border-color: transparent;
+      background: var(--ink);
+      color: #111;
+    }
+    .play-trim-note {
+      grid-column: 1 / -1;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    #play-trim {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.55rem;
+      margin: 0.8rem 0 1rem;
+    }
+    #play-trim button {
+      border: 1px solid var(--line);
+      border-radius: 0.65rem;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-weight: 650;
+      padding: 0.55rem 0.7rem;
+    }
+    #play-trim button:disabled { opacity: 0.45; }
+    #play-trim .trim-save {
+      border-color: transparent;
+      background: var(--ink);
+      color: #111;
+    }
+    #play-trim-note {
+      margin: -0.35rem 0 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
     #results .play-length, #reviews .play-length { color: var(--muted); font-size: 0.8rem; }
     .review-actions {
       display: flex;
@@ -1156,6 +1351,36 @@
     #meter[hidden] { display: none; }
     #project-name { color: var(--ink); margin: 0.85rem 0 0.2rem; letter-spacing: -0.02em; }
     #film-meta { margin: 0; }
+    #review.is-loading #studio,
+    #review.is-loading #chart-progress,
+    #review.is-loading #outcome,
+    #review.is-loading #film-steps,
+    #review.is-loading #meter,
+    #review.is-loading #read-notes,
+    #review.is-loading #film-url,
+    #review.is-loading #retry,
+    #review.is-loading #film-error { display: none; }
+    #film-loading[hidden] { display: none; }
+    #film-loading { margin-top: 1.15rem; }
+    #film-loading-note { margin: 0; color: var(--muted); }
+    #film-loading-poster {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      margin-top: 0.85rem;
+      border-radius: var(--radius);
+    }
+    #film-loading .film-loading-steps,
+    #film-loading .film-loading-cards { display: grid; gap: 0.55rem; margin-top: 1rem; }
+    #film-loading .film-loading-steps { grid-template-columns: repeat(3, 1fr); }
+    #film-loading .bone {
+      display: block;
+      border-radius: 12px;
+      background: linear-gradient(90deg, #2a2a2c 25%, #3a3a3c 50%, #2a2a2c 75%);
+      background-size: 200% 100%;
+      animation: activity-shimmer 1.2s ease-in-out infinite;
+    }
+    #film-loading .film-loading-steps .bone { height: 2.7rem; border-radius: 999px; }
+    #film-loading .film-loading-cards .bone { height: 4.4rem; }
     #film-url {
       margin: 0.28rem 0 0;
       color: var(--muted);
@@ -1359,6 +1584,19 @@
       object-fit: contain;
       background: #14161a;
     }
+    .team-shots {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.45rem;
+    }
+    .team-shots figure { margin: 0; }
+    .team-shots figure:has(img[hidden]) { display: none; }
+    .team-shots figcaption { display: none; }
+    .team-card .team-shots img {
+      aspect-ratio: 3 / 4;
+      object-fit: contain;
+      background: #14161a;
+    }
     .team-card label {
       display: grid;
       gap: 0.35rem;
@@ -1423,9 +1661,78 @@
     .team-card.other { opacity: 0.62; }
     .team-card.other button.mine { color: var(--muted); }
     #select-team { display: none; }
-    #teams-save,
-    #teams-retry { margin-top: 0.85rem; }
+    #teams-save { display: inline-flex; margin: 0.35rem 0 1rem; }
+    .team-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin: 0.85rem 0 0.25rem;
+    }
+    .team-actions[hidden] { display: none; }
+    #teams-retry {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin: 0;
+      padding: 0.55rem 0.95rem;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+      font-size: 0.9rem;
+    }
+    #teams-retry:hover:not(:disabled) { filter: none; border-color: rgba(255, 255, 255, 0.28); }
+    #teams-retry .spin {
+      width: 0.8rem;
+      height: 0.8rem;
+      border: 2px solid rgba(255, 255, 255, 0.22);
+      border-top-color: var(--ink);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    #teams-retry .spin[hidden] { display: none; }
+    .team-card .team-refresh {
+      justify-self: start;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--blue);
+      font-size: 0.78rem;
+      font-weight: 650;
+    }
+    .team-card .team-refresh:hover:not(:disabled) { filter: none; color: #409cff; }
+    .team-card.refreshing .team-shots {
+      opacity: 0.55;
+      filter: saturate(0.7);
+    }
     #teams-error { color: #ff9f0a; }
+    #teams-meter {
+      display: grid;
+      gap: 0.55rem;
+      margin: 0.15rem 0 0.85rem;
+    }
+    #teams-meter[hidden] { display: none; }
+    #teams-meter .stages { margin: 0; }
+    #teams-track {
+      height: 0.3rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+    #teams-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--gold);
+      transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    #teams-status {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    #teams-status[data-tone="error"] { color: #ff9f0a; }
+    #teams-status[data-tone="working"] { color: var(--ink); }
     @media (max-width: 700px) {
       .team-row { grid-template-columns: 1fr; }
     }
@@ -1507,13 +1814,17 @@
       </div>
       <p id="activity-filter-empty" class="lead" hidden>No films in this view.</p>
       <div id="activity-charts" hidden>
-        <figure>
+        <figure id="chart-time-figure">
           <figcaption>Total time <strong id="chart-time-value"></strong></figcaption>
           <svg id="chart-time" viewBox="0 0 320 128" role="img" aria-label="Total processing time over time"></svg>
         </figure>
-        <figure>
+        <figure id="chart-plays-figure">
           <figcaption>Reading plays per minute <strong id="chart-plays-value"></strong></figcaption>
           <svg id="chart-plays" viewBox="0 0 320 128" role="img" aria-label="Plays read per minute over time"></svg>
+        </figure>
+        <figure id="chart-cost-figure" hidden>
+          <figcaption>Read cost <strong id="chart-cost-value"></strong></figcaption>
+          <svg id="chart-cost" viewBox="0 0 320 128" role="img" aria-label="Cost of reading each film"></svg>
         </figure>
       </div>
       <ol id="activity-legend" class="stages" aria-label="Film steps">
@@ -1547,7 +1858,15 @@
         <li><strong>Read</strong><span>Each stretch is a play, junk, or not clear yet. On Cloudflare, more workers read at once.</span></li>
         <li><strong>Cut</strong><span>A play is clipped only after the film up to that point has settled, so the clips stay in order.</span></li>
         <li><strong>Check</strong><span>A stretch that is still unclear gets one more look. What remains waits for you to mark it.</span></li>
+        <li><strong>Your team</strong><span>You choose which uniform is yours. The next read is told that, so a white jersey that is defending is your defense and the other team is on offense.</span></li>
+        <li><strong>Chart</strong><span>That read names a scrimmage play as a run or a pass, and whether the opponent is on offense or defense. A special-teams play is the kick, punt, or return from your side.</span></li>
+        <li><strong>Formation</strong><span>Experimental, and last. For the opponent's offensive plays, it names the formation they are lined up in.</span></li>
       </ol>
+      <label class="formation-toggle" for="formation-reads">
+        <input id="formation-reads" type="checkbox">
+        Read offensive formations
+      </label>
+      <p class="lead" id="formation-note">Experimental, and last. Off until you turn it on. The scouting report includes it when this is on.</p>
       <p class="lead">Charting a play comes later, after its clip is final.</p>
     </section>
     <section id="review" hidden>
@@ -1574,25 +1893,40 @@
       <ol id="film-steps" class="stages" hidden></ol>
       <a id="film-url" hidden></a>
       <p id="outcome" class="lead" hidden></p>
+      <div id="film-loading" hidden role="status" aria-live="polite">
+        <div id="film-loading-poster" class="bone" hidden></div>
+        <p id="film-loading-note">Opening this film</p>
+        <div class="film-loading-steps" aria-hidden="true">
+          <span class="bone"></span>
+          <span class="bone"></span>
+          <span class="bone"></span>
+        </div>
+        <div class="film-loading-cards" aria-hidden="true">
+          <span class="bone"></span>
+          <span class="bone"></span>
+          <span class="bone"></span>
+          <span class="bone"></span>
+        </div>
+      </div>
       <nav id="chart-progress" hidden aria-label="Charting">
         <ol>
           <li data-step="review">
-            <button type="button" data-target="stage-review">
+            <a href="/projects" data-screen="review">
               <span class="step-label">Review plays</span>
               <span class="step-state">Optional</span>
-            </button>
+            </a>
           </li>
           <li data-step="teams">
-            <button type="button" data-target="teams">
+            <a href="/projects" data-screen="select-teams">
               <span class="step-label">Your team</span>
               <span class="step-state"></span>
-            </button>
+            </a>
           </li>
           <li data-step="report">
-            <button type="button" data-target="report">
+            <a href="/projects" data-screen="generate-report" aria-disabled="true">
               <span class="step-label">Scout report</span>
               <span class="step-state"></span>
-            </button>
+            </a>
           </li>
         </ol>
         <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -1618,7 +1952,18 @@
         </div>
         <section id="teams" hidden>
           <h2 id="teams-heading">Your team</h2>
-          <p id="teams-note" class="lead" hidden>Choose the player wearing your uniform.</p>
+          <p id="teams-note" class="lead" hidden>Choose the full-body shot of your team.</p>
+          <div id="teams-meter" hidden>
+            <ol id="teams-steps" class="stages" aria-label="Team image steps">
+              <li data-step="read">Read film</li>
+              <li data-step="find">Find players</li>
+              <li data-step="save">Save cards</li>
+            </ol>
+            <div id="teams-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Team image progress">
+              <div id="teams-fill"></div>
+            </div>
+            <p id="teams-status"></p>
+          </div>
           <button id="select-team" type="button">Select team</button>
           <div id="teams-building" class="team-row" hidden>
             <article class="team-card ghost" aria-hidden="true">
@@ -1632,39 +1977,92 @@
           </div>
           <p id="mine-ask" class="mine-ask" hidden>Which player is your team?</p>
           <div class="team-row" role="radiogroup" aria-labelledby="teams-heading" hidden>
-            <article class="team-card">
+            <article class="team-card" data-side="left">
             <p id="team-left-kicker" class="team-kicker">Home</p>
-            <img id="team-left-player" class="player" alt="Generated player for home" hidden>
+            <div class="team-shots">
+              <figure>
+                <img id="team-left-reference" alt="Reference sent for home" hidden>
+                <figcaption>Reference</figcaption>
+              </figure>
+              <figure>
+                <img id="team-left-player" class="player" alt="Player for home" hidden>
+                <figcaption>Player</figcaption>
+              </figure>
+            </div>
               <p id="team-left-uniform" class="team-uniform" hidden></p>
               <img id="team-left-still" alt="" hidden>
               <button id="team-left-mine" class="mine" type="button" role="radio" data-side="left" aria-pressed="false" aria-checked="false">This is my team</button>
+              <button class="team-refresh" type="button" data-side="left" hidden>New photo</button>
               <label for="team-left-name">Team name
                 <input id="team-left-name" maxlength="40" autocomplete="off">
               </label>
             </article>
-            <article class="team-card">
+            <article class="team-card" data-side="right">
             <p id="team-right-kicker" class="team-kicker">Away</p>
-            <img id="team-right-player" class="player" alt="Generated player for away" hidden>
+            <div class="team-shots">
+              <figure>
+                <img id="team-right-reference" alt="Reference sent for away" hidden>
+                <figcaption>Reference</figcaption>
+              </figure>
+              <figure>
+                <img id="team-right-player" class="player" alt="Player for away" hidden>
+                <figcaption>Player</figcaption>
+              </figure>
+            </div>
               <p id="team-right-uniform" class="team-uniform" hidden></p>
               <img id="team-right-still" alt="" hidden>
               <button id="team-right-mine" class="mine" type="button" role="radio" data-side="right" aria-pressed="false" aria-checked="false">This is my team</button>
+              <button class="team-refresh" type="button" data-side="right" hidden>New photo</button>
               <label for="team-right-name">Team name
                 <input id="team-right-name" maxlength="40" autocomplete="off">
               </label>
             </article>
           </div>
+          <div class="team-actions" hidden>
+            <button id="teams-retry" type="button">
+              <span class="spin" hidden></span>
+              <span class="label">Try different photos</span>
+            </button>
+          </div>
           <p id="teams-error" class="lead" hidden></p>
-          <button id="teams-retry" class="retry" type="button" hidden>Regenerate players</button>
           <button id="teams-save" type="button" hidden>Save teams</button>
         </section>
         <div id="report" hidden>
           <p class="stage-kicker">Scout report</p>
           <h2>Scouting report</h2>
           <p id="report-note" class="lead"></p>
+          <fieldset id="report-options">
+            <legend>Include</legend>
+            <label><input type="checkbox" name="section" value="tendencies" checked> Play tendency table</label>
+            <label><input type="checkbox" name="section" value="calls" checked> Run and pass</label>
+            <label><input type="checkbox" name="section" value="special" checked> Special teams</label>
+            <label><input type="checkbox" name="section" value="plays" checked> Each play</label>
+            <label><input type="checkbox" name="section" value="formations"> Formations <span class="experimental">Experimental</span></label>
+          </fieldset>
           <p class="exports">
             <button id="report-generate" type="button" disabled>Generate scouting report</button>
-            <a id="report-link" href="" hidden download="scouting-report.pdf">Download PDF</a>
-            <a id="report-csv" href="" hidden download="scouting-report.csv">Download CSV</a>
+          </p>
+          <section id="report-live" hidden>
+            <h3>Scouting analysis</h3>
+            <p id="report-live-note" class="lead"></p>
+            <div id="report-live-tendency"></div>
+            <table id="report-analysis-table" class="plays">
+              <thead>
+                <tr>
+                  <th>Play</th>
+                  <th>Opponent</th>
+                  <th>Call</th>
+                  <th>Formation</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </section>
+          <article id="report-view" hidden></article>
+          <p id="report-downloads" class="exports" hidden>
+            <a id="report-link" href="" download="scouting-report.pdf">Download PDF</a>
+            <a id="report-csv" href="" download="scouting-report.csv">Download CSV</a>
           </p>
         </div>
         <footer id="stage-dock" hidden>
@@ -1681,6 +2079,12 @@
       <p id="play-progress" class="lead" hidden></p>
       <ol id="play-tracker" class="play-tracker" aria-label="Reviewed plays" hidden></ol>
       <video id="play-video" controls playsinline preload="metadata" muted></video>
+      <div id="play-trim" hidden>
+        <button id="play-trim-in" type="button">Start here</button>
+        <button id="play-trim-out" type="button">End here</button>
+        <button id="play-trim-save" class="trim-save" type="button" disabled>Save trim</button>
+      </div>
+      <p id="play-trim-note" class="lead" hidden></p>
       <dl id="play-details"></dl>
       <div id="play-types"></div>
       <button id="play-reviewed" type="button" hidden>Mark reviewed</button>
@@ -1704,10 +2108,27 @@
     const teamsSave = document.querySelector("#teams-save");
     const selectTeamButton = document.querySelector("#select-team");
     const mineAsk = document.querySelector("#mine-ask");
+    const teamsActions = document.querySelector(".team-actions");
     const teamsRetry = document.querySelector("#teams-retry");
+    const teamsRetryLabel = teamsRetry.querySelector(".label");
+    const teamsRetrySpin = teamsRetry.querySelector(".spin");
+    const teamsMeter = document.querySelector("#teams-meter");
+    const teamsSteps = document.querySelector("#teams-steps");
+    const teamsTrack = document.querySelector("#teams-track");
+    const teamsFill = document.querySelector("#teams-fill");
+    const teamsStatus = document.querySelector("#teams-status");
+    const TEAM_STEP_ORDER = ["read", "find", "save"];
     const reportBox = document.querySelector("#report");
     const reportNote = document.querySelector("#report-note");
     const reportGenerate = document.querySelector("#report-generate");
+    const reportOptions = document.querySelector("#report-options");
+    const reportView = document.querySelector("#report-view");
+    const reportLive = document.querySelector("#report-live");
+    const reportLiveNote = document.querySelector("#report-live-note");
+    const reportLiveTendency = document.querySelector("#report-live-tendency");
+    const reportAnalysisTable = document.querySelector("#report-analysis-table");
+    const reportDownloads = document.querySelector("#report-downloads");
+    let reportPoll = 0;
     const reportLink = document.querySelector("#report-link");
     const reportCsv = document.querySelector("#report-csv");
     const chartProgress = document.querySelector("#chart-progress");
@@ -1727,6 +2148,11 @@
     const playBack = document.querySelector("#play-back");
     const playTitle = document.querySelector("#play-title");
     const playVideo = document.querySelector("#play-video");
+    const playTrim = document.querySelector("#play-trim");
+    const playTrimIn = document.querySelector("#play-trim-in");
+    const playTrimOut = document.querySelector("#play-trim-out");
+    const playTrimSave = document.querySelector("#play-trim-save");
+    const playTrimNote = document.querySelector("#play-trim-note");
     const playProgress = document.querySelector("#play-progress");
     const playTracker = document.querySelector("#play-tracker");
     const playReviewed = document.querySelector("#play-reviewed");
@@ -1753,6 +2179,10 @@
     const startPlace = document.querySelector("#start-place");
     const projectList = document.querySelector("#projects");
     const projectName = document.querySelector("#project-name");
+    let listedProjects = [];
+    const filmLoading = document.querySelector("#film-loading");
+    const filmLoadingNote = document.querySelector("#film-loading-note");
+    const filmLoadingPoster = document.querySelector("#film-loading-poster");
     const filmThumb = document.querySelector("#film-thumb");
     const filmMeta = document.querySelector("#film-meta");
     const filmSteps = document.querySelector("#film-steps");
@@ -1916,7 +2346,52 @@
     window.addEventListener("popstate", () => { route(); });
     route();
 
+    function filmLocation() {
+      const match = location.pathname.match(
+        /^\/projects\/(\d+)(?:\/(review|select-teams|generate-report))?$/,
+      );
+      if (!match) return null;
+      return { id: match[1], screen: match[2] || "" };
+    }
+
+    function stageFromScreen(screen) {
+      if (screen === "select-teams") return "teams";
+      if (screen === "generate-report") return "report";
+      if (screen === "review") return "review";
+      return "";
+    }
+
+    function screenPath(id, stage) {
+      const screen = stage === "teams"
+        ? "select-teams"
+        : stage === "report"
+          ? "generate-report"
+          : "review";
+      return `/projects/${id}/${screen}`;
+    }
+
+    function titleForStage(stage) {
+      const names = {
+        review: "Review plays",
+        teams: "Select team",
+        report: "Scouting report",
+      };
+      const film = projectName.textContent.trim();
+      const label = names[stage] || "Film";
+      document.title = film ? `${label} · ${film}` : label;
+    }
+
     async function route() {
+      const film = filmLocation();
+      if (
+        film
+        && film.screen
+        && results.dataset.project === film.id
+        && !review.hidden
+      ) {
+        openStage(stageFromScreen(film.screen));
+        return;
+      }
       document.title = "Film analysis";
       const playMatch = location.pathname.match(/^\/play\/([^/]+)$/);
       if (playMatch) {
@@ -1924,8 +2399,8 @@
         return;
       }
       leavePlay();
-      const match = location.pathname.match(/^\/projects\/(\d+)$/);
-      if (!match) {
+      if (!film) {
+        hideFilmLoading();
         if (location.pathname === "/analyses") history.replaceState({}, "", "/projects");
         if (location.pathname === "/projects") await showAnalyses();
         else if (location.pathname === "/activity") await showActivity();
@@ -1933,9 +2408,14 @@
         else await showComposer();
         return;
       }
-      const response = await fetch(`/api/projects/${match[1]}`);
+      const token = ++watch;
+      showFilmLoading(film.id);
+      const response = await fetch(`/api/projects/${film.id}`);
+      if (token !== watch) return;
       const payload = await response.json().catch(() => ({}));
+      if (token !== watch) return;
       if (!response.ok) {
+        hideFilmLoading();
         status.className = "error";
         status.textContent = typeof payload.detail === "string"
           ? payload.detail
@@ -1944,7 +2424,7 @@
         await showComposer();
         return;
       }
-      showReview(payload);
+      paint(payload, token);
     }
 
     function leavePlay() {
@@ -1990,14 +2470,16 @@
       playTitle.textContent = title;
       playBack.textContent = play.name || "Film";
       playBack.href = play.film || "/projects";
-      if (playVideo.dataset.clip !== play.video) {
-        playVideo.dataset.clip = play.video || "";
+      const clipKey = `${play.video || ""}|${play.start}|${play.end}`;
+      if (playVideo.dataset.clip !== clipKey) {
+        playVideo.dataset.clip = clipKey;
         playVideo.src = endpoint(play.video || "");
       }
       playDetails.replaceChildren();
       const rows = [
         ["Film", playLink(play.film, play.name || "Film")],
         ["Type", kindLabel(play)],
+        ...(play.formation ? [["Formation", play.formation]] : []),
         ["Your team", play.unit === "defense" ? "Defense" : play.unit === "offense" ? "Offense" : "Not tagged"],
         ["In the film", `${clock(play.start)} – ${clock(play.end)}`],
         ["Length", playLength(play.end - play.start)],
@@ -2014,6 +2496,7 @@
       paintPlayTypes(play);
       paintTracker(playTracker, playProgress, play.tracker || [], play.uid);
       paintReviewedButton(play);
+      paintPlayTrim(play);
       playSection.dataset.uid = play.uid || "";
       playSection.dataset.next = play.next || "";
       playSection.dataset.previous = play.previous || "";
@@ -2022,6 +2505,19 @@
       playNav.hidden = !play.film && !play.previous && !play.next;
       playNav.append(play.previous ? playLink(`/play/${play.previous}`, "Previous") : document.createElement("span"));
       playNav.append(play.next ? skipButton(play) : continueToTeams(play));
+    }
+
+    function paintPlayTrim(play) {
+      playTrim.hidden = !play.video;
+      playTrimNote.hidden = true;
+      playTrimNote.textContent = "";
+      playSection.dataset.start = String(play.start);
+      playSection.dataset.end = String(play.end);
+      delete playSection.dataset.trimIn;
+      delete playSection.dataset.trimOut;
+      playTrimSave.disabled = true;
+      playTrimIn.disabled = !play.video;
+      playTrimOut.disabled = !play.video;
     }
 
     function skipButton(play) {
@@ -2041,12 +2537,7 @@
       button.addEventListener("click", () => {
         const film = play.film || playSection.dataset.film || "/projects";
         const id = (String(film).match(/\/projects\/(\d+)/) || [])[1];
-        if (id) {
-          chartProgress.dataset.intent = "teams";
-          chartProgress.dataset.project = id;
-          try { sessionStorage.setItem(stageKey(id), "teams"); } catch { /* private mode */ }
-        }
-        acceptAndOpen(play.uid, film, button);
+        acceptAndOpen(play.uid, id ? `/projects/${id}/select-teams` : film, button);
       });
       return button;
     }
@@ -2093,7 +2584,9 @@
       ["Special teams", [
         ["special_teams", "Special teams"],
         ["kickoff", "Kickoff"],
+        ["kick_return", "Kick return"],
         ["punt", "Punt"],
+        ["punt_return", "Punt return"],
         ["field_goal", "Field goal"],
         ["extra_point", "Extra point"],
       ]],
@@ -2113,55 +2606,100 @@
     }
 
     function cardKind(play) {
-      if (play.play_type) return typeName(play.play_type);
-      return play.family === "special_teams" ? "Special teams" : "";
+      const named = play.play_type
+        ? typeName(play.play_type)
+        : play.family === "special_teams"
+          ? "Special teams"
+          : play.family === "scrimmage"
+            ? "Offense / defense"
+            : "";
+      if (play.formation && named) return `${named} · ${play.formation}`;
+      return play.formation || named;
     }
 
     function selectedType(play) {
       return play.play_type || play.family || "scrimmage";
     }
 
+    function playFamily(play) {
+      return play.family === "special_teams" ? "special_teams" : "scrimmage";
+    }
+
     function paintPlayTypes(play) {
       playTypes.replaceChildren();
-      const side = document.createElement("div");
-      const sideLabel = document.createElement("p");
-      sideLabel.className = "type-label";
-      sideLabel.textContent = "Your team";
-      const sideActions = document.createElement("div");
-      sideActions.className = "review-actions";
-      for (const [value, label] of [["offense", "Offense"], ["defense", "Defense"]]) {
+      const family = document.createElement("div");
+      const familyLabel = document.createElement("p");
+      familyLabel.className = "type-label";
+      familyLabel.textContent = "Tag";
+      const familyActions = document.createElement("div");
+      familyActions.className = "review-actions";
+      const chosenFamily = playFamily(play);
+      for (const [value, label] of [
+        ["scrimmage", "Offense / defense"],
+        ["special_teams", "Special teams"],
+      ]) {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = label;
-        button.classList.toggle("chosen", play.unit === value);
+        button.classList.toggle("chosen", chosenFamily === value);
         button.addEventListener("click", () => {
           if (button.classList.contains("chosen")) return;
-          tagUnit(play.uid, value);
+          relabelPlay(play.uid, value);
         });
-        sideActions.append(button);
+        familyActions.append(button);
       }
-      side.append(sideLabel, sideActions);
-      playTypes.append(side);
-      for (const [name, choices] of playTypeGroups) {
-        const group = document.createElement("div");
-        const heading = document.createElement("p");
-        heading.className = "type-label";
-        heading.textContent = name;
-        const actions = document.createElement("div");
-        actions.className = "review-actions";
-        for (const [value, label] of choices) {
+      family.append(familyLabel, familyActions);
+      playTypes.append(family);
+      if (chosenFamily === "scrimmage") {
+        const side = document.createElement("div");
+        const sideLabel = document.createElement("p");
+        sideLabel.className = "type-label";
+        sideLabel.textContent = "Your team";
+        const sideActions = document.createElement("div");
+        sideActions.className = "review-actions";
+        for (const [value, label] of [["offense", "Offense"], ["defense", "Defense"]]) {
           const button = document.createElement("button");
           button.type = "button";
           button.textContent = label;
-          button.classList.toggle("chosen", selectedType(play) === value);
+          button.classList.toggle("chosen", play.unit === value);
+          button.addEventListener("click", () => {
+            if (button.classList.contains("chosen")) return;
+            tagUnit(play.uid, value);
+          });
+          sideActions.append(button);
+        }
+        side.append(sideLabel, sideActions);
+        playTypes.append(side);
+      }
+      const typeGroup = playTypeGroups.find(([groupName]) => (
+        chosenFamily === "special_teams"
+          ? groupName === "Special teams"
+          : groupName === "Offense / defense"
+      ));
+      if (typeGroup) {
+        const choices = typeGroup[1];
+        const group = document.createElement("div");
+        const heading = document.createElement("p");
+        heading.className = "type-label";
+        heading.textContent = "Type";
+        const actions = document.createElement("div");
+        actions.className = "review-actions";
+        for (const [value, label] of choices) {
+          if (value === "scrimmage" || value === "special_teams") continue;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = label;
+          button.classList.toggle("chosen", play.play_type === value);
           button.addEventListener("click", () => {
             if (button.classList.contains("chosen")) return;
             relabelPlay(play.uid, value);
           });
           actions.append(button);
         }
-        group.append(heading, actions);
-        playTypes.append(group);
+        if (actions.childElementCount) {
+          group.append(heading, actions);
+          playTypes.append(group);
+        }
       }
       const discard = document.createElement("button");
       discard.type = "button";
@@ -2169,6 +2707,20 @@
       discard.textContent = "Not a play";
       discard.addEventListener("click", () => relabelPlay(play.uid, "junk", discard));
       playTypes.append(discard);
+    }
+
+    async function tagPlayCard(card, tag, control) {
+      const uid = card.dataset.uid;
+      if (!uid) return;
+      const buttons = [...card.querySelectorAll(".unit-tag button")];
+      for (const button of buttons) button.disabled = true;
+      try {
+        await relabelPlay(uid, tag, control);
+      } finally {
+        for (const button of buttons) {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
     }
 
     async function tagUnit(uid, unit, control) {
@@ -2192,6 +2744,7 @@
         status.textContent = "";
         showPlayUpdate(payload);
         refreshReport();
+        paintDock();
       } catch {
         status.className = "error";
         status.textContent = "Could not save that side of the ball.";
@@ -2264,6 +2817,49 @@
       if (!playReviewed.dataset.uid) return;
       setReviewed(playReviewed.dataset.uid, playReviewed.dataset.reviewed !== "1", playReviewed);
     });
+
+    playTrimIn.addEventListener("click", () => markDetailTrim("in"));
+    playTrimOut.addEventListener("click", () => markDetailTrim("out"));
+    playTrimSave.addEventListener("click", () => saveDetailTrim());
+
+    function markDetailTrim(edge) {
+      const start = Number(playSection.dataset.start || 0);
+      const end = Number(playSection.dataset.end || 0);
+      const at = Number.isFinite(playVideo.currentTime) ? playVideo.currentTime : 0;
+      const film = start + Math.max(0, Math.min(at, Math.max(0, end - start)));
+      if (edge === "in") playSection.dataset.trimIn = String(film);
+      else playSection.dataset.trimOut = String(film);
+      const nextStart = Number(playSection.dataset.trimIn || start);
+      const nextEnd = Number(playSection.dataset.trimOut || end);
+      playTrimSave.disabled = !(
+        nextEnd - nextStart >= 0.5
+        && (nextStart > start + 0.04 || nextEnd < end - 0.04)
+      );
+      playTrimNote.hidden = false;
+      playTrimNote.textContent = `Trim to ${clock(nextStart)} – ${clock(nextEnd)}.`;
+    }
+
+    async function saveDetailTrim() {
+      const uid = playSection.dataset.uid;
+      const start = Number(playSection.dataset.trimIn || playSection.dataset.start || 0);
+      const end = Number(playSection.dataset.trimOut || playSection.dataset.end || 0);
+      if (!uid || end - start < 0.5) return;
+      playTrimSave.disabled = true;
+      playTrimSave.textContent = "Saving trim…";
+      try {
+        const play = await postPlayTrim(uid, start, end);
+        delete reportBox.dataset.ready;
+        showPlayUpdate(play);
+        playTrimNote.hidden = false;
+        playTrimNote.textContent = "Trim saved. Later reads use this window.";
+      } catch (error) {
+        playTrimNote.hidden = false;
+        playTrimNote.textContent = error.message || "Could not trim that play.";
+        playTrimSave.disabled = false;
+      } finally {
+        playTrimSave.textContent = "Save trim";
+      }
+    }
 
     function showPlayUpdate(payload) {
       if (location.pathname === `/play/${payload.uid}`) paintPlay(payload);
@@ -2389,6 +2985,7 @@
       settingsSection.hidden = true;
       review.hidden = true;
       playSection.hidden = true;
+      hideFilmLoading();
       results.replaceChildren();
       delete results.dataset.project;
       markCurrent();
@@ -2624,7 +3221,9 @@
     function markCurrent() {
       for (const link of document.querySelectorAll("header nav a")) {
         const href = link.getAttribute("href");
-        if (href && href === location.pathname) link.setAttribute("aria-current", "page");
+        const here = href === location.pathname
+          || (href === "/projects" && location.pathname.startsWith("/projects/"));
+        if (href && here) link.setAttribute("aria-current", "page");
         else link.removeAttribute("aria-current");
       }
     }
@@ -2661,7 +3260,7 @@
       if (pending) {
         window.setTimeout(() => {
           if (token === watch && !historySection.hidden) paintHistory(token).catch(() => {});
-        }, 1000);
+        }, 3000);
       }
     }
 
@@ -2778,10 +3377,25 @@
       const rows = chartRows(jobs);
       const timeRows = rows.filter((row) => row.total > 0);
       const playRows = rows.filter((row) => row.perMin != null);
-      const charts = document.querySelector("#activity-charts");
-      charts.hidden = timeRows.length < 2 && playRows.length < 2;
+      const costRows = costChartRows(jobs);
+      const timeFigure = document.querySelector("#chart-time-figure");
+      const playFigure = document.querySelector("#chart-plays-figure");
+      const costFigure = document.querySelector("#chart-cost-figure");
+      timeFigure.hidden = timeRows.length < 2;
+      playFigure.hidden = playRows.length < 2;
+      costFigure.hidden = costRows.length < 1;
+      document.querySelector("#activity-charts").hidden = (
+        timeFigure.hidden && playFigure.hidden && costFigure.hidden
+      );
       drawChart(document.querySelector("#chart-time"), timeRows, (row) => row.total / 60, "#ffd60a");
       drawChart(document.querySelector("#chart-plays"), playRows, (row) => row.perMin, "#0a84ff");
+      drawChart(
+        document.querySelector("#chart-cost"),
+        costRows,
+        (row) => row.usd,
+        "#30d158",
+        moneyTick,
+      );
       document.querySelector("#chart-time-value").textContent = timeRows.length
         ? stepLength(timeRows[timeRows.length - 1].total, false)
         : "";
@@ -2789,6 +3403,43 @@
       document.querySelector("#chart-plays-value").textContent = latest == null
         ? ""
         : latest >= 10 ? `${Math.round(latest)} / min` : `${latest.toFixed(1)} / min`;
+      const spent = costRows.reduce((sum, row) => sum + row.usd, 0);
+      const models = [...new Set(costRows.map((row) => shortModel(row.model)).filter(Boolean))];
+      const modelLabel = models.length === 1 ? models[0] : models.length ? `${models.length} models` : "";
+      document.querySelector("#chart-cost-value").textContent = costRows.length
+        ? [money(spent), modelLabel].filter(Boolean).join(" · ")
+        : "";
+    }
+
+    function costChartRows(jobs) {
+      return jobs
+        .map((job) => ({
+          at: Date.parse(job.updated || ""),
+          name: [job.name || "Film", shortModel(job.read_model)].filter(Boolean).join(" · "),
+          usd: Number(job.read_cost) || 0,
+          model: job.read_model || "",
+        }))
+        .filter((row) => Number.isFinite(row.at) && row.usd > 0)
+        .sort((a, b) => a.at - b.at);
+    }
+
+    function shortModel(model) {
+      return String(model || "").replace(/-\d{8}$/, "");
+    }
+
+    function shortLabel(text) {
+      const value = String(text || "");
+      return value.length > 28 ? `${value.slice(0, 27)}…` : value;
+    }
+
+    function money(value) {
+      if (value >= 1) return `$${value.toFixed(2)}`;
+      if (value >= 0.01) return `$${value.toFixed(3)}`;
+      return `$${value.toFixed(4)}`;
+    }
+
+    function moneyTick(value) {
+      return money(value);
     }
 
     function chartRows(jobs) {
@@ -2812,9 +3463,12 @@
       });
     }
 
-    function drawChart(svg, rows, valueOf, color) {
+    function drawChart(svg, rows, valueOf, color, tick = chartTick, mark = null) {
       svg.replaceChildren();
-      if (rows.length < 2) return;
+      if (rows.length < 2) {
+        if (rows.length === 1 && rows[0].usd != null) drawCostBar(svg, rows[0], valueOf, color, tick);
+        return;
+      }
       const width = 320;
       const height = 128;
       const left = 34;
@@ -2822,7 +3476,7 @@
       const top = 12;
       const bottom = 22;
       const values = rows.map(valueOf);
-      const max = Math.max(...values, 0.1);
+      const max = Math.max(...values, tick === moneyTick ? 0 : 0.1) || 0.001;
       const start = rows[0].at;
       const span = Math.max(1, rows[rows.length - 1].at - start);
       const xOf = (at) => left + ((at - start) / span) * (width - left - right);
@@ -2843,10 +3497,12 @@
         ...rows.map((row, index) => `${xOf(row.at)},${yOf(values[index])}`),
         `${xOf(rows[rows.length - 1].at)},${floor}`,
       ].join(" "));
-      svg.append(area, line, axisLabel(4, yOf(max) + 4, chartTick(max)), axisLabel(4, floor, "0"));
+      svg.append(area, line, axisLabel(4, yOf(max) + 4, tick(max)), axisLabel(4, floor, "0"));
+      const startMark = mark ? mark(rows[0]) : chartWhen(rows[0].at, span);
+      const endMark = mark ? mark(rows[rows.length - 1]) : chartWhen(rows[rows.length - 1].at, span);
       svg.append(
-        axisLabel(left, height - 6, chartWhen(rows[0].at, span), "start"),
-        axisLabel(width - right, height - 6, chartWhen(rows[rows.length - 1].at, span), "end"),
+        axisLabel(left, height - 6, startMark, "start"),
+        axisLabel(width - right, height - 6, endMark, "end"),
       );
       rows.forEach((row, index) => {
         const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -2855,10 +3511,31 @@
         dot.setAttribute("r", "2.5");
         dot.setAttribute("fill", color);
         const tip = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        tip.textContent = `${row.name}: ${chartTick(values[index])}`;
+        tip.textContent = `${row.name}: ${tick(values[index])}`;
         dot.append(tip);
         svg.append(dot);
       });
+    }
+
+    function drawCostBar(svg, row, valueOf, color, tick) {
+      const width = 320;
+      const height = 128;
+      const floor = height - 22;
+      const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      bar.setAttribute("x", "148");
+      bar.setAttribute("y", "16");
+      bar.setAttribute("width", "24");
+      bar.setAttribute("height", String(floor - 16));
+      bar.setAttribute("fill", color);
+      const tip = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      tip.textContent = `${row.name}: ${tick(valueOf(row))}`;
+      bar.append(tip);
+      svg.append(
+        bar,
+        axisLabel(4, 26, tick(valueOf(row))),
+        axisLabel(4, floor, "0"),
+        axisLabel(160, height - 6, row.play ? `Play ${row.play}` : shortLabel(row.name), "middle"),
+      );
     }
 
     function axisLabel(x, y, text, anchor) {
@@ -2921,7 +3598,37 @@
         placeDetail.textContent = "This page sends each film to Cloudflare. One cutter keeps that film in order while workers read it at the same time.";
         paintWorkers(payload.workers);
       }
+      if (typeof payload.formations === "boolean") paintFormations(payload.formations);
       paintStartPlace();
+    }
+
+    function paintFormations(on) {
+      const box = document.querySelector("#formation-reads");
+      if (box) box.checked = on;
+      if (box && box.dataset.synced === "1") return;
+      const choice = reportOptions.querySelector('input[value="formations"]');
+      if (choice) choice.checked = on;
+      if (box) box.dataset.synced = "1";
+    }
+
+    async function saveFormations() {
+      const box = document.querySelector("#formation-reads");
+      const on = Boolean(box && box.checked);
+      const choice = reportOptions.querySelector('input[value="formations"]');
+      if (choice) choice.checked = on;
+      if (box) box.dataset.synced = "1";
+      let response;
+      try {
+        response = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ formations: on }),
+        });
+      } catch {
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok) paintFormations(Boolean(payload.formations));
     }
 
     function choosePlace(place) {
@@ -2967,6 +3674,7 @@
     }
 
     workersInput.addEventListener("change", () => saveWorkers());
+    document.querySelector("#formation-reads").addEventListener("change", () => saveFormations());
     activityRetry.addEventListener("click", () => {
       if (!activityLoaded) beginActivityLoad();
       paintActivity(watch);
@@ -3032,6 +3740,7 @@
       ["downloading", "Download"],
       ["saving", "Save"],
       ["scanning", "Read"],
+      ["charting", "Report"],
       ["checking", "Check"],
     ];
 
@@ -3203,6 +3912,8 @@
         thumb = document.createElement("img");
         thumb.className = "thumb";
         thumb.alt = "";
+        thumb.loading = "lazy";
+        thumb.decoding = "async";
         link.prepend(thumb);
       }
       if (thumb.getAttribute("src") !== job.thumbnail) thumb.src = job.thumbnail;
@@ -3228,6 +3939,10 @@
       if (size > 0) parts.push({ text: megabytes(size) });
       const took = stepTotal(job);
       if (took) parts.push({ text: `took ${took}` });
+      const spent = Number(job.read_cost) || 0;
+      const model = shortModel(job.read_model);
+      if (spent > 0) parts.push({ text: money(spent) });
+      if (model) parts.push({ text: model });
       return parts;
     }
 
@@ -3337,6 +4052,7 @@
     function activityStep(job) {
       if (job.phase === "ready") return "Complete";
       if (!job.running) return "Stopped";
+      if (job.phase === "charting") return "Scouting report";
       if (job.phase === "scanning" || job.phase === "checking") {
         return job.phase === "checking" || reachedEnd(job.scanned, job.duration)
           ? "Checking"
@@ -3387,6 +4103,9 @@
         const done = clock(job.scanned || 0);
         const read = job.duration ? `Read ${done} of ${clock(job.duration)}` : `Read ${done}`;
         return joinParts([read, retryPhrase(job), `${plays} so far`, workerPhrase()]);
+      }
+      if (job.phase === "charting") {
+        return joinParts(["Reading each play for the scouting report", plays, workerPhrase()]);
       }
       const progress = activityProgress(job);
       if (!progress) {
@@ -3611,7 +4330,6 @@
     }
 
     let projectFilter = "all";
-    let listedProjects = [];
 
     function historyItem(project) {
       const item = document.createElement("li");
@@ -3671,6 +4389,8 @@
           thumb?.remove();
           thumb = document.createElement("img");
           thumb.alt = "";
+          thumb.loading = "lazy";
+          thumb.decoding = "async";
           poster.prepend(thumb);
         }
         if (thumb.getAttribute("src") !== project.thumbnail) thumb.src = project.thumbnail;
@@ -4096,6 +4816,7 @@
         teamsSection.dataset.project = "";
         delete teamsSection.dataset.loading;
         delete teamsSection.dataset.named;
+        delete teamsSection.dataset.references;
         for (const img of teamsSection.querySelectorAll("img")) {
           img.removeAttribute("src");
           delete img.dataset.source;
@@ -4130,12 +4851,23 @@
       teamsSection.querySelector('.team-row[role="radiogroup"]').hidden = !open;
       teamsBuilding.hidden = !building;
       teamsSave.hidden = true;
-      teamsRetry.hidden = !open && teamsError.hidden;
+      const showRetry = open || !teamsError.hidden;
+      teamsActions.hidden = !showRetry;
+      teamsRetry.hidden = !showRetry;
+      for (const button of teamsSection.querySelectorAll(".team-refresh")) {
+        button.hidden = !open;
+      }
     }
 
     function playersReady() {
       const left = document.querySelector("#team-left-player");
       const right = document.querySelector("#team-right-player");
+      return Boolean(left.getAttribute("src") && right.getAttribute("src"));
+    }
+
+    function referencesReady() {
+      const left = document.querySelector("#team-left-reference");
+      const right = document.querySelector("#team-right-reference");
       return Boolean(left.getAttribute("src") && right.getAttribute("src"));
     }
 
@@ -4151,11 +4883,18 @@
         still.hidden = true;
         const player = document.querySelector(`#team-${side}-player`);
         const playerUrl = teams[`${side}_player`];
-        if (playerUrl && player.dataset.source !== playerUrl) {
+        if (playerUrl && (
+          player.dataset.source !== playerUrl
+          || teamsSection.dataset.refreshing === "1"
+        )) {
           player.dataset.source = playerUrl;
           player.src = playerUrl;
         }
         player.hidden = !playerUrl;
+        const reference = document.querySelector(`#team-${side}-reference`);
+        reference.hidden = true;
+        const shots = player.closest(".team-shots");
+        if (shots) shots.style.gridTemplateColumns = "1fr";
         const name = document.querySelector(`#team-${side}-name`);
         const saved = teams[`${side}_name`] || "";
         if (name.dataset.saved === undefined) name.dataset.saved = "";
@@ -4167,7 +4906,8 @@
         }
         const school = name.value.trim() || (side === "left" ? "Home" : "Away");
         document.querySelector(`#team-${side}-kicker`).textContent = school;
-        player.alt = `Generated player for ${school}`;
+        player.alt = `Player for ${school}`;
+        reference.alt = `Reference sent for ${school}`;
         document.querySelector(`#team-${side}-mine`).setAttribute(
           "aria-pressed",
           teams.mine === side ? "true" : "false",
@@ -4178,8 +4918,8 @@
       }
       paintMineChoice();
       teamsNote.textContent = teams.left_player && teams.right_player
-        ? "Home and away, standing on the field."
-        : "Building the home and away players.";
+        ? "A full-body shot of each team."
+        : "Finding a full-body shot of each team.";
     }
 
     function paintMineChoice() {
@@ -4213,40 +4953,186 @@
       }
     }
 
-    async function loadLineup(projectId, again = false) {
+    function paintTeamsProgress(progress, failed = false) {
+      if (!teamsMeter) return;
+      if (!progress) {
+        teamsMeter.hidden = true;
+        return;
+      }
+      teamsMeter.hidden = false;
+      const step = progress.step || "read";
+      const percent = Number(progress.percent) || 0;
+      const order = TEAM_STEP_ORDER.indexOf(step);
+      for (const item of teamsSteps.querySelectorAll("li")) {
+        const index = TEAM_STEP_ORDER.indexOf(item.dataset.step);
+        item.classList.toggle("done", index >= 0 && index < order);
+        item.classList.toggle("now", item.dataset.step === step && !failed);
+        item.classList.toggle("stopped", failed && item.dataset.step === step);
+      }
+      teamsFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      teamsTrack.setAttribute("aria-valuenow", String(Math.max(0, Math.min(100, percent))));
+      const attempt = Number(progress.attempt) || 1;
+      const detail = progress.detail || (failed ? "Could not build the team cards." : "Working on the team cards.");
+      const line = attempt > 1 ? `Try ${attempt}. ${detail}` : detail;
+      teamsStatus.textContent = line;
+      teamsStatus.dataset.tone = failed ? "error" : progress.running ? "working" : "";
+      teamsTrack.setAttribute("aria-valuetext", line);
+    }
+
+    function hideTeamsProgress() {
+      if (!teamsMeter) return;
+      teamsMeter.hidden = true;
+      teamsFill.style.width = "0";
+      teamsStatus.textContent = "";
+      delete teamsStatus.dataset.tone;
+      for (const item of teamsSteps.querySelectorAll("li")) {
+        item.classList.remove("done", "now", "stopped");
+      }
+    }
+
+    async function watchTeamBuild(projectId) {
+      for (let attempt = 0; attempt < 180; attempt += 1) {
+        if (results.dataset.project !== String(projectId)) return null;
+        if (teamsSection.dataset.loading !== String(projectId)) return null;
+        const response = await fetch(`/api/projects/${projectId}`);
+        if (!response.ok) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400));
+          continue;
+        }
+        const payload = await response.json().catch(() => null);
+        if (!payload || results.dataset.project !== String(projectId)) return null;
+        const teams = payload.teams || {};
+        const progress = teams.progress || null;
+        const failed = Boolean(progress && progress.error);
+        const building = Boolean(teams.building || (progress && progress.running));
+        paintTeamsProgress(progress, failed);
+        if (teams.left_player || teams.right_player) {
+          fillTeams(projectId, teams);
+          if (studio.dataset.stage === "teams") showTeamChoices(true);
+        }
+        if (!building) return teams;
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+      }
+      return null;
+    }
+
+    async function loadLineup(projectId, again = false, side = null) {
+      const keepCards = again && playersReady();
+      const showing = keepCards || (playersReady() && !again);
       teamsSection.dataset.loading = String(projectId);
+      if (again) teamsSection.dataset.refreshing = "1";
       selectTeamButton.disabled = true;
-      selectTeamButton.textContent = "Building players…";
-      teamsNote.textContent = "Reading the plays and building a player for each uniform.";
+      selectTeamButton.textContent = showing ? "Select team" : "Building players…";
+      teamsNote.textContent = again
+        ? (side ? "Finding another photo for that team." : "Finding different photos for each team.")
+        : "Finding a full-body shot of each team.";
       teamsError.hidden = true;
-      teamsRetry.hidden = true;
-      showTeamChoices(false);
+      teamsRetry.disabled = true;
+      teamsRetrySpin.hidden = false;
+      teamsRetryLabel.textContent = again ? "Finding photos…" : "Building photos…";
+      paintTeamsProgress(
+        {
+          step: "read",
+          percent: 4,
+          detail: again
+            ? (side ? "Starting another photo for that team." : "Starting different photos for each team.")
+            : "Starting the team cards.",
+          attempt: Number(teamsSection.dataset.attempt || 0) + 1,
+          running: true,
+        },
+        false,
+      );
+      teamsSection.dataset.attempt = String(Number(teamsSection.dataset.attempt || 0) + 1);
+      for (const button of teamsSection.querySelectorAll(".team-refresh")) {
+        button.disabled = true;
+        const match = side && button.dataset.side === side;
+        if (again) {
+          button.closest(".team-card").classList.toggle(
+            "refreshing",
+            !side || match,
+          );
+        }
+        if (match) button.textContent = "Finding…";
+      }
+      if (!showing) showTeamChoices(false);
+      else showTeamChoices(true);
       paintDock();
+      if (studio.dataset.stage === "teams") paintStageCopy("teams");
       try {
-        const againQuery = again ? "?again=true" : "";
-        const response = await fetch(`/api/projects/${projectId}/teams/stills${againQuery}`, {
+        const params = new URLSearchParams();
+        params.set("wait", "false");
+        if (again) params.set("again", "true");
+        if (side) params.set("side", side);
+        const response = await fetch(`/api/projects/${projectId}/teams/stills?${params}`, {
           method: "POST",
         });
         const payload = await readBody(response);
         if (!response.ok) {
           throw new Error(typeof payload.detail === "string" ? payload.detail : "Could not read a lineup.");
         }
-        if (results.dataset.project === String(projectId)) {
-          fillTeams(projectId, payload.teams);
-          teamsSection.dataset.named = String(projectId);
-          showTeamChoices(true);
+        if (payload.teams && payload.teams.progress) {
+          paintTeamsProgress(payload.teams.progress, Boolean(payload.teams.progress.error));
         }
+        let teams = payload.teams;
+        if (teams && (teams.building || (teams.progress && teams.progress.running))) {
+          const watched = await watchTeamBuild(projectId);
+          if (watched) teams = watched;
+        }
+        if (results.dataset.project !== String(projectId)) return;
+        if (teams && teams.progress && teams.progress.error) {
+          throw new Error(teams.progress.error);
+        }
+        fillTeams(projectId, teams);
+        teamsSection.dataset.named = String(projectId);
+        showTeamChoices(true);
+        paintTeamsProgress(
+          {
+            step: "save",
+            percent: 100,
+            detail: "Team cards are ready.",
+            attempt: Number(teamsSection.dataset.attempt || 1),
+            running: false,
+          },
+          false,
+        );
+        window.setTimeout(() => {
+          if (teamsSection.dataset.loading) return;
+          hideTeamsProgress();
+        }, 900);
       } catch (error) {
         if (results.dataset.project !== String(projectId)) return;
-        teamsNote.textContent = "The players could not be generated.";
+        teamsNote.textContent = "A full-body shot of each team could not be found.";
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not read a lineup.";
-        teamsRetry.hidden = false;
+        paintTeamsProgress(
+          {
+            step: "save",
+            percent: 100,
+            detail: error.message || "Could not build the team cards.",
+            attempt: Number(teamsSection.dataset.attempt || 1),
+            running: false,
+            error: error.message || "Could not build the team cards.",
+          },
+          true,
+        );
+        teamsRetryLabel.textContent = "Try again";
+        showTeamChoices(playersReady());
       } finally {
         if (teamsSection.dataset.loading === String(projectId)) delete teamsSection.dataset.loading;
+        delete teamsSection.dataset.refreshing;
         selectTeamButton.disabled = false;
         selectTeamButton.textContent = "Select team";
+        teamsRetry.disabled = false;
+        teamsRetrySpin.hidden = true;
+        if (teamsError.hidden) teamsRetryLabel.textContent = "Try different photos";
+        for (const button of teamsSection.querySelectorAll(".team-refresh")) {
+          button.disabled = false;
+          button.textContent = "New photo";
+          button.closest(".team-card").classList.remove("refreshing");
+        }
         if (!playersReady()) showTeamChoices(false);
+        else if (studio.dataset.stage === "teams") showTeamChoices(true);
+        if (studio.dataset.stage === "teams") paintStageCopy("teams");
         paintDock();
       }
     }
@@ -4267,8 +5153,8 @@
         reportBox.dataset.side = mine.dataset.side;
         reportBox.dataset.labeled = "1";
         chartProgress.dataset.teams = "1";
-        const reportButton = chartProgress.querySelector('[data-step="report"] button');
-        if (reportButton) reportButton.disabled = false;
+        const reportLinkStep = chartProgress.querySelector('[data-step="report"] a');
+        if (reportLinkStep) reportLinkStep.setAttribute("aria-disabled", "false");
         const teamsStep = chartProgress.querySelector('[data-step="teams"]');
         if (teamsStep) teamsStep.dataset.complete = "1";
         paintStageCopy("teams");
@@ -4281,6 +5167,14 @@
         if (event.target.closest("input, label, button")) return;
         const mine = card.querySelector("button.mine");
         if (mine) mine.click();
+      });
+    }
+    for (const button of teamsSection.querySelectorAll(".team-refresh")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const projectId = results.dataset.project;
+        if (!projectId || teamsSection.dataset.loading === projectId) return;
+        loadLineup(projectId, true, button.dataset.side);
       });
     }
     for (const name of teamsSection.querySelectorAll("input")) {
@@ -4312,11 +5206,21 @@
       setPlaysOpen(playsToggle.getAttribute("aria-expanded") !== "true");
     });
     chartProgress.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-target]");
-      if (!button || button.disabled) return;
-      const stage = button.closest("li").dataset.step;
-      if (stage === "review") setPlaysOpen(true);
-      openStage(stage);
+      const link = event.target.closest("a[data-screen]");
+      if (!link) return;
+      if (link.getAttribute("aria-disabled") === "true") {
+        event.preventDefault();
+        return;
+      }
+      const stage = stageFromScreen(link.dataset.screen);
+      if (!stage) return;
+      if (results.dataset.project && !review.hidden) {
+        event.preventDefault();
+        if (stage === "review") setPlaysOpen(true);
+        openStage(stage);
+        return;
+      }
+      followLink(event, link.getAttribute("href"));
     });
 
     function setPlaysOpen(open) {
@@ -4335,7 +5239,7 @@
       const redraw = options.redraw !== false;
       teamsSave.disabled = true;
       teamsError.hidden = true;
-      if (redraw) teamsNote.textContent = "Building the home and away players.";
+      if (redraw) teamsNote.textContent = "Finding a full-body shot of each team.";
       try {
         const response = await fetch(`/api/projects/${projectId}/teams`, {
           method: "POST",
@@ -4357,7 +5261,7 @@
       } catch (error) {
         teamsError.hidden = false;
         teamsError.textContent = error.message || "Could not save those teams.";
-        teamsNote.textContent = "Home and away, standing on the field.";
+        teamsNote.textContent = "A full-body shot of each team.";
         if (!redraw) reportNote.textContent = error.message || "Could not save that team.";
       } finally {
         teamsSave.disabled = false;
@@ -4367,7 +5271,73 @@
 
     let teamSave = null;
 
+    function knownFilm(id) {
+      return listedProjects.find((item) => String(item.project) === String(id)) || null;
+    }
+
+    function showFilmLoading(id) {
+      const known = knownFilm(id);
+      useLibraryLayout(false);
+      composer.hidden = true;
+      historySection.hidden = true;
+      activitySection.hidden = true;
+      settingsSection.hidden = true;
+      playSection.hidden = true;
+      review.hidden = false;
+      review.classList.add("is-loading");
+      filmLoading.hidden = false;
+      status.className = "";
+      status.textContent = "";
+      projectName.textContent = known && known.name ? known.name : "";
+      const meta = [];
+      if (known && known.channel) meta.push(known.channel);
+      filmMeta.textContent = meta.join(" · ");
+      const thumb = known && known.thumbnail;
+      if (thumb) {
+        filmThumb.dataset.source = thumb;
+        filmThumb.src = thumb;
+        filmThumb.alt = known.name || "Film";
+        filmThumb.hidden = false;
+        filmLoadingPoster.hidden = true;
+      } else {
+        filmThumb.hidden = true;
+        filmLoadingPoster.hidden = false;
+      }
+      filmLoadingNote.textContent = "Opening this film";
+      markCurrent();
+    }
+
+    function hideFilmLoading() {
+      review.classList.remove("is-loading");
+      if (filmLoading) filmLoading.hidden = true;
+    }
+
+    async function settlePlayers(token, id) {
+      if (token !== watch) return;
+      const response = await fetch(`/api/projects/${id}`);
+      if (token !== watch || !response.ok) return;
+      const payload = await response.json().catch(() => null);
+      if (!payload || token !== watch || !payload.teams) return;
+      fillTeams(payload.project, payload.teams);
+      const progress = payload.teams.progress;
+      const building = Boolean(payload.teams.building || payload.teams.refreshing || (progress && progress.running));
+      if (progress) paintTeamsProgress(progress, Boolean(progress.error));
+      if (!building) {
+        delete teamsSection.dataset.refreshing;
+        if (!progress || !progress.error) hideTeamsProgress();
+        paintStageCopy(studio.dataset.stage);
+        return;
+      }
+      teamsSection.dataset.refreshing = "1";
+      teamsNote.hidden = false;
+      teamsNote.textContent = progress && progress.detail
+        ? progress.detail
+        : "Updating the player photos.";
+      window.setTimeout(() => settlePlayers(token, id), 700);
+    }
+
     function paint(project, token) {
+      hideFilmLoading();
       useLibraryLayout(false);
       composer.hidden = true;
       historySection.hidden = true;
@@ -4432,6 +5402,14 @@
       });
       paintReviews(project);
       paintTeams(project);
+      if (project.teams && project.teams.refreshing) {
+        teamsSection.dataset.refreshing = "1";
+        teamsNote.hidden = false;
+        teamsNote.textContent = "Updating the player photos.";
+        window.setTimeout(() => settlePlayers(token, project.project), 1500);
+      } else {
+        delete teamsSection.dataset.refreshing;
+      }
       paintReport(project);
       paintChart(project);
       const failed = hasError(project);
@@ -4481,41 +5459,57 @@
       const length = document.createElement("span");
       length.className = "play-length play-duration";
       meta.append(range, kind, length);
-      const picker = document.createElement("select");
-      picker.className = "play-type";
-      picker.setAttribute("aria-label", "Play type");
-      const blank = new Option("Play type", "");
-      picker.append(blank);
-      for (const [name, choices] of playTypeGroups) {
-        const group = document.createElement("optgroup");
-        group.label = name;
-        for (const [value, label] of choices) group.append(new Option(label, value));
-        picker.append(group);
-      }
-      picker.append(new Option("Not a play", "junk"));
-      picker.addEventListener("change", () => {
-        if (!picker.value) {
-          picker.value = picker.dataset.type || "scrimmage";
-          return;
-        }
-        relabelPlay(item.dataset.uid, picker.value, picker);
-      });
       const view = document.createElement("a");
       view.className = "view-play";
       view.textContent = "View play";
       view.addEventListener("click", (event) => followLink(event, view.getAttribute("href")));
       if (play.video) item.append(playVideoElement(play.video));
+      const tagLabel = document.createElement("p");
+      tagLabel.className = "play-tag-label";
+      tagLabel.textContent = "Tag";
       const unitRow = document.createElement("div");
       unitRow.className = "unit-tag";
-      for (const [value, label] of [["offense", "Offense"], ["defense", "Defense"]]) {
+      for (const [value, label] of [
+        ["scrimmage", "Offense / defense"],
+        ["special_teams", "Special teams"],
+      ]) {
         const button = document.createElement("button");
         button.type = "button";
-        button.dataset.unit = value;
+        button.dataset.tag = value;
         button.textContent = label;
-        button.addEventListener("click", () => tagUnit(item.dataset.uid, value, button));
+        button.addEventListener("click", () => tagPlayCard(item, value, button));
         unitRow.append(button);
       }
-      item.append(badge, meta, unitRow, picker, view);
+      const trimLabel = document.createElement("p");
+      trimLabel.className = "play-trim-label";
+      trimLabel.textContent = "Trim";
+      const trim = document.createElement("div");
+      trim.className = "play-trim";
+      const trimIn = document.createElement("button");
+      trimIn.type = "button";
+      trimIn.className = "trim-in";
+      trimIn.textContent = "Start here";
+      trimIn.addEventListener("click", () => markCardTrim(item, "in"));
+      const trimOut = document.createElement("button");
+      trimOut.type = "button";
+      trimOut.className = "trim-out";
+      trimOut.textContent = "End here";
+      trimOut.addEventListener("click", () => markCardTrim(item, "out"));
+      const trimSave = document.createElement("button");
+      trimSave.type = "button";
+      trimSave.className = "trim-save";
+      trimSave.textContent = "Save trim";
+      trimSave.disabled = true;
+      trimSave.addEventListener("click", () => saveCardTrim(item, trimSave));
+      const trimNote = document.createElement("p");
+      trimNote.className = "play-trim-note";
+      trim.append(trimIn, trimOut, trimSave, trimNote);
+      const discard = document.createElement("button");
+      discard.type = "button";
+      discard.className = "play-discard";
+      discard.textContent = "Not a play";
+      discard.addEventListener("click", () => relabelPlay(item.dataset.uid, "junk", discard));
+      item.append(badge, meta, tagLabel, unitRow, trimLabel, trim, discard, view);
       syncPlayCard(play, item);
       return item;
     }
@@ -4527,8 +5521,13 @@
       item.dataset.family = play.family || "";
       item.dataset.unit = play.unit || "";
       item.dataset.reviewed = play.reviewed ? "1" : "0";
+      item.dataset.start = String(play.start);
+      item.dataset.end = String(play.end);
+      delete item.dataset.trimIn;
+      delete item.dataset.trimOut;
+      const tag = playFamily(play);
       for (const button of item.querySelectorAll(".unit-tag button")) {
-        button.setAttribute("aria-pressed", button.dataset.unit === play.unit ? "true" : "false");
+        button.setAttribute("aria-pressed", button.dataset.tag === tag ? "true" : "false");
       }
       const range = item.querySelector(".play-range");
       if (range) range.textContent = `${clock(play.start)} – ${clock(play.end)}`;
@@ -4542,12 +5541,76 @@
       if (length) length.textContent = playLength(play.end - play.start);
       const view = item.querySelector(".view-play");
       if (view) view.href = `/play/${play.uid}`;
-      const picker = item.querySelector(".play-type");
-      if (picker && picker.dataset.saving !== "1") {
-        const value = selectedType(play);
-        picker.dataset.type = value;
-        picker.value = value;
+      const video = item.querySelector("video");
+      if (video && play.video) {
+        const next = `${endpoint(play.video)}?v=${encodeURIComponent(`${play.start}-${play.end}`)}`;
+        if (video.dataset.trimmed !== next) {
+          video.dataset.trimmed = next;
+          video.src = next;
+        }
       }
+      const trimSave = item.querySelector(".trim-save");
+      if (trimSave) trimSave.disabled = true;
+      const trimNote = item.querySelector(".play-trim-note");
+      if (trimNote) {
+        trimNote.textContent = "Pause where the play starts and ends, then save the trim.";
+      }
+    }
+
+    function markCardTrim(card, edge) {
+      const video = card.querySelector("video");
+      const note = card.querySelector(".play-trim-note");
+      const save = card.querySelector(".trim-save");
+      if (!video) return;
+      const at = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      const start = Number(card.dataset.start || 0);
+      const end = Number(card.dataset.end || 0);
+      const film = start + Math.max(0, Math.min(at, Math.max(0, end - start)));
+      if (edge === "in") card.dataset.trimIn = String(film);
+      else card.dataset.trimOut = String(film);
+      const nextStart = Number(card.dataset.trimIn || start);
+      const nextEnd = Number(card.dataset.trimOut || end);
+      if (save) save.disabled = !(nextEnd - nextStart >= 0.5 && (nextStart > start + 0.04 || nextEnd < end - 0.04));
+      if (note) {
+        note.textContent = `Trim to ${clock(nextStart)} – ${clock(nextEnd)}.`;
+      }
+    }
+
+    async function saveCardTrim(card, button) {
+      const uid = card.dataset.uid;
+      const start = Number(card.dataset.trimIn || card.dataset.start || 0);
+      const end = Number(card.dataset.trimOut || card.dataset.end || 0);
+      if (!uid || end - start < 0.5) return;
+      button.disabled = true;
+      button.textContent = "Saving trim…";
+      try {
+        const play = await postPlayTrim(uid, start, end);
+        syncPlayCard(play, card);
+        delete reportBox.dataset.ready;
+        refreshReport();
+        paintDock();
+      } catch (error) {
+        const note = card.querySelector(".play-trim-note");
+        if (note) note.textContent = error.message || "Could not trim that play.";
+        button.disabled = false;
+      } finally {
+        button.textContent = "Save trim";
+      }
+    }
+
+    async function postPlayTrim(uid, start, end) {
+      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/trim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start, end }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.detail === "string" ? payload.detail : "Could not trim that play.",
+        );
+      }
+      return payload;
     }
 
     function stageKey(id) {
@@ -4564,6 +5627,8 @@
       const teamsDone = (project.teams && (project.teams.mine === "left" || project.teams.mine === "right"))
         || chartProgress.dataset.teams === "1"
         || Boolean(selectedTeamSide());
+      const asked = stageFromScreen(filmLocation()?.screen || "");
+      if (asked && filmLocation()?.id === String(project.project)) return clampStage(asked, teamsDone);
       if (chartProgress.dataset.intent) {
         const stage = clampStage(chartProgress.dataset.intent, teamsDone);
         delete chartProgress.dataset.intent;
@@ -4597,7 +5662,7 @@
         }
       }
       stageDock.hidden = live || stage === "report";
-      if (stage === "teams") beginTeams();
+      if (stage === "teams" && !chartProgress.hidden) beginTeams();
     }
 
     function beginTeams() {
@@ -4605,6 +5670,10 @@
       if (!projectId) return;
       if (playersReady()) {
         showTeamChoices(true);
+        if (!referencesReady() && teamsSection.dataset.references !== String(projectId)) {
+          teamsSection.dataset.references = String(projectId);
+          loadLineup(projectId);
+        }
         return;
       }
       if (teamsSection.dataset.loading === String(projectId)) {
@@ -4624,28 +5693,33 @@
       const mine = selectedTeamSide();
       const teamName = sideName(mine);
       const opponent = sideName(mine === "left" ? "right" : mine === "right" ? "left" : "");
-      const reportReady = reportBox.dataset.ready === String(results.dataset.project || "");
       if (stage === "report") {
-        chartNote.textContent = reportReady
-          ? "The scout report is ready."
+        chartNote.textContent = reportOnPage()
+          ? "The scouting report is on this page. Generate again, or download it."
           : opponent
-            ? `A scouting report on ${opponent}, from every play.`
-            : "A scouting report from every play in this film.";
+            ? `Choose what goes into the report on ${opponent}.`
+            : "Choose what goes into the scouting report.";
         return;
       }
       if (stage === "teams") {
+        if (teamsSection.dataset.refreshing === "1" || teamsSection.dataset.loading) {
+          chartNote.textContent = teamsStatus.textContent || "Finding different photos.";
+          return;
+        }
         if (!playersReady()) {
-          chartNote.textContent = teamsSection.dataset.loading
-            ? "Building a player for each uniform."
-            : "The two uniforms in this film.";
+          chartNote.textContent = "The two uniforms in this film.";
           return;
         }
         chartNote.textContent = mine
-          ? (teamName ? `${teamName} is your team. The scout report is next.` : "Your team is set. The scout report is next.")
-          : "Home and away, standing on the field. Choose yours.";
+          ? (teamName
+            ? `${teamName} is your team. Try different photos if the shot is off.`
+            : "Your team is set. Try different photos if the shot is off.")
+          : "Choose your team, or try different photos.";
         return;
       }
-      if (stage === "review") chartNote.textContent = "Review any play. Choosing your team is next.";
+      if (stage === "review") {
+        chartNote.textContent = "Trim each clip and tag it as offense / defense or special teams.";
+      }
     }
 
     function paintDock() {
@@ -4706,7 +5780,10 @@
         const saved = await flushTeamNames();
         if (!saved) {
           rememberStage(projectId, "teams");
+          const stay = screenPath(projectId, "teams");
+          if (location.pathname !== stay) history.replaceState({}, "", stay);
           applyStage("teams");
+          titleForStage("teams");
           retintSteps("teams");
           paintStageLabels("teams");
           paintStageCopy("teams");
@@ -4715,7 +5792,14 @@
         }
       }
       rememberStage(projectId, next);
+      const path = screenPath(projectId, next);
+      const here = stageFromScreen((filmLocation() || {}).screen || "");
+      if (location.pathname !== path) {
+        if (here === stage && next !== stage) history.replaceState({}, "", path);
+        else history.pushState({}, "", path);
+      }
       applyStage(next);
+      titleForStage(next);
       retintSteps(next);
       paintStageLabels(next);
       paintStageCopy(next);
@@ -4794,16 +5878,22 @@
       const reportReady = teamsDone && reportBox.dataset.ready === String(project.project);
       const stage = resolveStage(project);
       rememberStage(project.project, stage);
+      const path = screenPath(project.project, stage);
+      if (location.pathname !== path) history.replaceState({}, "", path);
+      titleForStage(stage);
       const reviewStep = chartProgress.querySelector('[data-step="review"]');
       const teamsStep = chartProgress.querySelector('[data-step="teams"]');
       const reportStep = chartProgress.querySelector('[data-step="report"]');
+      reviewStep.querySelector("a").href = screenPath(project.project, "review");
+      teamsStep.querySelector("a").href = screenPath(project.project, "teams");
+      reportStep.querySelector("a").href = screenPath(project.project, "report");
       reviewStep.dataset.complete = reviewDone ? "1" : "";
       teamsStep.dataset.complete = teamsDone ? "1" : "";
       reportStep.dataset.complete = reportReady ? "1" : "";
       markChartStep(reviewStep, stage === "review" ? "now" : reviewDone ? "done" : "");
       markChartStep(teamsStep, stage === "teams" ? "now" : teamsDone ? "done" : "");
       markChartStep(reportStep, stage === "report" ? "now" : reportReady ? "done" : "");
-      reportStep.querySelector("button").disabled = !teamsDone;
+      reportStep.querySelector("a").setAttribute("aria-disabled", teamsDone ? "false" : "true");
       const filled = stage === "report"
         ? (reportReady ? 100 : 78)
         : stage === "teams"
@@ -4824,7 +5914,7 @@
         ? "All plays reviewed."
         : `${reviewed} of ${plays.length} plays reviewed. Reviewing is optional.`;
       const nextText = reportReady
-        ? "The scouting report is ready to download."
+        ? "The scouting report is on this page."
         : teamsDone
           ? "Generate the scouting report next."
           : "Choose your team next.";
@@ -4854,8 +5944,15 @@
         reportBox.dataset.project = String(project.project);
         delete reportBox.dataset.ready;
         delete reportBox.dataset.plays;
+        delete reportBox.dataset.tendencies;
+        delete reportBox.dataset.sections;
         delete reportBox.dataset.labeled;
         delete reportBox.dataset.side;
+        delete reportBox.dataset.live;
+        delete reportBox.dataset.resume;
+        delete reportBox.dataset.synced;
+        reportView.replaceChildren();
+        reportView.hidden = true;
       }
       if ("teams" in project) {
         const mine = project.teams && project.teams.mine;
@@ -4875,23 +5972,123 @@
       }
       const labeled = reportBox.dataset.labeled === "1";
       const saved = reportBox.dataset.saved === "1";
+      const picked = reportSelection();
       reportBox.hidden = studio.dataset.stage !== "report";
-      const ready = saved && reportBox.dataset.ready === String(project.project);
+      const haveReport = saved
+        && reportBox.dataset.ready === String(project.project)
+        && Boolean(reportBox.dataset.sections);
       const busy = reportGenerate.dataset.busy === "1";
-      reportGenerate.hidden = ready;
-      reportGenerate.disabled = !saved || busy;
-      if (!busy) reportGenerate.textContent = "Generate scouting report";
-      reportLink.hidden = !ready;
-      reportCsv.hidden = !ready;
-      reportLink.href = `/api/projects/${project.project}/report.pdf`;
-      reportCsv.href = `/api/projects/${project.project}/report.csv`;
-      const count = Number(reportBox.dataset.plays) || 0;
-      const read = count === 1 ? "Read 1 play." : `Read ${count} plays.`;
-      reportNote.textContent = ready
-        ? `${read} Download the PDF or the CSV.`
-        : labeled
-          ? "Your team is selected. Generate the scouting report from each play."
-          : "Select your team, then generate the scouting report.";
+      const canResume = reportBox.dataset.resume === "1";
+      reportGenerate.hidden = false;
+      reportGenerate.disabled = !saved || busy || picked.length === 0;
+      if (!busy) {
+        reportGenerate.textContent = canResume
+          ? "Continue reading"
+          : haveReport
+            ? "Generate again"
+            : "Generate scouting report";
+      }
+      const live = reportBox.dataset.live === "1";
+      const savedSections = reportBox.dataset.sections || "";
+      const query = savedSections ? `?sections=${encodeURIComponent(savedSections)}` : "";
+      reportLink.href = `/api/projects/${project.project}/report.pdf${query}`;
+      reportCsv.href = `/api/projects/${project.project}/report.csv${query}`;
+      if (
+        studio.dataset.stage === "report"
+        && labeled
+        && saved
+        && !busy
+        && !live
+        && reportBox.dataset.synced !== String(project.project)
+      ) {
+        resumeReportProgress(project.project);
+      }
+      if (busy || (live && !haveReport)) {
+        reportLive.hidden = false;
+        reportView.hidden = true;
+        reportDownloads.hidden = true;
+        return;
+      }
+      reportLive.hidden = true;
+      reportView.hidden = !haveReport;
+      reportDownloads.hidden = !haveReport;
+      reportNote.textContent = haveReport
+        ? "The report is below. Generate again, or download it."
+        : canResume
+          ? "Reading stopped partway. Continue to finish the leftover plays."
+          : !labeled
+            ? "Select your team, then choose what the report should include."
+            : picked.length
+              ? "Generate the scouting report. You can leave and come back while it reads."
+              : "Choose at least one part of the report.";
+    }
+
+    async function resumeReportProgress(projectId) {
+      if (reportBox.dataset.checking === "1" || reportGenerate.dataset.busy === "1") return;
+      if (reportOnPage()) return;
+      reportBox.dataset.checking = "1";
+      try {
+        const sections = reportSelection();
+        const saved = reportBox.dataset.sections
+          ? reportBox.dataset.sections.split(",").filter(Boolean)
+          : sections;
+        const query = saved.length ? `?sections=${encodeURIComponent(saved.join(","))}` : "";
+        const response = await fetch(`/api/projects/${projectId}/report/analysis${query}`);
+        if (!response.ok) return;
+        const body = await response.json();
+        if (Array.isArray(body.sections) && body.sections.length && !reportBox.dataset.sections) {
+          reportBox.dataset.sections = body.sections.join(",");
+          for (const input of reportOptions.querySelectorAll("input")) {
+            input.checked = body.sections.includes(input.value);
+          }
+        }
+        const analysis = body.analysis || [];
+        if (body.running) {
+          beginReportLive(projectId, saved.length ? saved : sections, false);
+          paintAnalysis(body);
+          watchReportFinish(projectId, saved.length ? saved : sections);
+          return;
+        }
+        if (body.can_resume) {
+          reportBox.dataset.resume = "1";
+          reportLive.hidden = false;
+          reportView.hidden = true;
+          reportDownloads.hidden = true;
+          paintAnalysis({ ...body, running: false });
+          reportNote.textContent = "Reading stopped partway. Continue to finish the leftover plays.";
+          reportGenerate.textContent = "Continue reading";
+          return;
+        }
+        delete reportBox.dataset.resume;
+        if (analysis.length && body.done > 0 && body.done >= body.total && !reportOnPage()) {
+          await loadFinishedReport(projectId, saved.length ? saved : sections);
+        }
+      } catch {
+        /* keep the idle report screen */
+      } finally {
+        reportBox.dataset.synced = String(projectId);
+        delete reportBox.dataset.checking;
+      }
+    }
+
+    function beginReportLive(projectId, sections, clearTable) {
+      reportGenerate.dataset.busy = "1";
+      reportGenerate.disabled = true;
+      reportGenerate.textContent = "Reading each play…";
+      reportBox.dataset.live = "1";
+      delete reportBox.dataset.resume;
+      reportBox.dataset.sections = sections.join(",");
+      reportLive.hidden = false;
+      reportView.hidden = true;
+      reportDownloads.hidden = true;
+      if (clearTable) {
+        reportNote.textContent = "Reading the first play.";
+        reportLiveNote.textContent = "Starting the scouting analysis.";
+        reportLiveTendency.replaceChildren();
+        reportAnalysisTable.querySelector("tbody").replaceChildren();
+      }
+      reportAnalysisTable.dataset.formation = sections.includes("formations") ? "1" : "0";
+      startReportPoll(projectId, sections);
     }
 
     async function enableReportDownload() {
@@ -4899,41 +6096,360 @@
       if (!projectId || reportBox.dataset.labeled !== "1" || reportGenerate.dataset.busy === "1") {
         return;
       }
-      reportGenerate.dataset.busy = "1";
-      reportGenerate.disabled = true;
-      reportGenerate.textContent = "Reading each play…";
-      reportNote.textContent = "Reading the data on each play.";
+      const sections = reportSelection();
+      if (!sections.length) return;
+      const restart = reportBox.dataset.resume !== "1";
+      beginReportLive(projectId, sections, restart);
       try {
-        const response = await fetch(`/api/projects/${projectId}/report`, { method: "POST" });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
+        const response = await fetch(`/api/projects/${projectId}/report/live`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sections, restart }),
+        });
+        if (response.status === 409) {
+          watchReportFinish(projectId, sections);
+          return;
+        }
+        if (!response.ok || !response.body) {
+          const payload = await response.json().catch(() => ({}));
           throw new Error(
             typeof payload.detail === "string" ? payload.detail : "Could not read those plays.",
           );
         }
-        reportBox.dataset.project = String(projectId);
-        reportBox.dataset.ready = String(projectId);
-        reportBox.dataset.plays = String(payload.plays || 0);
-        paintReport({ status: "ready", project: projectId, plays: [{}] });
-        if (chartProgress.hidden) return;
-        const reportStep = chartProgress.querySelector('[data-step="report"]');
-        markChartStep(reportStep, "done");
-        reportStep.dataset.complete = "1";
-        reportStep.querySelector(".step-state").textContent = "Done";
-        chartFill.style.width = "100%";
-        chartTrack.setAttribute("aria-valuenow", "100");
-        chartNote.textContent = "Each play was read. Download the scouting report.";
-        chartTrack.setAttribute("aria-valuetext", "Each play was read. Download the scouting report.");
+        try {
+          const payload = await readReportStream(response.body);
+          await finishReport(projectId, sections, payload);
+          return;
+        } catch {
+          await watchReportFinish(projectId, sections);
+        }
       } catch (error) {
         reportNote.textContent = error.message || "Could not read those plays.";
-      } finally {
+        stopReportPoll();
+        delete reportBox.dataset.live;
         delete reportGenerate.dataset.busy;
-        if (reportBox.dataset.ready !== String(projectId)) {
-          reportGenerate.disabled = reportBox.dataset.labeled !== "1";
-          reportGenerate.textContent = "Generate scouting report";
-        }
+        paintReport({
+          status: "ready",
+          project: projectId,
+          plays: [{}],
+          teams: reportBox.dataset.side ? { mine: reportBox.dataset.side } : null,
+        });
       }
     }
+
+    async function watchReportFinish(projectId, sections) {
+      const query = sections.length ? `?sections=${encodeURIComponent(sections.join(","))}` : "";
+      for (let attempt = 0; attempt < 1800; attempt += 1) {
+        if (results.dataset.project !== String(projectId)) return;
+        if (reportBox.dataset.live !== "1") return;
+        try {
+          const response = await fetch(`/api/projects/${projectId}/report/analysis${query}`);
+          if (response.ok) {
+            const body = await response.json();
+            paintAnalysis(body);
+            const unfinished = (body.analysis || []).some(
+              (row) => row.status === "pending" || row.status === "reading",
+            );
+            if (!body.running && !unfinished) {
+              await loadFinishedReport(projectId, sections);
+              return;
+            }
+            if (!body.running && unfinished) {
+              stopReportPoll();
+              delete reportBox.dataset.live;
+              delete reportGenerate.dataset.busy;
+              reportBox.dataset.resume = "1";
+              paintReport({
+                status: "ready",
+                project: projectId,
+                plays: [{}],
+                teams: reportBox.dataset.side ? { mine: reportBox.dataset.side } : null,
+              });
+              return;
+            }
+          }
+        } catch {
+          /* keep waiting */
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+      }
+      reportNote.textContent = "Still reading. Come back to this page for progress.";
+    }
+
+    async function loadFinishedReport(projectId, sections) {
+      const query = sections.length ? `?sections=${encodeURIComponent(sections.join(","))}` : "";
+      const response = await fetch(`/api/projects/${projectId}/report${query}`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof payload.detail === "string" ? payload.detail : "Could not open that report.",
+        );
+      }
+      await finishReport(projectId, sections, await response.json());
+    }
+
+    async function finishReport(projectId, sections, payload) {
+      stopReportPoll();
+      delete reportBox.dataset.live;
+      delete reportBox.dataset.resume;
+      delete reportGenerate.dataset.busy;
+      reportBox.dataset.project = String(projectId);
+      reportBox.dataset.ready = String(projectId);
+      reportBox.dataset.sections = sections.join(",");
+      reportBox.dataset.plays = String(payload.plays || 0);
+      reportBox.dataset.tendencies = payload.tendencies || "";
+      reportLive.hidden = true;
+      renderReport(payload.blocks || []);
+      reportView.hidden = false;
+      reportDownloads.hidden = false;
+      reportNote.textContent = "The report is below. Generate again, or download it.";
+      const fresh = await fetch(`/api/projects/${projectId}`);
+      if (fresh.ok) showReview(await fresh.json());
+      else {
+        paintReport({
+          status: "ready",
+          project: projectId,
+          plays: [{}],
+          teams: reportBox.dataset.side ? { mine: reportBox.dataset.side } : null,
+        });
+      }
+      if (chartProgress.hidden) return;
+      const reportStep = chartProgress.querySelector('[data-step="report"]');
+      markChartStep(reportStep, "done");
+      reportStep.dataset.complete = "1";
+      reportStep.querySelector(".step-state").textContent = "Done";
+      chartFill.style.width = "100%";
+      chartTrack.setAttribute("aria-valuenow", "100");
+      const done = "The scouting report is on this page. Generate again, or download it.";
+      chartNote.textContent = done;
+      chartTrack.setAttribute("aria-valuetext", done);
+    }
+
+    function startReportPoll(projectId, sections) {
+      stopReportPoll();
+      const query = sections.length ? `?sections=${encodeURIComponent(sections.join(","))}` : "";
+      const tick = async () => {
+        if (reportBox.dataset.live !== "1") return;
+        try {
+          const response = await fetch(`/api/projects/${projectId}/report/analysis${query}`);
+          if (!response.ok) return;
+          paintAnalysis(await response.json());
+        } catch {
+          /* keep reading */
+        }
+      };
+      tick();
+      reportPoll = window.setInterval(tick, 400);
+    }
+
+    function stopReportPoll() {
+      if (reportPoll) window.clearInterval(reportPoll);
+      reportPoll = 0;
+    }
+
+    function paintAnalysis(payload) {
+      if (reportBox.dataset.live !== "1" && reportBox.dataset.resume !== "1") return;
+      const snapshot = payload.snapshot || payload;
+      const analysis = payload.analysis || snapshot.analysis || [];
+      reportLive.hidden = false;
+      reportView.hidden = true;
+      if (snapshot.tendency) paintLiveTendency(snapshot);
+      paintAnalysisTable(analysis, Boolean(snapshot.formation));
+      const done = Number(payload.done != null ? payload.done : snapshot.done || 0);
+      const total = Number(
+        payload.total != null ? payload.total : snapshot.total || analysis.length || 0,
+      );
+      const workers = Number(
+        payload.workers != null ? payload.workers : snapshot.workers || 0,
+      );
+      const reading = analysis.filter((row) => row.status === "reading").length;
+      const pace = workers > 1 ? ` ${workers} workers.` : "";
+      const line = total
+        ? reading
+          ? `Reading ${reading} play${reading === 1 ? "" : "s"}. ${done} of ${total} done.${pace}`
+          : `Read ${done} of ${total} plays.${pace}`
+        : "Reading the plays.";
+      reportLiveNote.textContent = line;
+      if (reportBox.dataset.live === "1") reportNote.textContent = line;
+    }
+
+    function reportOnPage() {
+      return reportBox.dataset.ready === String(results.dataset.project || "")
+        && Boolean(reportBox.dataset.sections);
+    }
+
+    function reportSelection() {
+      return [...reportOptions.querySelectorAll("input:checked")].map((input) => input.value);
+    }
+
+    function reportSectionName(section) {
+      return {
+        calls: "run and pass",
+        special: "special teams",
+        tendencies: "the play tendency table",
+        plays: "each play",
+        formations: "offensive formations",
+      }[section] || section;
+    }
+
+    async function readReportStream(body) {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finished = null;
+      while (true) {
+        const step = await reader.read();
+        buffer += decoder.decode(step.value || new Uint8Array(), { stream: !step.done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const payload = readReportLine(line);
+          if (!payload) continue;
+          if (payload.ready) finished = payload;
+          else renderLiveReport(payload);
+        }
+        if (step.done) break;
+      }
+      const tail = readReportLine(buffer);
+      if (tail) {
+        if (tail.ready) finished = tail;
+        else renderLiveReport(tail);
+      }
+      if (!finished) throw new Error("Could not read those plays.");
+      return finished;
+    }
+
+    function readReportLine(line) {
+      const text = (line || "").trim();
+      if (!text) return null;
+      return JSON.parse(text);
+    }
+
+    function renderLiveReport(event) {
+      if (reportBox.dataset.live !== "1") return;
+      paintAnalysis(event);
+    }
+
+    function paintLiveTendency(event) {
+      const counts = event.counts || {};
+      const run = Number(counts.run || 0);
+      const pass = Number(counts.pass || 0);
+      const offense = Number(counts.offense || 0);
+      const charted = run + pass;
+      const share = (count) => (charted ? `${Math.round((100 * count) / charted)}%` : "0%");
+      const tendency = [
+        "Call\tPlays\tShare",
+        `Run\t${run}\t${share(run)}`,
+        `Pass\t${pass}\t${share(pass)}`,
+        `Offense\t${offense}\t`,
+      ].join("\n");
+      reportLiveTendency.replaceChildren();
+      const lead = document.createElement("p");
+      lead.textContent = event.label || "";
+      reportLiveTendency.append(lead, reportTable(tendency));
+    }
+
+    function paintAnalysisTable(rows, showFormation) {
+      reportAnalysisTable.dataset.formation = showFormation ? "1" : "0";
+      const body = reportAnalysisTable.querySelector("tbody");
+      body.replaceChildren();
+      for (const row of rows || []) {
+        const line = document.createElement("tr");
+        const status = row.status || "";
+        const pending = status === "pending" || status === "reading";
+        appendLiveCell(line, String(row.play || ""), false);
+        appendLiveCell(line, sideLabel(row.side), pending && !row.side);
+        appendLiveCell(line, callLabel(row.call), pending && !row.call);
+        appendLiveCell(line, row.formation || "", pending && showFormation && !row.formation);
+        appendLiveCell(line, statusLabel(status), status === "reading");
+        body.append(line);
+      }
+    }
+
+    function sideLabel(side) {
+      if (reportBox.dataset.side === "left" || reportBox.dataset.side === "right") {
+        if (side === "offense") return "Defense";
+        if (side === "defense") return "Offense";
+      }
+      return {
+        offense: "Offense",
+        defense: "Defense",
+        "special teams": "Special teams",
+        "Opponent offense": "Offense",
+        "Opponent defense": "Defense",
+      }[side] || side || "";
+    }
+
+    function callLabel(call) {
+      return {
+        run: "Run",
+        pass: "Pass",
+        kneel: "Kneel",
+        spike: "Spike",
+        two_point: "Two-point",
+        kickoff: "Kickoff",
+        kick_return: "Kick return",
+        punt: "Punt",
+        punt_return: "Punt return",
+        field_goal: "Field goal",
+        extra_point: "Extra point",
+      }[call] || call || "";
+    }
+
+    function statusLabel(status) {
+      return {
+        pending: "Waiting",
+        reading: "Reading",
+        ready: "Ready",
+        missed: "Missed",
+      }[status] || status || "";
+    }
+
+    function appendLiveCell(row, value, pending) {
+      const cell = document.createElement("td");
+      cell.textContent = pending ? (value || "Reading") : value;
+      if (pending) cell.className = "pending";
+      row.append(cell);
+    }
+
+    function renderReport(blocks) {
+      reportView.replaceChildren();
+      for (const block of blocks) {
+        if (block.kind === "table") {
+          reportView.append(reportTable(block.text || ""));
+          continue;
+        }
+        const node = document.createElement(block.kind === "title" || block.kind === "heading" ? "h3" : "p");
+        if (block.kind === "row") node.className = "report-row";
+        node.textContent = block.text || "";
+        reportView.append(node);
+      }
+    }
+
+    function reportTable(text) {
+      const table = document.createElement("table");
+      const rows = text.split("\n").filter(Boolean);
+      rows.forEach((line, index) => {
+        const row = document.createElement("tr");
+        for (const cell of line.split("\t")) {
+          const node = document.createElement(index === 0 ? "th" : "td");
+          node.textContent = cell;
+          row.append(node);
+        }
+        table.append(row);
+      });
+      return table;
+    }
+
+    reportOptions.addEventListener("change", () => {
+      if (!results.dataset.project) return;
+      paintReport({
+        status: "ready",
+        project: results.dataset.project,
+        plays: [{}],
+        teams: reportBox.dataset.side ? { mine: reportBox.dataset.side } : null,
+      });
+    });
 
     function refreshReport() {
       if (review.hidden || !results.dataset.project) return;
