@@ -661,7 +661,6 @@ def create_app(
         saved = page[0]
         if saved is None:
             raise HTTPException(status_code=404, detail="That analysis is no longer available.")
-        refreshing = _schedule_portrait_refresh(catalog, saved, draw_lineup, draw_portrait)
         payload = _project_payload(
             saved,
             running=_running(running, running_lock, project_id),
@@ -673,9 +672,6 @@ def create_app(
             still=grab,
             make_poster=True,
         )
-        teams = payload.get("teams")
-        if refreshing and isinstance(teams, dict):
-            teams["refreshing"] = True
         return payload
 
     @app.post("/api/projects/{project_id}/teams/stills")
@@ -739,7 +735,9 @@ def create_app(
                     "then switch the team being scouted."
                 ),
             )
-        if body.redraw or not _players_saved(catalog, project_id):
+        # A missing photo used to rescan the whole film on every save, so naming
+        # a team or tapping who you scout restarted the player search from scratch.
+        if body.redraw:
             _store_portraits(catalog, project_id, named)
         try:
             catalog.set_film_teams(project_id, named)
@@ -773,7 +771,7 @@ def create_app(
 
         saved, teams, plays = _report_film(catalog, project_id)
         chosen = _report_sections(sections)
-        return _report_payload(saved, teams, plays, chosen)
+        return _report_payload(saved, teams, plays, chosen, catalog)
 
     @app.post("/api/projects/{project_id}/report")
     def generate_scouting_report(
@@ -806,7 +804,7 @@ def create_app(
         finally:
             _release(running, running_lock, project_id)
         saved = _require_project(catalog, project_id)
-        return _report_payload(saved, teams, _report_plays(saved), chosen)
+        return _report_payload(saved, teams, _report_plays(saved), chosen, catalog)
 
     @app.post("/api/projects/{project_id}/report/live")
     def live_scouting_report(
@@ -919,7 +917,9 @@ def create_app(
     def scouting_report(project_id: int, sections: str = "") -> Response:
         saved, teams, plays = _report_film(catalog, project_id)
         chosen = _report_sections(sections)
-        pdf = scouting_pdf(saved.name, teams, plays, chosen)
+        pdf = scouting_pdf(
+            saved.name, teams, plays, chosen, _lineup_layouts(catalog, saved.project, plays)
+        )
         return Response(
             content=pdf,
             media_type="application/pdf",
@@ -930,7 +930,9 @@ def create_app(
     def scouting_sheet(project_id: int, sections: str = "") -> Response:
         saved, teams, plays = _report_film(catalog, project_id)
         chosen = _report_sections(sections)
-        sheet = scouting_csv(saved.name, teams, plays, chosen)
+        sheet = scouting_csv(
+            saved.name, teams, plays, chosen, _lineup_layouts(catalog, saved.project, plays)
+        )
         return Response(
             content=sheet,
             media_type="text/csv; charset=utf-8",
@@ -2973,7 +2975,9 @@ def _live_lines(
     if not todo:
         with contextlib.suppress(CatalogError):
             catalog.record_activity(project_id, "ready", running=False)
-        yield json.dumps(_report_payload(current, teams, _report_plays(current), chosen)) + "\n"
+        yield json.dumps(
+            _report_payload(current, teams, _report_plays(current), chosen, catalog)
+        ) + "\n"
         return
 
     mine, other = _team_uniforms(teams)
@@ -3046,7 +3050,9 @@ def _live_lines(
         with contextlib.suppress(CatalogError):
             catalog.record_activity(project_id, "ready", running=False)
         current = _require_project(catalog, project_id)
-        yield json.dumps(_report_payload(current, teams, _report_plays(current), chosen)) + "\n"
+        yield json.dumps(
+            _report_payload(current, teams, _report_plays(current), chosen, catalog)
+        ) + "\n"
     except Exception:
         with contextlib.suppress(CatalogError):
             catalog.record_activity(project_id, "stopped", running=False)
@@ -3110,12 +3116,12 @@ def _follow_report(
         unfinished = any(row.status in {"pending", "reading"} for row in rows)
         if not live and not unfinished:
             yield json.dumps(
-                _report_payload(current, teams, _report_plays(current), chosen)
+                _report_payload(current, teams, _report_plays(current), chosen, catalog)
             ) + "\n"
             return
         if not live:
             yield json.dumps(
-                _report_payload(current, teams, _report_plays(current), chosen)
+                _report_payload(current, teams, _report_plays(current), chosen, catalog)
             ) + "\n"
             return
         time.sleep(0.1)
@@ -3310,15 +3316,35 @@ def _play_by_number(project: ProjectDetail, play_number: int) -> PlayRecord | No
     return None
 
 
+def _lineup_layouts(
+    catalog: Catalog, project_id: int, plays: Sequence[PlayRecord]
+) -> dict[int, dict[str, object]]:
+    """Saved XY layouts for scrimmage snaps. Special teams are left out."""
+
+    found: dict[int, dict[str, object]] = {}
+    for play in plays:
+        if play.discarded or play.family == "special_teams":
+            continue
+        try:
+            layout = catalog.play_layout(project_id, play.play_number)
+        except CatalogError:
+            continue
+        if isinstance(layout, dict):
+            found[play.play_number] = layout
+    return found
+
+
 def _report_payload(
     saved: ProjectDetail,
     teams: FilmTeams,
     plays: list[PlayRecord],
     chosen: frozenset[str] | None,
+    catalog: Catalog | None = None,
 ) -> dict[str, object]:
     sections = report_sections(chosen)
     reads = play_reads(plays)
-    blocks = scouting_blocks(saved.name, teams, plays, sections)
+    layouts = None if catalog is None else _lineup_layouts(catalog, saved.project, plays)
+    blocks = scouting_blocks(saved.name, teams, plays, sections, layouts)
     tendencies = " ".join(tendency_lines(teams, plays)) if "tendencies" in sections else ""
     return {
         "project": saved.project,
@@ -3613,12 +3639,6 @@ def _players_missing(catalog: Catalog, project_id: int) -> bool:
     ) is None
 
 
-def _players_saved(catalog: Catalog, project_id: int) -> bool:
-    return _still_bytes(catalog, project_id, "left-player") is not None and _still_bytes(
-        catalog, project_id, "right-player"
-    ) is not None
-
-
 def _load_project_page(
     catalog: Catalog, project_id: int
 ) -> tuple[ProjectDetail | None, tuple[ActivityStep, ...], FilmTeams | None, list[ReadNote]]:
@@ -3750,6 +3770,10 @@ def _start_team_build(
     with _team_build_lock:
         current = _team_builds.get(project_id)
         if not wait and current is not None and current.get("running"):
+            return
+        # Keep the cards from the pass that just finished. Another search
+        # starts only when the page asks again (a new photo).
+        if not wait and not force and current is not None:
             return
     attempt = _next_team_attempt(project_id)
     play_count = len(project.plays)

@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from fpdf import FPDF
 
 from film_analysis.chart.formation import formation_label
+from film_analysis.chart.formation_features import (
+    NEEDS_LOOK,
+    FormationFeatures,
+    features_from_dict,
+    lineup_label,
+)
 from film_analysis.storage.catalog import FilmTeams, PlayRecord
 
 _CALLS = {
@@ -121,6 +127,7 @@ def scouting_blocks(
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
     sections: Sequence[str] | None = None,
+    layouts: dict[int, dict[str, object]] | None = None,
 ) -> list[tuple[str, str]]:
     """The report as titled sections and lines, before it becomes a PDF."""
 
@@ -173,11 +180,7 @@ def scouting_blocks(
             blocks.extend(_call_play_index(special))
             blocks.extend(_play_lines(special, teams))
     if "formations" in chosen:
-        formed_plays = defense if owned else offense
-        formed_name = opponent if owned else "Offense"
-        blocks.append(("heading", "Formations"))
-        blocks.append(("body", _formation_copy(formed_plays, formed_name)))
-        for breakdown in team_breakdowns(teams, plays):
+        for breakdown in team_breakdowns(teams, plays, layouts):
             blocks.extend(_breakdown_blocks(breakdown))
     return blocks
 
@@ -187,6 +190,7 @@ def scouting_pdf(
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
     sections: Sequence[str] | None = None,
+    layouts: dict[int, dict[str, object]] | None = None,
 ) -> bytes:
     """Render the scouting report as a PDF."""
 
@@ -194,7 +198,7 @@ def scouting_pdf(
     pdf.set_compression(False)
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    for kind, text in scouting_blocks(film_name, teams, plays, sections):
+    for kind, text in scouting_blocks(film_name, teams, plays, sections, layouts):
         safe = text.encode("latin-1", "replace").decode("latin-1")
         if kind == "title":
             pdf.set_font("Helvetica", "B", 18)
@@ -211,6 +215,9 @@ def scouting_pdf(
         elif kind == "clips":
             pdf.set_font("Helvetica", size=11)
             pdf.multi_cell(0, 6, _clip_line(safe), new_x="LMARGIN", new_y="NEXT")
+        elif kind == "plot":
+            pdf.set_font("Helvetica", size=11)
+            pdf.multi_cell(0, 6, f"Lineup plot: Play {safe}", new_x="LMARGIN", new_y="NEXT")
         else:
             pdf.set_font("Helvetica", size=11)
             pdf.multi_cell(0, 6, safe, new_x="LMARGIN", new_y="NEXT")
@@ -222,6 +229,7 @@ def scouting_csv(
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
     sections: Sequence[str] | None = None,
+    layouts: dict[int, dict[str, object]] | None = None,
 ) -> str:
     """One row per play, for a spreadsheet."""
 
@@ -259,7 +267,7 @@ def scouting_csv(
             _shown_side(play.side, teams),
         ]
         if show_formation:
-            row.append(play.formation)
+            row.append("" if play.side == "special teams" else _csv_formation(play, layouts))
         writer.writerow(row)
     return buffer.getvalue()
 
@@ -590,45 +598,27 @@ def _play_lines(plays: Sequence[PlayRead], teams: FilmTeams | None = None) -> li
 def _play_line(play: PlayRead, teams: FilmTeams | None = None) -> str:
     shown = _shown_side(play.side, teams) or "Not read"
     call = f"  {play.call}" if play.call_key and play.call else ""
-    formed = f"  {play.formation}" if play.formation else ""
+    formed = f"  {play.formation}" if play.side == "offense" and play.formation else ""
     return (
         f"Play {play.number}  {_clock(play.start_seconds)}-{_clock(play.end_seconds)}"
         f"  {shown}{call}  {_seconds(play.seconds)}{formed}"
     )
 
 
-def _formation_copy(plays: Sequence[PlayRead], team: str) -> str:
-    named = [play for play in plays if play.formation]
-    if not named:
-        return f"No formation was read for {team} offense."
-    counts: dict[str, int] = {}
-    for play in named:
-        counts[play.formation] = counts.get(play.formation, 0) + 1
-    ranked = sorted(counts.items(), key=lambda item: -item[1])
-    pieces = [f"{count} {name}" for name, count in ranked]
-    return f"{team} offense: {', '.join(pieces)}."
-
-
-NOT_READ = "Formation not read"
-
-
 @dataclass(frozen=True)
 class FormationGroup:
-    """The snaps one offense ran from one formation."""
+    """Snaps where the scouted team lined up the same way."""
 
     formation: str
     plays: tuple[int, ...]
     runs: int
     passes: int
+    plot: int = 0
 
 
 @dataclass(frozen=True)
 class UnitBreakdown:
-    """One team on one side of the ball, grouped by the offense's formation.
-
-    On defense the formation is the one the other team's offense lined up in,
-    because the formation read names the offense's alignment.
-    """
+    """The scouted team on one side of the ball, grouped by their own lineup."""
 
     team: str
     unit: str
@@ -640,7 +630,7 @@ class UnitBreakdown:
 
     @property
     def read(self) -> int:
-        return sum(len(group.plays) for group in self.groups if group.formation != NOT_READ)
+        return sum(len(group.plays) for group in self.groups if group.formation != NEEDS_LOOK)
 
     @property
     def scope(self) -> str:
@@ -650,36 +640,37 @@ class UnitBreakdown:
 def team_breakdowns(
     teams: FilmTeams | None,
     plays: Sequence[PlayRecord],
+    layouts: dict[int, dict[str, object]] | None = None,
 ) -> list[UnitBreakdown]:
-    """Each team's offense and defense. The team you play next comes first."""
+    """The scouted team's offense and defense, grouped by how they lined up.
+
+    A stored offense tag means that team had the ball. On defense the group is
+    their own alignment, not the formation the other offense came out in.
+    """
 
     reads = play_reads(plays)
-    yours, opponent, owned = _names(teams)
-    if not owned and teams is not None:
-        yours, opponent = teams.left_name, teams.right_name
-    # A stored "offense" means the user's team (or the left team) had the ball.
-    with_ball = {
-        yours: [play for play in reads if play.side == "offense"],
-        opponent: [play for play in reads if play.side == "defense"],
-    }
-    order = (opponent, yours) if owned else (yours, opponent)
-    breakdowns: list[UnitBreakdown] = []
-    for team in order:
-        other = opponent if team == yours else yours
-        breakdowns.append(_unit_breakdown(team, "offense", other, with_ball[team]))
-        breakdowns.append(_unit_breakdown(team, "defense", other, with_ball[other]))
-    return breakdowns
+    yours, opponent, _owned = _names(teams)
+    offense = [play for play in reads if play.side == "offense"]
+    defense = [play for play in reads if play.side == "defense"]
+    return [
+        _unit_breakdown(yours, "offense", opponent, offense, layouts),
+        _unit_breakdown(yours, "defense", opponent, defense, layouts),
+    ]
 
 
 def _unit_breakdown(
-    team: str, unit: str, opponent: str, snaps: Sequence[PlayRead]
+    team: str,
+    unit: str,
+    opponent: str,
+    snaps: Sequence[PlayRead],
+    layouts: dict[int, dict[str, object]] | None = None,
 ) -> UnitBreakdown:
     grouped: dict[str, list[PlayRead]] = {}
     for play in snaps:
-        grouped.setdefault(play.formation or NOT_READ, []).append(play)
+        grouped.setdefault(_lineup_name(play, unit, layouts), []).append(play)
     ranked = sorted(
         grouped.items(),
-        key=lambda item: (item[0] == NOT_READ, -len(item[1]), item[1][0].number),
+        key=lambda item: (item[0] == NEEDS_LOOK, -len(item[1]), item[1][0].number),
     )
     groups = tuple(
         FormationGroup(
@@ -687,6 +678,7 @@ def _unit_breakdown(
             tuple(play.number for play in members),
             sum(1 for play in members if play.call_key == "run"),
             sum(1 for play in members if play.call_key == "pass"),
+            _plot_play(members, layouts),
         )
         for name, members in ranked
     )
@@ -710,10 +702,12 @@ def _breakdown_blocks(breakdown: UnitBreakdown) -> list[tuple[str, str]]:
         return blocks
     rows = ["Formation\tPlays\tShare\tRun\tPass"]
     for group in breakdown.groups:
-        share = "" if group.formation == NOT_READ else _share(len(group.plays), breakdown.read)
+        share = "" if group.formation == NEEDS_LOOK else _share(len(group.plays), breakdown.read)
         rows.append(f"{group.formation}\t{len(group.plays)}\t{share}\t{group.runs}\t{group.passes}")
     blocks.append(("grouped", "\n".join([breakdown.scope, *rows])))
     for group in breakdown.groups:
+        if group.plot:
+            blocks.append(("plot", str(group.plot)))
         name = f"{breakdown.scope} · {group.formation}"
         blocks.append(("clips", "\t".join([name, *(str(number) for number in group.plays)])))
     return blocks
@@ -740,37 +734,72 @@ def _breakdown_copy(breakdown: UnitBreakdown) -> str:
         mix = ". None are charted as a run or a pass."
     read = breakdown.read
     if not read:
-        formed = " No formation was read on these snaps yet."
+        formed = " No lineup was plotted on these snaps yet."
         return f"{lead}{mix}{formed}"
-    named = [group for group in breakdown.groups if group.formation != NOT_READ]
+    named = [group for group in breakdown.groups if group.formation != NEEDS_LOOK]
     top = named[0]
-    whose = "" if breakdown.unit == "offense" else f"{opponent} lined up "
     most = (
         f"Most used: {top.formation}, {len(top.plays)} of {read} ({_percent(len(top.plays), read)})"
     )
-    if breakdown.unit == "defense":
-        most = (
-            f"{whose}in {top.formation} most against them, {len(top.plays)} of {read} "
-            f"({_percent(len(top.plays), read)})"
-        )
-    lean = _formation_lean(top)
-    coverage = f" Formation read on {read} of {snaps} {snap_word}."
+    lean = _formation_lean(top, breakdown.unit)
+    coverage = f" Lineup read on {read} of {snaps} {snap_word}."
     if read < snaps:
-        coverage += f" {snaps - read} still need a formation."
+        coverage += f" {snaps - read} still need a look."
     return f"{lead}{mix} {most}{lean}.{coverage}"
 
 
-def _formation_lean(group: FormationGroup) -> str:
-    """Say when a formation gives the call away."""
+def _formation_lean(group: FormationGroup, unit: str) -> str:
+    """Say when a lineup gives the call away."""
 
     charted = group.runs + group.passes
     if charted < 3:
         return ""
+    verb = "the offense ran" if unit == "defense" else "run"
+    passed = "the offense passed" if unit == "defense" else "pass"
     if group.runs / charted >= 0.7:
-        return f", run {_percent(group.runs, charted)} of the time"
+        return f", {verb} {_percent(group.runs, charted)} of the time"
     if group.passes / charted >= 0.7:
-        return f", pass {_percent(group.passes, charted)} of the time"
+        return f", {passed} {_percent(group.passes, charted)} of the time"
     return ""
+
+
+def _lineup_name(
+    play: PlayRead, unit: str, layouts: dict[int, dict[str, object]] | None
+) -> str:
+    fallback = play.formation if unit == "offense" else ""
+    return lineup_label(_layout_features(play.number, layouts), unit, fallback)
+
+
+def _layout_features(
+    play_number: int, layouts: dict[int, dict[str, object]] | None
+) -> FormationFeatures | None:
+    if not layouts:
+        return None
+    raw = layouts.get(play_number)
+    if not isinstance(raw, dict):
+        return None
+    payload = raw.get("features") if isinstance(raw.get("features"), dict) else raw
+    if not isinstance(payload, dict):
+        return None
+    return features_from_dict(payload)
+
+
+def _plot_play(members: Sequence[PlayRead], layouts: dict[int, dict[str, object]] | None) -> int:
+    for play in members:
+        if _layout_features(play.number, layouts) is not None:
+            return play.number
+    return 0
+
+
+def _csv_formation(play: PlayRead, layouts: dict[int, dict[str, object]] | None) -> str:
+    """How the scouted team lined up. Special teams and unread snaps stay blank."""
+
+    if play.side not in {"offense", "defense"}:
+        return ""
+    label = _lineup_name(play, play.side, layouts)
+    if label == NEEDS_LOOK:
+        return ""
+    return label
 
 
 def _call(play: PlayRecord) -> str:

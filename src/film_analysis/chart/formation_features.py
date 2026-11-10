@@ -22,6 +22,12 @@ _TE_WIDTH = 0.28
 _WR_WIDTH = 0.38
 _DL_DEPTH = 0.12
 _LB_DEPTH = 0.28
+NEEDS_LOOK = "Needs a look"
+_BACKFIELD_NAMES = {
+    "shotgun": "Shotgun",
+    "pistol": "Pistol",
+    "under_center": "Under center",
+}
 
 
 @dataclass(frozen=True)
@@ -36,11 +42,17 @@ class FormationFeatures:
     defense_front: str
     sketch: str
     quality: str
+    defense_quality: str = "low"
 
     def bucket(self) -> str:
-        """Similarity key: same starting look within tolerance."""
+        """Offensive similarity key. Matching shapes are not identical coordinates."""
 
         return f"{self.backfield}|{self.backs}|{self.receivers}"
+
+    def defense_bucket(self) -> str:
+        """Defensive similarity key from linemen, linebackers, and deep players."""
+
+        return self.defense_front if self.defense_front not in {"", "unknown"} else ""
 
 
 @dataclass(frozen=True)
@@ -86,16 +98,10 @@ def extract_features(
     receivers, wideouts, tight_ends = _receivers(skill, qb)
     defense_front = _defense_front(defense_pts, los_y, center_x)
     high = sum(1 for player in offense if player.confidence == "high")
+    def_high = sum(1 for player in defense if player.confidence == "high")
     quality = "high" if high >= 6 else "medium" if high >= 3 else "low"
-    sketch = ", ".join(
-        part
-        for part in (
-            backfield_kind.replace("_", " "),
-            f"{backs}-back" if backs != 1 else "1-back",
-            receivers,
-        )
-        if part and part != "unknown"
-    )
+    defense_quality = "high" if def_high >= 6 else "medium" if def_high >= 3 else "low"
+    sketch = offense_title_parts(backfield_kind, backs, receivers, wideouts) or "unknown"
     return FormationFeatures(
         backfield_kind,
         backs,
@@ -103,17 +109,93 @@ def extract_features(
         wideouts,
         tight_ends,
         defense_front,
-        sketch or "unknown",
+        sketch,
         quality,
+        defense_quality,
     )
 
 
 def features_match(left: FormationFeatures, right: FormationFeatures) -> bool:
-    """True when both snaps look like the same starting formation."""
+    """True when both snaps look like the same offensive formation."""
 
-    if left.quality == "low" or right.quality == "low":
-        return False
-    return left.bucket() == right.bucket()
+    return same_lineup(left, right, "offense")
+
+
+def same_lineup(left: FormationFeatures, right: FormationFeatures, unit: str) -> bool:
+    """True when the scouted side's shape matches, even if the XY points differ."""
+
+    key = lineup_bucket(left, unit)
+    return bool(key) and key == lineup_bucket(right, unit)
+
+
+def lineup_bucket(features: FormationFeatures, unit: str) -> str:
+    """The shape key for the scouted team. Empty when the plot is too thin to group."""
+
+    if unit == "defense":
+        if features.defense_quality == "low":
+            return ""
+        return features.defense_bucket()
+    if features.quality == "low" or features.bucket() == "unknown|0|unknown":
+        return ""
+    return features.bucket()
+
+
+def lineup_label(features: FormationFeatures | None, unit: str, fallback: str = "") -> str:
+    """Plain name of how the scouted team lined up.
+
+    Offense falls back to a stored formation name when no plot was kept.
+    Defense never uses that name — it is the other team's offensive formation.
+    """
+
+    if features is not None:
+        if unit == "defense":
+            title = defense_title(features) if features.defense_quality != "low" else ""
+        else:
+            title = offense_title(features) if features.quality != "low" else ""
+        if title:
+            return title
+    if unit != "defense" and fallback:
+        return fallback
+    return NEEDS_LOOK
+
+
+def offense_title(features: FormationFeatures) -> str:
+    """Shotgun, 3 in the backfield, 2 wide — or a heavy set."""
+
+    return offense_title_parts(
+        features.backfield, features.backs, features.receivers, features.wideouts
+    )
+
+
+def offense_title_parts(backfield: str, backs: int, receivers: str, wideouts: int) -> str:
+    kind = _BACKFIELD_NAMES.get(backfield, "")
+    if receivers == "heavy":
+        return f"{kind}, heavy" if kind else "Heavy"
+    if not kind:
+        return ""
+    men = backs if backfield == "under_center" else backs + 1
+    parts = [kind, f"{men} in the backfield"]
+    if wideouts:
+        parts.append(f"{wideouts} wide")
+    return ", ".join(parts)
+
+
+def defense_title(features: FormationFeatures) -> str:
+    """4 linemen, 3 linebackers, 4 deep."""
+
+    parts = (features.defense_front or "").split("-")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return ""
+    linemen, backers, deep = (int(part) for part in parts)
+    return (
+        f"{_people(linemen, 'lineman', 'linemen')}, "
+        f"{_people(backers, 'linebacker', 'linebackers')}, "
+        f"{deep} deep"
+    )
+
+
+def _people(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
 
 
 def group_by_features(
@@ -127,10 +209,7 @@ def group_by_features(
     buckets: dict[str, list[tuple[int, FormationFeatures, str, str]]] = {}
     for row in rows:
         features = row[1]
-        if features.quality == "low" or features.bucket() == "unknown|0|unknown":
-            key = f"low:{row[0]}"
-        else:
-            key = features.bucket()
+        key = lineup_bucket(features, "offense") or f"low:{row[0]}"
         buckets.setdefault(key, []).append(row)
     groups: list[FormationGroupView] = []
     for key, members in buckets.items():
@@ -161,6 +240,14 @@ def group_by_features(
 def features_from_dict(value: dict[str, object] | None) -> FormationFeatures | None:
     if not value:
         return None
+    front = str(value.get("defense_front") or "unknown")
+    stored_defense = value.get("defense_quality")
+    if stored_defense is None and len(front.split("-")) == 3 and all(
+        part.isdigit() for part in front.split("-")
+    ):
+        defense_quality = "medium"
+    else:
+        defense_quality = str(stored_defense or "low")
     try:
         return FormationFeatures(
             str(value.get("backfield") or "unknown"),
@@ -168,9 +255,10 @@ def features_from_dict(value: dict[str, object] | None) -> FormationFeatures | N
             str(value.get("receivers") or "unknown"),
             int(value.get("wideouts") or 0),
             int(value.get("tight_ends") or 0),
-            str(value.get("defense_front") or "unknown"),
+            front,
             str(value.get("sketch") or "unknown"),
             str(value.get("quality") or "low"),
+            defense_quality,
         )
     except (TypeError, ValueError):
         return None

@@ -474,17 +474,16 @@ def test_formations_are_read_for_both_offenses(tmp_path: Path) -> None:
     assert sorted(seen) == [("dark blue", "pass"), ("white", "run")]
     blocks = created.json()["blocks"]
     text = "\n".join(block["text"] for block in blocks)
-    assert "Formations" in text
-    assert "Away offense: 1 Shotgun." in text
     assert "experimental" not in text.lower()
     headings = [block["text"] for block in blocks if block["kind"] == "heading"]
-    assert headings[-4:] == ["Away offense", "Away defense", "Home offense", "Home defense"]
-    assert "Away had the ball on 1 snap: 0 runs (0%) and 1 pass (100%)." in text
+    assert headings == ["Home offense", "Home defense"]
+    assert "Home had the ball on 1 snap: 1 run (100%) and 0 passes (0%)." in text
     assert "Home defended 1 snap and faced 0 runs (0%) and 1 pass (100%) from Away." in text
     grids = [block["text"] for block in blocks if block["kind"] == "clips"]
-    assert "Away offense · Shotgun\t2" in grids
-    assert "Home defense · Shotgun\t2" in grids
     assert "Home offense · Shotgun\t1" in grids
+    assert "Home defense · Needs a look\t2" in grids
+    assert "Away offense · Shotgun\t2" not in grids
+    assert "Home defense · Shotgun\t2" not in grids
     plays = store.get_project(1).plays
     assert plays[0].formation == "shotgun"
     assert plays[0].unit == "offense"
@@ -716,8 +715,8 @@ def _ready_film(tmp_path: Path) -> MemoryCatalog:
     return store
 
 
-def test_each_team_groups_its_snaps_by_formation() -> None:
-    from film_analysis.scout.report import NOT_READ, scouting_pdf, team_breakdowns
+def test_the_scouted_team_groups_its_own_lineups() -> None:
+    from film_analysis.scout.report import scouting_csv, scouting_pdf, team_breakdowns
 
     def snap(number: int, unit: str, call: str, formation: str | None) -> PlayRecord:
         start = number * 10.0
@@ -731,41 +730,92 @@ def test_each_team_groups_its_snaps_by_formation() -> None:
         snap(5, "defense", "pass", None),
         snap(6, "offense", "pass", "shotgun"),
         snap(7, "offense", "run", None),
-        PlayRecord(8, 80.0, 85.0, "special_teams", "punt"),
+        PlayRecord(8, 80.0, 85.0, "special_teams", "punt", formation="shotgun"),
     ]
     teams = FilmTeams("Pike County", "Lamar County", "left")
+    layouts = {
+        1: _front("4-3-4"),
+        2: _front("4-3-4"),
+        3: _front("4-3-4"),
+        4: _front("3-3-5"),
+        6: _shotgun_two_wide(),
+    }
 
-    units = team_breakdowns(teams, plays)
+    units = team_breakdowns(teams, plays, layouts)
 
     assert [(unit.team, unit.unit) for unit in units] == [
-        ("Lamar County", "offense"),
-        ("Lamar County", "defense"),
         ("Pike County", "offense"),
         ("Pike County", "defense"),
     ]
-    lamar = units[0]
-    assert lamar.snaps == 5
-    assert lamar.read == 4
-    assert [(group.formation, group.plays) for group in lamar.groups] == [
-        ("I-formation", (1, 2, 3)),
-        ("Shotgun", (4,)),
-        (NOT_READ, (5,)),
+    assert [(group.formation, group.plays) for group in units[0].groups] == [
+        ("Shotgun, 3 in the backfield, 2 wide", (6,)),
+        ("Needs a look", (7,)),
     ]
-    assert units[1].groups == units[2].groups
-    blocks = scouting_blocks("Week 6", teams, plays, ["formations"])
+    assert units[0].groups[0].plot == 6
+    pike_defense = units[1]
+    assert pike_defense.snaps == 5
+    assert [(group.formation, group.plays) for group in pike_defense.groups] == [
+        ("4 linemen, 3 linebackers, 4 deep", (1, 2, 3)),
+        ("3 linemen, 3 linebackers, 5 deep", (4,)),
+        ("Needs a look", (5,)),
+    ]
+    assert "I-formation" not in {group.formation for group in pike_defense.groups}
+    blocks = scouting_blocks("Week 6", teams, plays, ["formations", "special"], layouts)
     text = "\n".join(text for _kind, text in blocks)
-    assert (
-        "Lamar County had the ball on 5 snaps: 3 runs (60%) and 2 passes (40%). "
-        "Most used: I-formation, 3 of 4 (75%), run 100% of the time." in text
-    )
-    assert "Formation read on 4 of 5 snaps. 1 still need a formation." in text
-    table = "Lamar County offense\nFormation\tPlays\tShare\tRun\tPass\nI-formation\t3\t75%\t3\t0"
-    assert table in text
-    assert "Lamar County offense · I-formation\t1\t2\t3" in text
-    assert "Pike County defense · I-formation\t1\t2\t3" in text
-    pdf = scouting_pdf("Week 6", teams, plays, ["formations"])
+    assert [line for kind, line in blocks if kind == "heading"] == [
+        "Special teams",
+        "Pike County offense",
+        "Pike County defense",
+    ]
+    assert "Most used: 4 linemen, 3 linebackers, 4 deep, 3 of 4 (75%)" in text
+    assert "the offense ran 100% of the time" in text
+    assert "Pike County defense · I-formation" not in text
+    assert "1 punt" in text
+    punt_rows = [line for kind, line in blocks if kind == "row" and line.startswith("Play 8")]
+    assert punt_rows and "Shotgun" not in punt_rows[0]
+    kinds = [kind for kind, _text in blocks]
+    assert "plot" in kinds
+    pdf = scouting_pdf("Week 6", teams, plays, ["formations"], layouts)
     assert pdf.startswith(b"%PDF")
-    assert b"I-formation: Play 1, Play 2, Play 3" in pdf
+    assert b"4 linemen, 3 linebackers, 4 deep: Play 1, Play 2, Play 3" in pdf
+    assert b"I-formation: Play 1, Play 2, Play 3" not in pdf
+    sheet = scouting_csv("Week 6", teams, plays, ["formations", "special"], layouts)
+    rows = sheet.splitlines()
+    assert "4 linemen, 3 linebackers, 4 deep" in rows[1]
+    assert "I-formation" not in sheet
+    assert rows[-1].endswith(",")
+
+
+def _front(front: str) -> dict[str, object]:
+    return {
+        "features": {
+            "backfield": "unknown",
+            "backs": 0,
+            "receivers": "unknown",
+            "wideouts": 0,
+            "tight_ends": 0,
+            "defense_front": front,
+            "sketch": "unknown",
+            "quality": "low",
+            "defense_quality": "high",
+        }
+    }
+
+
+def _shotgun_two_wide() -> dict[str, object]:
+    return {
+        "features": {
+            "backfield": "shotgun",
+            "backs": 2,
+            "receivers": "2x2",
+            "wideouts": 2,
+            "tight_ends": 0,
+            "defense_front": "4-3-4",
+            "sketch": "Shotgun, 3 in the backfield, 2 wide",
+            "quality": "high",
+            "defense_quality": "high",
+        }
+    }
 
 
 def test_a_team_with_no_snaps_says_so() -> None:
@@ -775,5 +825,6 @@ def test_a_team_with_no_snaps_says_so() -> None:
     blocks = scouting_blocks("Week 1", FilmTeams("Home", "Away", "left"), plays, ["formations"])
     text = "\n".join(text for _kind, text in blocks)
 
-    assert "Away has no offensive snaps charted in this film." in text
     assert "Home had the ball on 1 snap: 1 run (100%) and 0 passes (0%)." in text
+    assert "Home has no defensive snaps charted in this film." in text
+    assert "Away has no offensive snaps" not in text

@@ -1158,12 +1158,14 @@
     #play-details dd { margin: 0; }
     #play-details a { color: inherit; }
     #play-details img.formation-plot,
-    #play-types img.formation-plot {
+    #play-types img.formation-plot,
+    #report-view img.formation-plot {
       display: block;
       width: min(100%, 22rem);
       height: auto;
+      margin: 0.35rem 0 0.6rem;
       border-radius: 0.35rem;
-      background: #22482c;
+      background: #161816;
     }
     #play-types .formation-controls { display: grid; gap: 0.55rem; }
     #play-types .formation-note {
@@ -6460,6 +6462,7 @@
         for (const mine of teamsSection.querySelectorAll("button.mine")) {
           mine.setAttribute("aria-pressed", "false");
         }
+        delete teamsSection.dataset.searched;
         paintMineChoice();
       }
       const teams = project.teams;
@@ -6468,6 +6471,9 @@
       selectTeamButton.hidden = false;
       selectTeamButton.disabled = building;
       selectTeamButton.textContent = building ? "Finding both teams…" : "Find both teams";
+      if (!building && pictured) {
+        teamsSection.dataset.searched = String(project.project);
+      }
       if (pictured) {
         fillTeams(project.project, teams);
         showTeamChoices(true);
@@ -6601,10 +6607,11 @@
         kicker.textContent = "";
         player.alt = `Player for ${label}`;
         reference.alt = `Reference sent for ${label}`;
-        document.querySelector(`#team-${side}-mine`).setAttribute(
-          "aria-pressed",
-          teams.mine === side ? "true" : "false",
-        );
+        const mineButton = document.querySelector(`#team-${side}-mine`);
+        const keepLocal = !teams.mine && mineButton.getAttribute("aria-pressed") === "true";
+        if (!keepLocal) {
+          mineButton.setAttribute("aria-pressed", teams.mine === side ? "true" : "false");
+        }
         paintTeamColors(side, teams[`${side}_colors`]);
       }
       paintMineChoice();
@@ -6823,8 +6830,12 @@
       }
     }
 
+    function photosSettled(projectId) {
+      return teamsSection.dataset.searched === String(projectId) || anyPlayerPhoto();
+    }
+
     async function watchTeamBuild(projectId) {
-      for (let attempt = 0; attempt < 180; attempt += 1) {
+      for (let attempt = 0; attempt < 600; attempt += 1) {
         if (results.dataset.project !== String(projectId)) return null;
         if (teamsSection.dataset.loading !== String(projectId)) return null;
         const response = await fetch(`/api/projects/${projectId}`);
@@ -6850,6 +6861,10 @@
     }
 
     async function loadLineup(projectId, again = false, side = null) {
+      if (!again && photosSettled(projectId)) {
+        showTeamChoices(true);
+        return;
+      }
       const keepCards = again && (playersReady() || teamsNamed());
       const showing = keepCards || teamsNamed() || teamCardsOpen() || (playersReady() && !again);
       teamsSection.dataset.loading = String(projectId);
@@ -6935,6 +6950,11 @@
         if (teams && teams.progress && teams.progress.error) {
           throw new Error(teams.progress.error);
         }
+        if (teams && (teams.building || (teams.progress && teams.progress.running))) {
+          teamsNote.textContent = "Still looking for a player. Name each team, then tap the one you are scouting.";
+          showTeamChoices(true);
+          return;
+        }
         fillTeams(projectId, teams);
         teamsSection.dataset.named = String(projectId);
         showTeamChoices(true);
@@ -6973,6 +6993,9 @@
       } finally {
         if (teamsSection.dataset.loading === String(projectId)) delete teamsSection.dataset.loading;
         delete teamsSection.dataset.refreshing;
+        if (results.dataset.project === String(projectId)) {
+          teamsSection.dataset.searched = String(projectId);
+        }
         selectTeamButton.disabled = false;
         selectTeamButton.textContent = "Find both teams";
         teamsRetry.disabled = false;
@@ -7762,7 +7785,7 @@
       const mine = selectedTeamSide();
       if (stage === "report" || stage === "teams") {
         if (teamsSection.dataset.refreshing === "1" || teamsSection.dataset.loading) {
-          chartNote.textContent = teamsStatus.textContent || "Finding both teams.";
+          chartNote.textContent = teamsStatus.textContent || "Finding one player from each team.";
           return;
         }
         if (reportOnPage()) {
@@ -8149,7 +8172,7 @@
       }
       const sections = reportSelection();
       if (!sections.length) return;
-      if (!playersReady()) {
+      if (!playersReady() && !photosSettled(projectId)) {
         const alreadyPicked = Boolean(selectedTeamSide());
         if (!alreadyPicked) reportBox.dataset.pendingReport = "1";
         teamsSection.dataset.asked = "1";
@@ -8658,6 +8681,17 @@
         if (block.kind === "clips") {
           const grid = clipGrid(block.text || "", projectId);
           if (grid) reportView.append(grid);
+          continue;
+        }
+        if (block.kind === "plot") {
+          const number = String(block.text || "").trim();
+          if (number && projectId) {
+            const image = document.createElement("img");
+            image.className = "formation-plot";
+            image.alt = `Lineup plot for play ${number}`;
+            image.src = endpoint(`/projects/${projectId}/plays/${number}/formation.jpg`);
+            reportView.append(image);
+          }
           continue;
         }
         const node = document.createElement(block.kind === "title" || block.kind === "heading" ? "h3" : "p");

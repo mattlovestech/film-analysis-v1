@@ -151,7 +151,11 @@ def render_formation_plot(
     *,
     focus: str = "offense",
 ) -> bytes:
-    """Draw a bird's-eye view of the snap. The focused side is louder."""
+    """Draw a static XY chart of the lineup. X is width and Y is depth.
+
+    The line of scrimmage sits at y=0.5. Offense is the larger-y side of that
+    line. The focused side — the team being scouted — is drawn larger.
+    """
 
     try:
         import cv2
@@ -159,80 +163,95 @@ def render_formation_plot(
     except ImportError:
         return b""
     width, height = 720, 480
-    field = np.zeros((height, width, 3), dtype=np.uint8)
-    field[:] = (34, 92, 48)
-    for yard in range(1, 10):
-        x = int(width * yard / 10)
-        cv2.line(field, (x, 24), (x, height - 24), (48, 120, 64), 1, cv2.LINE_AA)
-    mid = height // 2
-    cv2.line(field, (24, mid), (width - 24, mid), (240, 240, 240), 2, cv2.LINE_AA)
+    chart = np.zeros((height, width, 3), dtype=np.uint8)
+    chart[:] = (22, 24, 22)
+    left, top, right, bottom = 72, 40, width - 28, height - 52
+    axis = (170, 174, 170)
+    cv2.line(chart, (left, top), (left, bottom), axis, 1, cv2.LINE_AA)
+    cv2.line(chart, (left, bottom), (right, bottom), axis, 1, cv2.LINE_AA)
+    los = int(top + 0.5 * (bottom - top))
+    cv2.line(chart, (left, los), (right, los), (235, 235, 235), 2, cv2.LINE_AA)
     cv2.putText(
-        field,
+        chart,
         "LOS",
-        (width - 70, mid - 8),
+        (right - 52, los - 8),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.45,
         (230, 230, 230),
         1,
         cv2.LINE_AA,
     )
+    cv2.putText(
+        chart,
+        "Width",
+        ((left + right) // 2 - 28, height - 16),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        axis,
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        chart,
+        "Depth",
+        (8, (top + bottom) // 2),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        axis,
+        1,
+        cv2.LINE_AA,
+    )
     offense_color = _bgr_from_hex(offense_uniform.jersey_hex) or (240, 240, 240)
     defense_color = _bgr_from_hex(defense_uniform.jersey_hex) or (40, 40, 200)
-    # Scouted focus: primary side is large and saturated; the other is muted.
     offense_primary = focus != "defense"
+    box = (left, top, right, bottom)
     for player in defense:
         _draw_marker(
-            field,
+            chart,
             player,
             defense_color if not offense_primary else _mute(defense_color),
-            width,
-            height,
-            mid,
-            offense_side=False,
+            box,
             primary=not offense_primary,
         )
     for player in offense:
         _draw_marker(
-            field,
+            chart,
             player,
             offense_color if offense_primary else _mute(offense_color),
-            width,
-            height,
-            mid,
-            offense_side=True,
+            box,
             primary=offense_primary,
         )
     cv2.putText(
-        field,
+        chart,
         "Offense",
-        (24, height - 18),
+        (left, height - 18),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
+        0.5,
         offense_color if offense_primary else _mute(offense_color),
         1,
         cv2.LINE_AA,
     )
     cv2.putText(
-        field,
+        chart,
         "Defense",
-        (24, 28),
+        (left, 24),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
+        0.5,
         defense_color if not offense_primary else _mute(defense_color),
         1,
         cv2.LINE_AA,
     )
     cv2.putText(
-        field,
-        "Hollow = low confidence",
-        (width - 250, height - 18),
+        chart,
+        "Hollow = guessed",
+        (width - 210, height - 18),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.45,
-        (210, 210, 210),
+        (200, 200, 200),
         1,
         cv2.LINE_AA,
     )
-    ok, encoded = cv2.imencode(".jpg", field, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    ok, encoded = cv2.imencode(".jpg", chart, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     if not ok:
         return b""
     return encoded.tobytes()
@@ -366,19 +385,18 @@ def _draw_marker(
     field,
     player: PlottedPlayer,
     color: tuple[int, int, int],
-    width: int,
-    height: int,
-    mid: int,
+    box: tuple[int, int, int, int],
     *,
-    offense_side: bool,
     primary: bool = True,
 ) -> None:
     import cv2
 
-    x = int(24 + player.x * (width - 48))
+    left, top, right, bottom = box
+    x = int(left + player.x * (right - left))
     # Points are already LOS-normalized: y>0.5 offense, y<0.5 defense.
-    y = int(24 + player.y * (height - 48))
-    y = max(30, min(height - 30, y))
+    y = int(top + player.y * (bottom - top))
+    y = max(top + 8, min(bottom - 8, y))
+    x = max(left + 8, min(right - 8, x))
     radius = 12 if primary else 7
     if player.confidence == "low":
         cv2.circle(field, (x, y), radius, color, 2, cv2.LINE_AA)
