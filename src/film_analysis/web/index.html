@@ -1316,6 +1316,113 @@
       text-transform: uppercase;
     }
     #report-settings .exports { margin: 0.15rem 0 0; }
+    #report-steps {
+      margin: 0 0 1.15rem;
+      padding: 0.95rem 1rem 1.05rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    #report-steps[hidden] { display: none; }
+    #report-steps > h3 {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #report-steps > .lead { margin: 0.3rem 0 0.75rem; font-size: 0.9rem; }
+    #report-steps ol.report-parts { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+    .report-part {
+      display: grid;
+      grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+      gap: 0.25rem 0.7rem;
+      align-items: start;
+      padding: 0.7rem 0.8rem;
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .report-part .part-number {
+      display: grid;
+      place-items: center;
+      width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 50%;
+      background: #2c2c2e;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 650;
+    }
+    .report-part[data-state="done"] .part-number { background: #1f3a26; color: #7ee08f; }
+    .report-part[data-state="partial"] .part-number,
+    .report-part[data-state="running"] .part-number { background: #3a3317; color: var(--gold); }
+    .report-part[data-state="waiting"] { opacity: 0.6; }
+    .report-part .part-name { margin: 0; color: var(--ink); font-weight: 650; }
+    .report-part .part-what { margin: 0.1rem 0 0; font-size: 0.85rem; }
+    .report-part .part-who {
+      grid-column: 2 / -1;
+      margin: 0.1rem 0 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .report-part .part-who:empty { display: none; }
+    .report-part .part-detail {
+      grid-column: 2 / -1;
+      margin: 0.15rem 0 0;
+      color: var(--ink);
+      font-size: 0.88rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .report-part .part-state {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .report-part[data-state="done"] .part-state { color: #7ee08f; }
+    .report-part[data-state="partial"] .part-state,
+    .report-part[data-state="running"] .part-state { color: var(--gold); }
+    .report-part .part-actions {
+      grid-column: 2 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem 1rem;
+      margin-top: 0.3rem;
+    }
+    .report-part .part-actions button { font-size: 0.82rem; }
+    .report-part .part-actions button[hidden] { display: none; }
+    #formation-gallery { margin-top: 0.9rem; }
+    #formation-gallery[hidden] { display: none; }
+    #formation-gallery h4 {
+      margin: 0.9rem 0 0.45rem;
+      font-size: 0.95rem;
+      font-weight: 650;
+    }
+    #formation-gallery h4 span { color: var(--muted); font-weight: 500; }
+    #formation-gallery ul {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+      gap: 0.6rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    #formation-gallery a {
+      display: grid;
+      gap: 0.3rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-decoration: none;
+    }
+    #formation-gallery a:hover { color: var(--ink); }
+    #formation-gallery img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #161816;
+    }
     #report-view { margin: 1.15rem 0 0.4rem; }
     #report-view h3 {
       margin: 1rem 0 0.3rem;
@@ -1392,11 +1499,17 @@
       gap: 0.85rem;
       align-items: start;
     }
-    .play-review video {
+    .play-review.has-plot {
+      grid-template-columns: minmax(0, 1.45fr) minmax(9rem, 0.7fr) minmax(8rem, 0.45fr);
+    }
+    .play-review video,
+    .play-review img.formation-plot,
+    .play-review svg.formation-plot {
       width: 100%;
       max-height: 22rem;
       background: #000;
       border-radius: 0.45rem;
+      object-fit: contain;
     }
     .play-review-tags {
       display: grid;
@@ -1415,6 +1528,34 @@
     }
     .play-review-tags dd { margin: 0; font-weight: 650; }
     .play-review-note { margin: 0.2rem 0; color: var(--muted); }
+    .play-review .lineup-slot {
+      min-height: 8rem;
+      background: #161816;
+      border-radius: 0.45rem;
+      overflow: hidden;
+    }
+    .play-review svg.formation-plot {
+      display: block;
+      height: auto;
+      background: #161816;
+    }
+    .play-review .step-yes,
+    .play-review .step-open,
+    td .step-yes,
+    td .step-open {
+      display: block;
+      margin-top: 0.15rem;
+      font-size: 0.68rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .step-yes { color: var(--gold); }
+    .step-open { color: var(--muted); }
+    .play-review button.review-play {
+      justify-self: start;
+      margin-top: 0.35rem;
+    }
     button.report-play {
       display: block;
       width: 100%;
@@ -1432,8 +1573,11 @@
     button.report-play.open { color: var(--ink); }
     .play-review-block { margin: 0.35rem 0 0.9rem; }
     @media (max-width: 720px) {
-      .play-review { grid-template-columns: 1fr; }
-      .play-review video { max-height: 16rem; }
+      .play-review,
+      .play-review.has-plot { grid-template-columns: 1fr; }
+      .play-review video,
+      .play-review img.formation-plot,
+      .play-review svg.formation-plot { max-height: 16rem; }
     }
     #report-view .report-row {
       color: var(--muted);
@@ -2788,6 +2932,97 @@
           <p class="stage-kicker">Scout report</p>
           <h2>Scouting report</h2>
           <p id="report-note" class="lead"></p>
+          <section id="report-steps" hidden aria-labelledby="report-steps-heading">
+            <h3 id="report-steps-heading">Activity</h3>
+            <p class="lead">The work runs in this order, and each step builds on the one before it. The scouting report puts them together.</p>
+            <ol class="report-parts">
+              <li class="report-part" data-part="plays">
+                <span class="part-number">1</span>
+                <div>
+                  <p class="part-name">Play types</p>
+                  <p class="part-what">Cuts the film into plays and sorts each one: an offense and defense snap, special teams, or junk.</p>
+                </div>
+                <span class="part-state"></span>
+                <p class="part-who">Done when the film was read. A model reads each stretch of film, several at once.</p>
+                <p class="part-detail"></p>
+                <div class="part-actions">
+                  <button class="retry" type="button" data-action="plays-see">Review plays</button>
+                </div>
+              </li>
+              <li class="report-part" data-part="teams">
+                <span class="part-number">2</span>
+                <div>
+                  <p class="part-name">Identify teams</p>
+                  <p class="part-what">Reads each side's uniform colors and finds a player photo for each team.</p>
+                </div>
+                <span class="part-state"></span>
+                <p class="part-who">One job on this computer. A model reads the uniforms, then the player finder crops a photo for each side. Step 4 can send back sharper photos.</p>
+                <p class="part-detail"></p>
+                <div class="part-actions">
+                  <button class="retry" type="button" data-action="teams-again">New photos</button>
+                  <button class="retry" type="button" data-action="teams-see">See team cards</button>
+                </div>
+              </li>
+              <li class="report-part" data-part="target">
+                <span class="part-number">3</span>
+                <div>
+                  <p class="part-name">Pick the scouted team</p>
+                  <p class="part-what">Name both sides and choose who you are scouting, so offense and defense line up on every play.</p>
+                </div>
+                <span class="part-state"></span>
+                <p class="part-who">You. Nothing below runs until a team is picked.</p>
+                <p class="part-detail"></p>
+                <div class="part-actions">
+                  <button class="retry" type="button" data-action="target-pick">Pick the team</button>
+                </div>
+              </li>
+              <li class="report-part" data-part="calls">
+                <span class="part-number">4</span>
+                <div>
+                  <p class="part-name">Play calls</p>
+                  <p class="part-what">Run or pass and whether the scouted team has the ball, or the special-teams play.</p>
+                </div>
+                <span class="part-state"></span>
+                <p class="part-who" data-who="calls"></p>
+                <p class="part-detail"></p>
+                <div class="part-actions">
+                  <button class="retry" type="button" data-action="calls-missing"></button>
+                  <button class="retry" type="button" data-action="calls-again">Read every call again</button>
+                  <button class="retry" type="button" data-action="calls-see">See calls</button>
+                </div>
+              </li>
+              <li class="report-part" data-part="formations">
+                <span class="part-number">5</span>
+                <div>
+                  <p class="part-name">Formations</p>
+                  <p class="part-what">Plots where both teams lined up on each run or pass, then names the formation.</p>
+                </div>
+                <span class="part-state"></span>
+                <p class="part-who" data-who="formations"></p>
+                <p class="part-detail"></p>
+                <div class="part-actions">
+                  <button class="retry" type="button" data-action="formations-missing"></button>
+                  <button class="retry" type="button" data-action="formations-again">Plot every play again</button>
+                  <button class="retry" type="button" data-action="formations-see" aria-expanded="false">See plots</button>
+                </div>
+              </li>
+              <li class="report-part" data-part="report">
+                <span class="part-number">6</span>
+                <div>
+                  <p class="part-name">Scouting report</p>
+                  <p class="part-what">Tendencies, calls, and formations for the team being scouted.</p>
+                </div>
+                <span class="part-state"></span>
+                <p class="part-who">Added up on this computer from steps 4 and 5. No extra model calls.</p>
+                <p class="part-detail"></p>
+                <div class="part-actions">
+                  <button class="retry" type="button" data-action="report-run">Build the report</button>
+                  <button class="retry" type="button" data-action="report-see">See the report</button>
+                </div>
+              </li>
+            </ol>
+            <div id="formation-gallery" hidden></div>
+          </section>
           <p id="film-exports" class="exports" hidden>
             <a id="plays-zip" href="">Download all plays</a>
             <span class="export-note">Every kept clip from this film, zipped for the team.</span>
@@ -2904,7 +3139,7 @@
                 <tr>
                   <th>Play</th>
                   <th>Film</th>
-                  <th>Opponent</th>
+                  <th>Side</th>
                   <th>Call</th>
                   <th>Formation</th>
                   <th>Status</th>
@@ -3015,6 +3250,13 @@
     const reportLiveTendency = document.querySelector("#report-live-tendency");
     const reportAnalysisTable = document.querySelector("#report-analysis-table");
     const reportDownloads = document.querySelector("#report-downloads");
+    const reportSteps = document.querySelector("#report-steps");
+    const formationGallery = document.querySelector("#formation-gallery");
+    const SPECIAL_CALL_TYPES = ["kickoff", "kick_return", "punt", "punt_return", "field_goal", "extra_point"];
+    let reportStepPlays = [];
+    let reportStepTeams = null;
+    let reportStepRows = new Map();
+    let galleryStamp = Date.now();
     let reportPoll = 0;
     const reportLink = document.querySelector("#report-link");
     const reportCsv = document.querySelector("#report-csv");
@@ -3230,8 +3472,8 @@
       if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("/via-cloud/")) {
         return path;
       }
-      // Lineup stills, portraits, and the report run here. The cloud site does not have them yet.
-      if (path.includes("/teams") || path.includes("/report")) return path;
+      // Lineup stills, portraits, formation plots, and the report run here. The cloud site does not have them yet.
+      if (path.includes("/teams") || path.includes("/report") || path.includes("/formation.jpg")) return path;
       if (runningPlace() === "cloud" && onThisComputer()) return `/via-cloud${path}`;
       return path;
     }
@@ -3423,7 +3665,7 @@
       button.type = "button";
       button.className = "skip";
       button.textContent = "Next play";
-      button.addEventListener("click", () => acceptAndOpen(play.uid, `/play/${play.next}`, button));
+      button.addEventListener("click", () => openPlayPath(`/play/${play.next}`, button));
       return button;
     }
 
@@ -3435,49 +3677,27 @@
       button.addEventListener("click", () => {
         const film = play.film || playSection.dataset.film || "/projects";
         const id = (String(film).match(/\/projects\/(\d+)/) || [])[1];
-        acceptAndOpen(play.uid, id ? `/projects/${id}/generate-report` : film, button);
+        openPlayPath(id ? `/projects/${id}/generate-report` : film, button);
       });
       return button;
     }
 
-    async function acceptAndOpen(uid, nextUid, control) {
+    function openPlayPath(nextUid, control) {
       if (playSection.dataset.leaving === "1") return;
       playSection.dataset.leaving = "1";
       if (control) control.disabled = true;
-      try {
-        if (playReviewed.dataset.reviewed !== "1") {
-          const response = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reviewed: true }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            status.className = "error";
-            status.textContent = typeof payload.detail === "string"
-              ? payload.detail
-              : "Could not save that review.";
-            return;
-          }
-        }
-        status.className = "";
-        status.textContent = "";
-        history.pushState({}, "", nextUid);
-        route();
-      } catch {
-        status.className = "error";
-        status.textContent = "Could not save that review.";
-      } finally {
-        delete playSection.dataset.leaving;
-        if (control && control.isConnected) control.disabled = false;
-      }
+      status.className = "";
+      status.textContent = "";
+      history.pushState({}, "", nextUid);
+      route();
+      delete playSection.dataset.leaving;
+      if (control && control.isConnected) control.disabled = false;
     }
 
     function goNextPlay() {
-      const uid = playSection.dataset.uid;
       const next = playSection.dataset.next;
-      if (!uid || !next) return;
-      acceptAndOpen(uid, `/play/${next}`);
+      if (!next) return;
+      openPlayPath(`/play/${next}`);
     }
 
     function goPreviousPlay() {
@@ -3515,12 +3735,105 @@
       return value;
     }
 
-    function formationPlot(href) {
+    function lineupChart(play) {
+      if (play.formation_plot) return formationPlot(play.formation_plot, play.formation_layout);
+      if (play.formation_layout) return formationDots(play.formation_layout);
+      if (play.play_type !== "run" && play.play_type !== "pass") return null;
+      return missingPlot();
+    }
+
+    function missingPlot() {
+      const slot = document.createElement("div");
+      slot.className = "lineup-slot";
+      const note = document.createElement("p");
+      note.className = "play-review-note";
+      note.textContent = "Formation has not been plotted.";
+      slot.append(note);
+      return slot;
+    }
+
+    function formationDots(layout) {
+      const svgNs = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNs, "svg");
+      svg.setAttribute("viewBox", "0 0 100 68");
+      svg.setAttribute("class", "formation-plot");
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", "Formation plot");
+      const field = document.createElementNS(svgNs, "rect");
+      field.setAttribute("width", "100");
+      field.setAttribute("height", "68");
+      field.setAttribute("fill", "#16301c");
+      const los = document.createElementNS(svgNs, "line");
+      los.setAttribute("x1", "6");
+      los.setAttribute("x2", "94");
+      los.setAttribute("y1", "34");
+      los.setAttribute("y2", "34");
+      los.setAttribute("stroke", "#e6e6e6");
+      los.setAttribute("stroke-width", "0.6");
+      svg.append(field, los);
+      const focus = layout.focus === "defense" ? "defense" : "offense";
+      drawLineupSide(svg, layout.defense, focus === "defense", layout.defense_color || "#7eb6ff");
+      drawLineupSide(svg, layout.offense, focus !== "defense", layout.offense_color || "#f4f1ea");
+      return svg;
+    }
+
+    function drawLineupSide(svg, players, primary, color) {
+      const svgNs = "http://www.w3.org/2000/svg";
+      for (const player of players || []) {
+        const dot = document.createElementNS(svgNs, "circle");
+        dot.setAttribute("cx", String(6 + Number(player.x || 0) * 88));
+        dot.setAttribute("cy", String(4 + Number(player.y || 0) * 60));
+        dot.setAttribute("r", primary ? "2.6" : "1.7");
+        dot.setAttribute("fill", player.confidence === "low" ? "none" : color);
+        dot.setAttribute("stroke", color);
+        dot.setAttribute("stroke-width", "0.55");
+        svg.append(dot);
+      }
+    }
+
+    async function plotPlayFormation(panel, uid, button) {
+      button.disabled = true;
+      try {
+        const plotted = await fetch(`/api/plays/${encodeURIComponent(uid)}/formation`, { method: "POST" });
+        if (!plotted.ok) throw new Error("Could not plot that formation.");
+        await loadPlayReview(panel, uid);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = error instanceof Error ? error.message : "Could not plot that formation.";
+      }
+    }
+
+    async function markPlayReviewed(panel, uid, plotFormation, button, reviewed) {
+      button.disabled = true;
+      try {
+        const saved = await fetch(`/api/plays/${encodeURIComponent(uid)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reviewed }),
+        });
+        if (!saved.ok) throw new Error("Could not save that review.");
+        if (plotFormation) {
+          const plotted = await fetch(`/api/plays/${encodeURIComponent(uid)}/formation`, {
+            method: "POST",
+          });
+          if (!plotted.ok) throw new Error("Could not plot that formation.");
+        }
+        await loadPlayReview(panel, uid);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = error instanceof Error ? error.message : "Could not save that review.";
+      }
+    }
+
+    function formationPlot(href, layout) {
       const image = document.createElement("img");
       image.src = endpoint(href);
       image.alt = "Formation plot";
       image.className = "formation-plot";
       image.loading = "lazy";
+      image.addEventListener("error", () => {
+        image.replaceWith(layout ? formationDots(layout) : missingPlot());
+      });
       return image;
     }
 
@@ -4145,10 +4458,8 @@
     }
 
     function paintTracker(list, progress, items, currentUid) {
-      const done = items.filter((item) => item.reviewed).length;
-      progress.hidden = items.length === 0;
+      progress.hidden = true;
       list.hidden = items.length === 0;
-      progress.textContent = reviewProgress(done, items.length);
       const links = [...list.querySelectorAll("a")];
       const same = links.length === items.length
         && items.every((item, index) => links[index].dataset.uid === item.uid);
@@ -4179,14 +4490,8 @@
       link.classList.toggle("current", current);
       if (current) link.setAttribute("aria-current", "true");
       else link.removeAttribute("aria-current");
-      const state = reviewed ? ", reviewed" : ", not reviewed";
+      const state = reviewed ? ", reviewed" : "";
       link.setAttribute("aria-label", `Play ${item.position}${state}`);
-    }
-
-    function reviewProgress(done, total) {
-      if (!total) return "";
-      if (done === total) return total === 1 ? "1 play reviewed" : `All ${total} plays reviewed`;
-      return `${done} of ${total} reviewed`;
     }
 
     function playLink(href, label, stay) {
@@ -6541,12 +6846,6 @@
       return Boolean(left && right);
     }
 
-    function nextBreakdownPlay() {
-      const cards = [...results.querySelectorAll(".play-card")];
-      const open = cards.find((card) => card.dataset.reviewed !== "1") || cards[0];
-      return open ? open.dataset.uid || "" : "";
-    }
-
     function referencesReady() {
       const left = document.querySelector("#team-left-reference");
       const right = document.querySelector("#team-right-reference");
@@ -7110,13 +7409,6 @@
     });
     stageNext.addEventListener("click", () => {
       const action = stageNext.dataset.action;
-      if (action === "breakdown") {
-        const uid = stageNext.dataset.uid;
-        if (!uid) return;
-        history.pushState({}, "", `/play/${uid}`);
-        route();
-        return;
-      }
       if (action === "teams" || action === "report") openStage(action);
     });
     playsToggle.addEventListener("click", () => {
@@ -7745,8 +8037,7 @@
       let stored = "";
       try { stored = sessionStorage.getItem(stageKey(project.project)) || ""; } catch { /* private mode */ }
       if (stored) return clampStage(stored);
-      const mine = project.teams && project.teams.mine;
-      return mine === "left" || mine === "right" ? "report" : "review";
+      return "report";
     }
 
     function rememberStage(id, stage) {
@@ -7800,7 +8091,7 @@
         return;
       }
       if (stage === "review") {
-        chartNote.textContent = "Watch a clip and tag it. The next play opens when the clip ends.";
+        chartNote.textContent = "Open a clip if you want another look. Review does not have to be finished.";
       }
     }
 
@@ -7811,32 +8102,16 @@
         return;
       }
       stageDock.hidden = false;
-      const total = results.querySelectorAll(".play-card").length;
-      const reviewed = results.querySelectorAll('.play-card[data-reviewed="1"]').length;
       const held = reviews.children.length;
-      const reviewLine = !total
+      stageStatus.textContent = held === 0
         ? "Review is optional."
-        : reviewed === total
-          ? (total === 1 ? "1 play reviewed." : `All ${total} plays reviewed.`)
-          : `${reviewed} of ${total} reviewed.`;
-      const heldLine = held === 0
-        ? ""
         : held === 1
-          ? "1 stretch still needs a look."
-          : `${held} stretches still need a look.`;
-      stageStatus.textContent = [reviewLine, heldLine].filter(Boolean).join(" ");
-      const nextUid = nextBreakdownPlay();
-      const breakdownOpen = total > 0 && reviewed < total && nextUid;
+          ? "Review is optional. 1 stretch still needs a look."
+          : `Review is optional. ${held} stretches still need a look.`;
       stageNext.disabled = false;
-      if (breakdownOpen) {
-        stageNext.textContent = reviewed ? "Next clip" : "Start breakdown";
-        stageNext.dataset.action = "breakdown";
-        stageNext.dataset.uid = nextUid;
-      } else {
-        stageNext.textContent = "Scout report";
-        stageNext.dataset.action = "report";
-        delete stageNext.dataset.uid;
-      }
+      stageNext.textContent = "Scout report";
+      stageNext.dataset.action = "report";
+      delete stageNext.dataset.uid;
     }
 
     async function openStage(stage) {
@@ -7874,9 +8149,7 @@
       if (stage === "report") {
         return reportBox.dataset.ready === String(results.dataset.project || "") ? 100 : 68;
       }
-      const total = results.querySelectorAll(".play-card").length;
-      const reviewed = results.querySelectorAll('.play-card[data-reviewed="1"]').length;
-      return total ? Math.max(8, Math.round((reviewed / total) * 36)) : 8;
+      return 8;
     }
 
     function retintSteps(stage) {
@@ -7916,8 +8189,6 @@
         delete chartProgress.dataset.stage;
         delete chartProgress.dataset.intent;
       }
-      const reviewed = plays.filter((play) => play.reviewed).length;
-      const reviewDone = reviewed === plays.length;
       if ("teams" in project) {
         const mine = project.teams && project.teams.mine;
         if (mine === "left" || mine === "right") chartProgress.dataset.teams = "1";
@@ -7933,21 +8204,15 @@
       const reportStep = chartProgress.querySelector('[data-step="report"]');
       reviewStep.querySelector("a").href = screenPath(project.project, "review");
       reportStep.querySelector("a").href = screenPath(project.project, "report");
-      reviewStep.dataset.complete = reviewDone ? "1" : "";
+      reviewStep.dataset.complete = "";
       reportStep.dataset.complete = reportReady ? "1" : "";
-      markChartStep(reviewStep, stage === "review" ? "now" : reviewDone ? "done" : "");
+      markChartStep(reviewStep, stage === "review" ? "now" : "");
       markChartStep(reportStep, stage === "report" ? "now" : reportReady ? "done" : "");
       reportStep.querySelector("a").setAttribute("aria-disabled", "false");
-      const filled = stage === "report"
-        ? (reportReady ? 100 : 68)
-        : Math.max(8, Math.round((reviewed / plays.length) * 36));
+      const filled = stage === "report" ? (reportReady ? 100 : 68) : 8;
       chartFill.style.width = `${filled}%`;
       chartTrack.setAttribute("aria-valuenow", String(filled));
-      reviewStep.querySelector(".step-state").textContent = reviewDone
-        ? "Done"
-        : reviewed === 0
-          ? "Optional"
-          : `${reviewed} of ${plays.length}`;
+      reviewStep.querySelector(".step-state").textContent = "Optional";
       reportStep.querySelector(".step-state").textContent = reportReady
         ? "Done"
         : stage === "report"
@@ -7956,13 +8221,10 @@
       applyStage(stage);
       if (stage === "report") resumeReportProgress(project.project);
       paintStageCopy(stage);
-      const reviewText = reviewDone
-        ? "All plays reviewed."
-        : `${reviewed} of ${plays.length} plays reviewed. Reviewing is optional.`;
       const nextText = reportReady
         ? "The scouting report is on this page."
-        : "Generate the scouting report next.";
-      chartTrack.setAttribute("aria-valuetext", `${reviewText} ${nextText}`);
+        : "Generate the scouting report next. Review is optional.";
+      chartTrack.setAttribute("aria-valuetext", nextText);
       paintDock();
     }
 
@@ -7997,6 +8259,16 @@
         delete reportBox.dataset.synced;
         reportView.replaceChildren();
         reportView.hidden = true;
+        reportStepPlays = [];
+        reportStepTeams = null;
+        reportStepRows = new Map();
+        delete reportBox.dataset.workers;
+        formationGallery.hidden = true;
+        formationGallery.replaceChildren();
+      }
+      if (plays.some((play) => play && play.play_number)) reportStepPlays = plays;
+      if ("teams" in project && project.teams && "left_name" in project.teams) {
+        reportStepTeams = project.teams;
       }
       if ("teams" in project) {
         const mine = project.teams && project.teams.mine;
@@ -8046,6 +8318,7 @@
       const query = `?sections=${encodeURIComponent(reportSelection().join(","))}`;
       reportLink.href = `/api/projects/${project.project}/report.pdf${query}`;
       reportCsv.href = `/api/projects/${project.project}/report.csv${query}`;
+      paintReportSteps();
       if (
         studio.dataset.stage === "report"
         && labeled
@@ -8209,14 +8482,17 @@
       delete reportBox.dataset.pendingReport;
       const restart = reportGenerate.dataset.restart === "1";
       const plays = reportPlayList();
+      const step = reportGenerate.dataset.step || "all";
       delete reportGenerate.dataset.restart;
       delete reportGenerate.dataset.plays;
+      delete reportGenerate.dataset.step;
+      reportBox.dataset.step = step;
       beginReportLive(projectId, sections, restart);
       try {
         const response = await fetch(`/api/projects/${projectId}/report/live`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sections, restart, plays }),
+          body: JSON.stringify({ sections, restart, plays, step }),
         });
         if (response.status === 409) {
           watchReportFinish(projectId, sections);
@@ -8302,6 +8578,7 @@
     }
 
     async function finishReport(projectId, sections, payload) {
+      galleryStamp = Date.now();
       stopReportPoll();
       delete reportBox.dataset.live;
       delete reportBox.dataset.resume;
@@ -8418,15 +8695,16 @@
         reportBox.dataset.replaced = "1";
       }
       if (snapshot.tendency) paintLiveTendency(snapshot);
+      const workers = Number(
+        payload.workers != null ? payload.workers : snapshot.workers || 0,
+      );
+      if (workers > 0) reportBox.dataset.workers = String(workers);
       if (analysis.length) {
         const showFormation = Boolean(snapshot.formation)
           || analysis.some((row) => row.formation);
         paintAnalysisTable(analysis, showFormation);
       }
       paintReportProgress(done, total);
-      const workers = Number(
-        payload.workers != null ? payload.workers : snapshot.workers || 0,
-      );
       const reading = analysis.filter((row) => row.status === "reading").length;
       const pace = workers > 1 ? ` ${workers} workers.` : "";
       const line = total
@@ -8513,6 +8791,8 @@
     }
 
     function paintAnalysisTable(rows, showFormation) {
+      reportStepRows = new Map(rows.map((row) => [Number(row.play), row]));
+      paintReportSteps();
       const openDetail = reportAnalysisTable.querySelector("tr.play-review-row");
       const openUid = openDetail ? openDetail.dataset.uid : "";
       if (openDetail) openDetail.remove();
@@ -8537,9 +8817,17 @@
         }
         line.append(playCell);
         appendLiveCell(line, filmSpan(row), false);
-        appendLiveCell(line, sideLabel(row.side), pending && !row.side);
+        appendLiveCell(
+          line,
+          sideLabel(row.side) || stepWord(row.steps, "side"),
+          pending && !row.side,
+        );
         appendLiveCell(line, callLabel(row.call), pending && !row.call);
-        appendLiveCell(line, row.formation || "", pending && showFormation && !row.formation);
+        appendLiveCell(
+          line,
+          row.formation || stepWord(row.steps, "formation"),
+          pending && showFormation && !row.formation,
+        );
         if (status === "missed" && playNumber) {
           const cell = document.createElement("td");
           const again = document.createElement("button");
@@ -8568,6 +8856,290 @@
       line.classList.add("open");
       line.setAttribute("aria-expanded", "true");
     }
+
+    function reportStepState() {
+      const projectId = reportBox.dataset.project || "";
+      const formations = reportSelection().includes("formations");
+      const plays = reportStepPlays
+        .filter((play) => play && play.play_number && !play.discarded)
+        .map((play) => {
+          const row = reportStepRows.get(Number(play.play_number));
+          const call = (row && row.call) || play.play_type || "";
+          const side = (row && row.side) || play.unit || "";
+          const special = play.family === "special_teams";
+          const runPass = !special && (call === "run" || call === "pass");
+          const plotted = Boolean(play.formation_plot)
+            || Boolean(formations && runPass && row && row.status === "ready");
+          return {
+            number: Number(play.play_number),
+            uid: play.uid || (row && row.uid) || "",
+            special,
+            call,
+            side,
+            runPass,
+            plotted,
+            formation: (row && row.formation) || play.formation || "",
+            read: special
+              ? SPECIAL_CALL_TYPES.includes(call)
+              : runPass && (side === "offense" || side === "defense"),
+          };
+        });
+      return { projectId, plays };
+    }
+
+    function paintReportSteps() {
+      const { projectId, plays } = reportStepState();
+      reportSteps.hidden = !plays.length;
+      if (!plays.length) return;
+      const live = reportBox.dataset.live === "1";
+      if (!live) delete reportBox.dataset.step;
+      const running = live ? reportBox.dataset.step || "all" : "";
+      const busy = live || reportGenerate.dataset.busy === "1";
+      const part = (name) => reportSteps.querySelector(`.report-part[data-part="${name}"]`);
+      const action = (name) => reportSteps.querySelector(`button[data-action="${name}"]`);
+      const paint = (name, state, label, detail) => {
+        const item = part(name);
+        item.dataset.state = state;
+        item.querySelector(".part-state").textContent = label;
+        item.querySelector(".part-detail").textContent = detail;
+      };
+
+      const kept = reportStepPlays.filter((play) => play && play.play_number && !play.discarded);
+      const snaps = kept.filter((play) => play.family === "scrimmage").length;
+      const kicks = kept.filter((play) => play.family === "special_teams").length;
+      const unsorted = kept.length - snaps - kicks;
+      const junk = reportStepPlays.filter((play) => play && play.discarded).length;
+      paint(
+        "plays",
+        unsorted ? "partial" : "done",
+        unsorted ? `${unsorted} unsorted` : "Done",
+        [
+          `${kept.length} plays`,
+          `${snaps} offense and defense snaps`,
+          `${kicks} special teams`,
+          unsorted ? `${unsorted} not sorted yet` : "",
+          junk ? `${junk} junk cut out` : "",
+        ].filter(Boolean).join(" · "),
+      );
+
+      const teams = reportStepTeams || {};
+      const names = {
+        left: (teams.left_name || "Home").trim() || "Home",
+        right: (teams.right_name || "Away").trim() || "Away",
+      };
+      const photos = ["left", "right"].filter((side) => teams[`${side}_player`]).length;
+      const mine = teams.mine === "left" || teams.mine === "right" ? teams.mine : "";
+      const teamsBusy = teamsSection.dataset.loading === projectId;
+      paint(
+        "teams",
+        teamsBusy ? "running" : photos === 2 ? "done" : photos ? "partial" : "waiting",
+        teamsBusy ? "Finding players" : photos === 2 ? "Done" : `${2 - photos} photo${photos === 1 ? "" : "s"} missing`,
+        `${names.left}: ${teams.left_player ? "photo" : "no photo"} · ${names.right}: ${teams.right_player ? "photo" : "no photo"}`,
+      );
+      action("teams-again").disabled = teamsBusy || busy;
+
+      paint(
+        "target",
+        mine ? "done" : "partial",
+        mine ? "Done" : "Your turn",
+        mine
+          ? `Scouting ${names[mine]} · ${names[mine === "left" ? "right" : "left"]} is the other team`
+          : "No team picked to scout yet.",
+      );
+      action("target-pick").textContent = mine ? "Change the team" : "Pick the team";
+
+      const workers = Number(reportBox.dataset.workers || workersInput.value || 4);
+      const crew = workers === 1 ? "1 worker" : `${workers} workers at once`;
+      const readingNow = [...reportStepRows.values()].filter((row) => row.status === "reading").length;
+      const now = readingNow ? ` ${readingNow} reading now.` : "";
+      reportSteps.querySelector('[data-who="calls"]').textContent =
+        `One model call per play, spread across ${crew}. Each worker takes the next play in line.${running === "call" || running === "all" ? now : ""}`;
+      reportSteps.querySelector('[data-who="formations"]').textContent =
+        `One more model call per run or pass, on the same ${workers === 1 ? "worker" : "workers"}. A worker plots its play right after reading the call.${running === "formation" ? now : ""}`;
+
+      const read = plays.filter((play) => play.read);
+      const callsMissing = plays.filter((play) => !play.read).map((play) => play.number);
+      const runs = read.filter((play) => play.call === "run").length;
+      const passes = read.filter((play) => play.call === "pass").length;
+      const special = read.filter((play) => play.special).length;
+      const callsRunning = running === "call" || running === "all";
+      paint(
+        "calls",
+        callsRunning ? "running" : !mine ? "waiting" : callsMissing.length ? (read.length ? "partial" : "waiting") : "done",
+        callsRunning ? "Reading" : !mine ? "Pick a team first" : callsMissing.length ? `${callsMissing.length} to read` : "Done",
+        `${read.length} of ${plays.length} plays read · ${runs} run · ${passes} pass · ${special} special teams`,
+      );
+      const callsMissingButton = action("calls-missing");
+      callsMissingButton.hidden = !callsMissing.length;
+      callsMissingButton.textContent = `Read ${callsMissing.length} missing ${callsMissing.length === 1 ? "call" : "calls"}`;
+      callsMissingButton.dataset.plays = JSON.stringify(callsMissing);
+      callsMissingButton.disabled = busy || !mine;
+      action("calls-again").disabled = busy || !mine;
+
+      const eligible = plays.filter((play) => play.runPass);
+      const plotted = eligible.filter((play) => play.plotted);
+      const named = plotted.filter((play) => play.formation).length;
+      const plotsMissing = eligible.filter((play) => !play.plotted).map((play) => play.number);
+      const plotsRunning = running === "formation" || running === "all";
+      paint(
+        "formations",
+        plotsRunning ? "running" : !eligible.length ? "waiting" : plotsMissing.length ? (plotted.length ? "partial" : "waiting") : "done",
+        plotsRunning
+          ? "Plotting"
+          : !eligible.length
+            ? "Needs play calls"
+            : plotsMissing.length
+              ? `${plotsMissing.length} to plot`
+              : "Done",
+        eligible.length
+          ? `${plotted.length} of ${eligible.length} runs and passes plotted · ${named} named`
+          : "Plots start once runs and passes are read.",
+      );
+      const plotsMissingButton = action("formations-missing");
+      plotsMissingButton.hidden = !plotsMissing.length;
+      plotsMissingButton.textContent = `Plot ${plotsMissing.length} missing ${plotsMissing.length === 1 ? "play" : "plays"}`;
+      plotsMissingButton.dataset.plays = JSON.stringify(plotsMissing);
+      plotsMissingButton.disabled = busy || !mine;
+      const plotsAgain = action("formations-again");
+      plotsAgain.dataset.plays = JSON.stringify(eligible.map((play) => play.number));
+      plotsAgain.hidden = !eligible.length;
+      plotsAgain.disabled = busy || !mine;
+      const see = action("formations-see");
+      see.hidden = !plotted.length;
+      see.textContent = formationGallery.hidden ? `See ${plotted.length} plots` : "Hide plots";
+      see.setAttribute("aria-expanded", formationGallery.hidden ? "false" : "true");
+      if (!formationGallery.hidden) renderFormationGallery(projectId, plotted, mine ? names[mine] : "");
+
+      const ready = reportBox.dataset.ready === projectId && !reportView.hidden;
+      const resume = reportBox.dataset.resume === "1";
+      paint(
+        "report",
+        running === "all" ? "running" : ready ? "done" : resume ? "partial" : "waiting",
+        running === "all" ? "Building" : ready ? "Ready" : resume ? "Unfinished" : "Not built",
+        ready
+          ? `Built from ${reportBox.dataset.plays || read.length} plays.`
+          : resume
+            ? leftoverNote()
+            : "Uses the calls and formations above.",
+      );
+      const reportRun = action("report-run");
+      reportRun.textContent = ready ? "Build it again" : resume ? "Finish the report" : "Build the report";
+      reportRun.disabled = busy;
+      action("report-see").hidden = !ready;
+    }
+
+    function runReportStep(step, plays) {
+      if (!plays.length) return;
+      reportGenerate.dataset.step = step;
+      reportGenerate.dataset.plays = JSON.stringify(plays);
+      enableReportDownload();
+    }
+
+    function renderFormationGallery(projectId, plotted, scouted) {
+      const groups = new Map();
+      for (const play of plotted) {
+        const name = play.formation || "Not named yet";
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(play);
+      }
+      const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+      const nodes = [];
+      for (const [name, items] of ordered) {
+        const heading = document.createElement("h4");
+        const count = document.createElement("span");
+        count.textContent = ` · ${items.length} ${items.length === 1 ? "snap" : "snaps"}`;
+        heading.append(name, count);
+        const list = document.createElement("ul");
+        for (const play of items) {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = play.uid ? `/play/${play.uid}` : `/projects/${projectId}/review`;
+          const image = formationPlot(`/projects/${projectId}/plays/${play.number}/formation.jpg?v=${galleryStamp}`);
+          const caption = document.createElement("span");
+          const who = scouted || "Scouted team";
+          const side = play.side === "offense"
+            ? `${who} on offense`
+            : play.side === "defense"
+              ? `${who} on defense`
+              : "";
+          caption.textContent = [`Play ${play.number}`, typeName(play.call) || play.call, side]
+            .filter(Boolean)
+            .join(" · ");
+          link.append(image, caption);
+          item.append(link);
+          list.append(item);
+        }
+        nodes.push(heading, list);
+      }
+      formationGallery.replaceChildren(...nodes);
+    }
+
+    reportSteps.addEventListener("click", (event) => {
+      const link = event.target.closest("#formation-gallery a");
+      if (link) {
+        event.preventDefault();
+        history.pushState({}, "", link.getAttribute("href"));
+        route();
+        return;
+      }
+      const button = event.target.closest("button[data-action]");
+      if (!button || button.disabled) return;
+      const plays = () => {
+        try {
+          return JSON.parse(button.dataset.plays || "[]");
+        } catch {
+          return [];
+        }
+      };
+      const scrollTo = (node) => node && node.scrollIntoView({ behavior: "smooth", block: "start" });
+      switch (button.dataset.action) {
+        case "plays-see":
+          history.pushState({}, "", `/projects/${reportBox.dataset.project}/review`);
+          route();
+          break;
+        case "target-pick":
+          showTeamChoices(true);
+          scrollTo(document.querySelector("#report-settings"));
+          break;
+        case "teams-again":
+          teamsRetry.click();
+          break;
+        case "teams-see":
+          showTeamChoices(true);
+          scrollTo(document.querySelector("#report-settings"));
+          break;
+        case "calls-missing":
+          runReportStep("call", plays());
+          break;
+        case "calls-again": {
+          const all = reportStepState().plays.map((play) => play.number);
+          const ask = `Read the call on all ${all.length} plays again? This replaces calls you changed by hand.`;
+          if (all.length && window.confirm(ask)) runReportStep("call", all);
+          break;
+        }
+        case "calls-see":
+          reportLive.hidden = false;
+          scrollTo(reportAnalysisTable);
+          break;
+        case "formations-missing":
+        case "formations-again":
+          runReportStep("formation", plays());
+          break;
+        case "formations-see":
+          formationGallery.hidden = !formationGallery.hidden;
+          paintReportSteps();
+          if (!formationGallery.hidden) scrollTo(formationGallery);
+          break;
+        case "report-run":
+          reportGenerate.click();
+          break;
+        case "report-see":
+          scrollTo(reportView);
+          break;
+        default:
+          break;
+      }
+    });
 
     function reportPlayList() {
       const raw = reportGenerate.dataset.plays || "";
@@ -8647,6 +9219,13 @@
         field_goal: "Field goal",
         extra_point: "Extra point",
       }[call] || call || "";
+    }
+
+    function stepWord(steps, key) {
+      const state = steps && steps[key];
+      if (state === "skip") return "—";
+      if (state === "detected" || state === "reviewed") return "Yes";
+      return "Not yet";
     }
 
     function statusLabel(status) {
@@ -8932,16 +9511,16 @@
         }
         panel.querySelector(".play-review-tags")?.remove();
         panel.querySelector(".play-review-note")?.remove();
+        panel.querySelector("img.formation-plot, svg.formation-plot, .lineup-slot")?.remove();
         const tags = document.createElement("dl");
         tags.className = "play-review-tags";
         const call = detectedCall(play.play_type);
         const side = sideLabel(play.unit);
-        const scouting = reportBox.dataset.side === "left" || reportBox.dataset.side === "right";
         const rows = [
-          ["Call", call],
-          ["Formation", play.formation || ""],
-          [scouting ? "Opponent" : "Side", side],
-        ].filter(([, value]) => value);
+          ["Call", call || "Not yet"],
+          ["Side", side || "Not yet"],
+          ["Formation", play.formation || (play.family === "special_teams" ? "—" : "Not yet")],
+        ];
         if (!rows.length) {
           const empty = document.createElement("p");
           empty.className = "play-review-note";
@@ -8958,7 +9537,28 @@
             tags.append(group);
           }
         }
-        panel.append(video, tags);
+        const plot = lineupChart(play);
+        const needsPlot = (play.play_type === "run" || play.play_type === "pass")
+          && !play.formation_plot
+          && !play.formation_layout;
+        if (needsPlot) {
+          const plotButton = document.createElement("button");
+          plotButton.type = "button";
+          plotButton.className = "retry review-play";
+          plotButton.textContent = "Plot formation";
+          plotButton.addEventListener("click", () => plotPlayFormation(panel, uid, plotButton));
+          tags.append(plotButton);
+        }
+        const review = document.createElement("button");
+        review.type = "button";
+        review.className = "retry review-play";
+        review.textContent = play.reviewed ? "Reviewed" : "Mark reviewed";
+        review.addEventListener("click", () => {
+          markPlayReviewed(panel, uid, !play.reviewed && needsPlot, review, !play.reviewed);
+        });
+        tags.append(review);
+        panel.classList.toggle("has-plot", Boolean(plot));
+        panel.append(video, ...(plot ? [plot] : []), tags);
         video.muted = true;
         video.play().catch(() => {});
       } catch {

@@ -58,3 +58,33 @@ def test_special_teams_is_named_from_your_team() -> None:
     assert parse_play_call('{"call":"punt return"}', "special_teams") == "punt_return"
     assert parse_play_call('{"call":"run"}', "special_teams") is None
     assert parse_play_call("not json", "special_teams") is None
+
+
+def test_the_play_read_asks_for_a_team_card_player() -> None:
+    for kind in ("scrimmage", "special_teams"):
+        prompt = chart_prompt(_MINE, _OTHER, kind)
+
+        assert "best photo of one player from each team" in prompt
+        assert "Never pick a referee" in prompt
+        assert '"players":{"A":{"frame":2,"box":[0.29,0.38,0.33,0.62],"score":7}}' in prompt
+
+
+def test_player_picks_keep_only_real_frames_and_boxes() -> None:
+    from film_analysis.chart.call import PlayerPick, parse_player_picks
+
+    reply = (
+        '{"offense":"A","call":"run","players":{'
+        '"A":{"frame":2,"box":[0.29,0.38,0.33,0.62],"score":12},'
+        '"Team B":{"frame":4,"box":[-0.1,0.2,0.1,0.5],"score":6}}}'
+    )
+
+    assert parse_player_picks(reply, 6) == {
+        "A": PlayerPick(2, (0.29, 0.38, 0.33, 0.62), 10),
+        "B": PlayerPick(4, (0.0, 0.2, 0.1, 0.5), 6),
+    }
+    assert parse_player_picks(reply, 3) == {"A": PlayerPick(2, (0.29, 0.38, 0.33, 0.62), 10)}
+    empty_box = '{"players":{"A":{"frame":1,"box":[0.5,0.5,0.5,0.5],"score":9}}}'
+    unknown_team = '{"players":{"C":{"frame":1,"box":[0.1,0.1,0.2,0.4],"score":9}}}'
+    assert parse_player_picks(empty_box, 6) == {}
+    assert parse_player_picks(unknown_team, 6) == {}
+    assert parse_player_picks('{"call":"run"}', 6) == {}

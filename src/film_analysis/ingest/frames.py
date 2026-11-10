@@ -72,13 +72,8 @@ def sample_frames(
     """
 
     _require_ffmpeg()
-    length = max(0.1, seconds)
-    lead = min(0.3, length / 4)
-    span = max(0.0, length - lead - 0.2)
-    count = max(1, count)
-    times = [lead + span * index / max(1, count - 1) for index in range(count)]
     frames: list[bytes] = []
-    for moment in times:
+    for moment in sample_times(seconds, count):
         result = subprocess.run(
             [
                 "ffmpeg",
@@ -108,6 +103,49 @@ def sample_frames(
         if result.returncode == 0 and result.stdout.startswith(b"\xff\xd8\xff"):
             frames.append(result.stdout)
     return frames
+
+
+def sample_times(seconds: float, count: int = 6) -> list[float]:
+    """The moments `sample_frames` reads, so one of them can be read again larger."""
+
+    length = max(0.1, seconds)
+    lead = min(0.3, length / 4)
+    span = max(0.0, length - lead - 0.2)
+    count = max(1, count)
+    return [lead + span * index / max(1, count - 1) for index in range(count)]
+
+
+def full_frame(video_path: Path, moment: float) -> bytes | None:
+    """One JPEG at the video's own size, for cropping a single player."""
+
+    _require_ffmpeg()
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{max(0.0, moment):.3f}",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-an",
+            "-q:v",
+            "2",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout.startswith(b"\xff\xd8\xff"):
+        return None
+    return result.stdout
 
 
 def extract_frames(video_path: Path) -> list[tuple[float, bytes]]:

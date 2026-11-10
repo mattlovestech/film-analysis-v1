@@ -5,7 +5,7 @@ import json
 import os
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from film_analysis.learning import apply_coach_notes
 from film_analysis.plays.boundaries import DEFAULT_MODEL
@@ -31,9 +31,30 @@ _SCRIMMAGE_PROMPT = (
     "Then say whether the offense ran or passed. "
     "A run is a handoff, a pitch, or a quarterback keeper or scramble. "
     "A pass is a throw, including a sack or an incompletion on a dropback. "
+    "{players}"
     "Do not explain. The whole reply is one JSON object. "
-    'Reply with JSON only: {{"offense":"A","call":"run"}}'
+    'Reply with JSON only: {{"offense":"A","call":"run",{example}}}'
 )
+
+_PLAYERS_ASK = (
+    "Also pick the best photo of one player from each team for a team card. "
+    "It must be a single player of that team, seen from helmet to cleats, "
+    "standing apart from other players, large, and sharp. "
+    "Never pick a referee in stripes, a coach, or anyone on the sideline. "
+    "Give the frame number, a tight box around that player as fractions of the frame "
+    "[left, top, right, bottom], and a score from 1 to 10 for how good a card it makes. "
+    "Leave a team out when no frame shows one of its players clearly. "
+)
+_PLAYERS_EXAMPLE = '"players":{"A":{"frame":2,"box":[0.29,0.38,0.33,0.62],"score":7}}'
+
+
+@dataclass(frozen=True)
+class PlayerPick:
+    """One player the model picked for a team card, by frame and box."""
+
+    frame: int
+    box: tuple[float, float, float, float]
+    score: int
 
 
 @dataclass(frozen=True)
@@ -45,6 +66,7 @@ class ChartedPlay:
     input_tokens: int = 0
     output_tokens: int = 0
     model: str = ""
+    players: dict[str, PlayerPick] = field(default_factory=dict)
 
 
 _SPECIAL_PROMPT = (
@@ -54,15 +76,22 @@ _SPECIAL_PROMPT = (
     "kickoff when your team kicks off. kick_return when your team receives the kickoff. "
     "punt when your team punts. punt_return when your team receives the punt. "
     "field_goal for a field goal. extra_point for an extra point. "
-    'Reply with JSON only: {{"call":"kick_return"}}'
+    "{players}In players, A is your team and B is the other team. "
+    'Reply with JSON only: {{"call":"kick_return",{example}}}'
 )
 
 
 def chart_prompt(mine: Uniform, other: Uniform, kind: str = SCRIMMAGE) -> str:
     """Ask for a run or a pass, or for the special-teams play your team is on."""
 
+    example = _PLAYERS_EXAMPLE
     if kind == SPECIAL_TEAMS:
-        prompt = _SPECIAL_PROMPT.format(mine=uniform_line(mine), other=uniform_line(other))
+        prompt = _SPECIAL_PROMPT.format(
+            mine=uniform_line(mine),
+            other=uniform_line(other),
+            players=_PLAYERS_ASK,
+            example=example,
+        )
     else:
         prompt = _SCRIMMAGE_PROMPT.format(
             mine=uniform_line(mine),
@@ -70,6 +99,8 @@ def chart_prompt(mine: Uniform, other: Uniform, kind: str = SCRIMMAGE) -> str:
             mine_name=_team_name(mine, "your team"),
             other_name=_team_name(other, "the opponent"),
             contrast=_contrast(mine, other),
+            players=_PLAYERS_ASK,
+            example=example,
         )
     return apply_coach_notes(prompt)
 
@@ -149,6 +180,38 @@ def parse_play_side(reply: str, kind: str = SCRIMMAGE) -> str | None:
     return None
 
 
+def parse_player_picks(reply: str, frames: int) -> dict[str, PlayerPick]:
+    """The player the model picked for each team, keyed A and B.
+
+    A pick is dropped when its frame is not one that was sent or its box is not
+    a real area inside the frame.
+    """
+
+    payload = _json_object(reply)
+    players = payload.get("players") if payload else None
+    if not isinstance(players, dict):
+        return {}
+    picks: dict[str, PlayerPick] = {}
+    for key, value in players.items():
+        team = str(key).strip().upper().removeprefix("TEAM ").strip()
+        if team not in {"A", "B"} or not isinstance(value, dict):
+            continue
+        try:
+            frame = int(value.get("frame"))
+            score = int(value.get("score"))
+            left, top, right, bottom = (float(edge) for edge in value.get("box"))
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= frame <= frames:
+            continue
+        left, right = max(0.0, left), min(1.0, right)
+        top, bottom = max(0.0, top), min(1.0, bottom)
+        if right - left < 0.005 or bottom - top < 0.01:
+            continue
+        picks[team] = PlayerPick(frame, (left, top, right, bottom), max(1, min(10, score)))
+    return picks
+
+
 def chart_play(
     frames: Sequence[bytes],
     mine: Uniform,
@@ -173,7 +236,7 @@ def chart_play(
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model=model,
-            max_tokens=400,
+            max_tokens=700,
             thinking={"type": "between_tools"},
             messages=[{"role": "user", "content": content}],
         )
@@ -196,6 +259,7 @@ def chart_play(
         int(getattr(usage, "input_tokens", 0) or 0),
         int(getattr(usage, "output_tokens", 0) or 0),
         model,
+        parse_player_picks(reply, len(jpegs)),
     )
 
 

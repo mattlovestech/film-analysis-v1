@@ -912,6 +912,44 @@ def _player_crop(image, box: PlayerBox):
     return image[top:bottom, left:right]
 
 
+def crop_picked_player(
+    frame: bytes, box: tuple[float, float, float, float]
+) -> bytes | None:
+    """Cut the player a model boxed out of a full-size frame, as a portrait card.
+
+    The box is in fractions of the frame and is often a little tight or off, so
+    the crop is padded. Referees and players too small to show a uniform are left out.
+    """
+
+    image = _bgr(frame)
+    if image is None:
+        return None
+    import cv2
+
+    frame_height, frame_width = image.shape[:2]
+    left, top, right, bottom = box
+    pad_x = (right - left) * 0.3
+    pad_y = (bottom - top) * 0.1
+    x0 = max(0, int((left - pad_x) * frame_width))
+    x1 = min(frame_width, int(round((right + pad_x) * frame_width)))
+    y0 = max(0, int((top - pad_y) * frame_height))
+    y1 = min(frame_height, int(round((bottom + pad_y) * frame_height)))
+    crop = image[y0:y1, x0:x1]
+    height, width = crop.shape[:2]
+    if height < 60 or width < 24 or height < width:
+        return None
+    if _striped(crop):
+        return None
+    if height < 480:
+        scale = min(4.0, 480 / height)
+        crop = cv2.resize(
+            crop,
+            (round(width * scale), round(height * scale)),
+            interpolation=cv2.INTER_CUBIC,
+        )
+    return _jpeg_edge(crop, 640)
+
+
 def _jpeg_edge(image, edge: int) -> bytes | None:
     import cv2
 

@@ -35,17 +35,24 @@ from fastapi.responses import (
 from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.background import BackgroundTask
 
-from film_analysis.chart.call import SPECIAL_CALLS, ChartedPlay, chart_play
+from film_analysis.chart.call import SPECIAL_CALLS, ChartedPlay, PlayerPick, chart_play
 from film_analysis.chart.formation import (
     FORMATIONS,
     FormationRead,
     formation_label,
     read_formation,
 )
+from film_analysis.chart.isolate import isolate_play
 from film_analysis.domain.models import PlayType
 from film_analysis.ingest.cost import read_cost
 from film_analysis.ingest.errors import MissingApiKeyError, VideoAnalysisError
-from film_analysis.ingest.frames import extract_window, sample_frames, video_duration
+from film_analysis.ingest.frames import (
+    extract_window,
+    full_frame,
+    sample_frames,
+    sample_times,
+    video_duration,
+)
 from film_analysis.ingest.youtube import (
     FilmInfo,
     canonical_youtube_url,
@@ -92,7 +99,7 @@ from film_analysis.storage.catalog import (
     SpanRecord,
     catalog_from_env,
 )
-from film_analysis.teams.players import usable_player_jpeg
+from film_analysis.teams.players import crop_picked_player, usable_player_jpeg
 from film_analysis.teams.uniforms import (
     Uniform,
     action_moments,
@@ -218,6 +225,15 @@ class _ReportChoice(BaseModel):
     sections: list[str] = Field(default_factory=list)
     restart: bool = False
     plays: list[int] = Field(default_factory=list)
+    # One part of the report: "call" reads the call again, "formation" plots again.
+    step: str = "all"
+
+    @field_validator("step")
+    @classmethod
+    def _known_step(cls, value: str) -> str:
+        if value not in {"all", "call", "formation"}:
+            raise ValueError("Choose all, call, or formation.")
+        return value
 
 
 _REPORT_BODY = Body(default=None)
@@ -799,6 +815,7 @@ def create_app(
                 slots,
                 restart=restart,
                 only=only,
+                phase=body.step if body else "all",
             ):
                 pass
         finally:
@@ -843,6 +860,7 @@ def create_app(
                 slots=slots,
                 restart=restart,
                 only=only,
+                phase=body.step if body else "all",
             )
         follow = report_choice.get(project_id, chosen)
 
@@ -2604,6 +2622,7 @@ def _play_summary(
             if has_plot
             else None
         ),
+        "steps": _play_steps(play, plotted=has_plot),
         "formation_choices": [
             {"key": key, "label": label} for key, label in FORMATIONS.items()
         ],
@@ -2628,8 +2647,17 @@ def _play_payload(
     play = ordered[index]
     previous_play = ordered[index - 1] if index else None
     next_play = ordered[index + 1] if index + 1 < len(ordered) else None
+    summary = _play_summary(project, play, catalog)
+    layout = None
+    if catalog is not None and play.family != "special_teams":
+        with contextlib.suppress(CatalogError):
+            layout = catalog.play_layout(project.project, play.play_number)
+    steps = summary.get("steps")
+    if isinstance(layout, dict) and isinstance(steps, dict) and steps.get("formation") == "open":
+        summary["steps"] = {**steps, "formation": "detected"}
     return {
-        **_play_summary(project, play, catalog),
+        **summary,
+        "formation_layout": layout if isinstance(layout, dict) else None,
         "project": project.project,
         "name": project.name,
         "channel": project.channel,
@@ -2702,20 +2730,37 @@ def _chart_play(
     other: Uniform,
     reader: Callable[[Sequence[bytes], Uniform, Uniform, str], ChartedPlay | str | None],
     kinds: frozenset[str] | None,
+    *,
+    mine_side: str = "left",
+    force: bool = False,
 ) -> tuple[int, int, str]:
-    """Add the call. Returns tokens and model used for this read."""
+    """Add the call, and any better team-card player the read found.
+
+    With ``force`` the call and side are read again even when the play has them.
+    Returns tokens and model used for this read.
+    """
 
     kind = "special_teams" if play.family == "special_teams" else "scrimmage"
     if kinds is not None and kind not in kinds:
         return 0, 0, ""
     allowed = SPECIAL_CALLS if kind == "special_teams" else {"run", "pass"}
-    needs_call = play.play_type not in allowed
-    needs_side = kind == "scrimmage" and play.unit not in {"offense", "defense"}
+    needs_call = force or play.play_type not in allowed
+    needs_side = kind == "scrimmage" and (force or play.unit not in {"offense", "defense"})
     if not needs_call and not needs_side:
         return 0, 0, ""
-    call, side, incoming, outgoing, model = _chart_answer(
-        reader(_scrimmage_frames(catalog, project, play), mine, other, kind)
-    )
+    isolated_unit = _isolated_unit(catalog, project, play, mine, other) if needs_side else None
+    if isolated_unit is not None and not needs_call:
+        try:
+            catalog.set_play_unit(
+                project.project, play.play_number, isolated_unit, mark_reviewed=False
+            )
+        except CatalogError:
+            return 0, 0, ""
+        return 0, 0, ""
+    answer = reader(_scrimmage_frames(catalog, project, play), mine, other, kind)
+    call, side, incoming, outgoing, model = _chart_answer(answer)
+    if isolated_unit is not None:
+        side = isolated_unit
     try:
         if needs_call and call in allowed:
             catalog.set_play_type(project.project, play.play_number, call, kind)
@@ -2723,7 +2768,131 @@ def _chart_play(
             catalog.set_play_unit(project.project, play.play_number, side, mark_reviewed=False)
     except CatalogError:
         return incoming, outgoing, model
+    picks = getattr(answer, "players", None)
+    if isinstance(picks, dict) and picks:
+        _keep_player_picks(catalog, project.project, play, picks, mine_side)
     return incoming, outgoing, model
+
+
+def _isolated_unit(
+    catalog: Catalog,
+    project: ProjectDetail,
+    play: PlayRecord,
+    mine: Uniform,
+    other: Uniform,
+) -> str | None:
+    """The scouted team's side when jersey color makes the lineup clear.
+
+    Special teams keeps the model's name for the kick, punt, or return. A close
+    or thin scrimmage frame returns nothing so the model can still name the side.
+    """
+
+    if play.family == "special_teams":
+        return None
+    isolation = isolate_play(_scrimmage_frames(catalog, project, play, snap=True), mine, other)
+    if isolation.confidence == "high" and isolation.unit in {"offense", "defense"}:
+        return isolation.unit
+    return None
+
+
+# A card the play reader scored lower than this stays with the detector's crop.
+_PICK_MIN_SCORE = 6
+_player_pick_lock = threading.Lock()
+
+
+def _keep_player_picks(
+    catalog: Catalog,
+    project_id: int,
+    play: PlayRecord,
+    picks: dict[str, PlayerPick],
+    mine_side: str,
+) -> None:
+    """Put the player the play reader picked on each team card when it scores higher.
+
+    Team A is the scouted team. The pick names one of the six chart frames; that
+    moment is read again at full size so the crop shows the uniform clearly.
+    """
+
+    try:
+        clip = catalog.clip_file(project_id, play.play_number)
+    except CatalogError:
+        return
+    if clip is None or not clip.is_file():
+        return
+    other_side = "right" if mine_side == "left" else "left"
+    moments = sample_times(max(0.5, play.end_seconds - play.start_seconds), 6)
+    for team, pick in picks.items():
+        side = mine_side if team == "A" else other_side
+        if pick.score < _PICK_MIN_SCORE or not 1 <= pick.frame <= len(moments):
+            continue
+        with _player_pick_lock:
+            if pick.score <= _pick_scores(catalog, project_id).get(side, 0):
+                continue
+        try:
+            frame = full_frame(clip, moments[pick.frame - 1])
+        except (VideoAnalysisError, OSError):
+            continue
+        shot = crop_picked_player(frame, pick.box) if frame else None
+        if shot is None:
+            continue
+        with _player_pick_lock:
+            scores = _pick_scores(catalog, project_id)
+            if pick.score <= scores.get(side, 0):
+                continue
+            try:
+                catalog.save_team_image(project_id, f"{side}-player", shot, ".jpg")
+                catalog.save_team_image(project_id, f"{side}-reference", shot, ".jpg")
+            except CatalogError:
+                continue
+            scores[side] = pick.score
+            _save_pick_scores(catalog, project_id, scores)
+
+
+def _pick_file(catalog: Catalog, project_id: int) -> Path | None:
+    for kind in ("left-player", "right-player", "left", "right"):
+        try:
+            path = catalog.team_image(project_id, kind)
+        except CatalogError:
+            continue
+        if path is not None:
+            return path.parent / ".player-picks.json"
+    return None
+
+
+def _pick_scores(catalog: Catalog, project_id: int) -> dict[str, int]:
+    """The score of the play-reader pick on each card. A detector crop has none."""
+
+    path = _pick_file(catalog, project_id)
+    if path is None or not path.is_file():
+        return {}
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(saved, dict):
+        return {}
+    return {
+        side: int(score)
+        for side, score in saved.items()
+        if side in {"left", "right"} and isinstance(score, int)
+    }
+
+
+def _save_pick_scores(catalog: Catalog, project_id: int, scores: dict[str, int]) -> None:
+    path = _pick_file(catalog, project_id)
+    if path is None:
+        return
+    with contextlib.suppress(OSError):
+        path.write_text(json.dumps(scores), encoding="utf-8")
+
+
+def _forget_player_pick(catalog: Catalog, project_id: int, side: str) -> None:
+    """A new detector crop or a reset replaces the pick, so the next read can beat it."""
+
+    with _player_pick_lock:
+        scores = _pick_scores(catalog, project_id)
+        if scores.pop(side, None) is not None:
+            _save_pick_scores(catalog, project_id, scores)
 
 
 def _chart_answer(value: object) -> tuple[str | None, str | None, int, int, str]:
@@ -2952,8 +3121,12 @@ def _live_lines(
     *,
     restart: bool = False,
     only: Sequence[int] | None = None,
+    phase: str = "all",
 ) -> Iterator[str]:
-    """Write the scouting-analysis table, chart plays in parallel, and stream the rows."""
+    """Write the scouting-analysis table, chart plays in parallel, and stream the rows.
+
+    ``phase`` runs one part: "call" reads each call again, "formation" plots again.
+    """
 
     kinds = chart_kinds(chosen)
     project_id = saved.project
@@ -2981,6 +3154,7 @@ def _live_lines(
         return
 
     mine, other = _team_uniforms(teams)
+    mine_side = "right" if teams.mine == "right" else "left"
     updates: queue.Queue[BaseException | None] = queue.Queue()
     remaining = len(todo)
 
@@ -3002,6 +3176,8 @@ def _live_lines(
                     formations,
                     kinds,
                     chosen,
+                    phase=phase,
+                    mine_side=mine_side,
                 )
             except Exception as error:
                 with contextlib.suppress(CatalogError):
@@ -3139,6 +3315,7 @@ def _analyze_report_play(
     chosen: frozenset[str],
     *,
     phase: str = "all",
+    mine_side: str = "left",
 ) -> None:
     """Chart one play. ``phase`` is call, formation, or both."""
 
@@ -3150,7 +3327,15 @@ def _analyze_report_play(
         model = ""
         if phase in {"all", "call"}:
             more_in, more_out, model = _chart_play(
-                catalog, project, latest, mine, other, reader, kinds
+                catalog,
+                project,
+                latest,
+                mine,
+                other,
+                reader,
+                kinds,
+                mine_side=mine_side,
+                force=phase == "call",
             )
             incoming += more_in
             outgoing += more_out
@@ -3194,7 +3379,7 @@ def _analyze_report_play(
             )
         detail = ""
         status = "ready" if learned else "missed"
-        if learned and "formations" in chosen and phase in {"all", "formation"}:
+        if learned and "formations" in chosen:
             call = (latest.play_type or "").strip().lower()
             if (
                 latest.family != "special_teams"
@@ -3272,6 +3457,7 @@ def _analysis_view(
         "call": note.call,
         "side": note.side,
         "formation": formation_label(note.formation) or note.formation,
+        "steps": _play_steps(play, plotted=bool(note.formation or (play and play.formation))),
         "input_tokens": note.input_tokens,
         "output_tokens": note.output_tokens,
         "cost_usd": round(note.cost_usd, 6),
@@ -3303,6 +3489,29 @@ def _merged_spend(
             ", ".join(unique),
         )
     return merged
+
+
+def _play_steps(play: PlayRecord | None, *, plotted: bool = False) -> dict[str, str]:
+    """Where this play is in the read. A created play is already detected.
+
+    Side and formation stay open until they are known. Special teams skips both.
+    Review is optional.
+    """
+
+    if play is None:
+        return {"play": "open", "side": "open", "formation": "open", "reviewed": "open"}
+    if play.family == "special_teams":
+        side = "skip"
+        formation = "skip"
+    else:
+        side = "detected" if play.unit in {"offense", "defense"} else "open"
+        formation = "detected" if plotted or play.formation else "open"
+    return {
+        "play": "detected",
+        "side": side,
+        "formation": formation,
+        "reviewed": "reviewed" if play.reviewed else "open",
+    }
 
 
 def _play_kind(play: PlayRecord) -> str:
@@ -4108,6 +4317,8 @@ def _reset_team_photos(
     """Remove stored player photos so the next build starts clean."""
 
     sides = (side,) if side in {"left", "right"} else ("left", "right")
+    for chosen in sides:
+        _forget_player_pick(catalog, project_id, chosen)
     kinds: list[str] = []
     for chosen in sides:
         kinds.extend(
@@ -4598,6 +4809,7 @@ def _store_portraits(
             )
             catalog.save_team_image(project_id, f"{side}-player", shot, ".jpg")
             catalog.save_team_image(project_id, f"{side}-reference", shot, ".jpg")
+            _forget_player_pick(catalog, project_id, side)
             _set_team_progress(
                 project_id,
                 step="save",

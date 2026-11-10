@@ -1,8 +1,8 @@
 """Spatial 11-on-11 plot of both teams before the snap.
 
-OpenCV finds people in a film frame. Jersey color splits them into offense and
-defense. Missing spots are filled with a best guess so each side always has 11
-markers, and those guesses are marked low confidence on the plot.
+The isolator splits a frame into the two jerseys. Missing spots are filled
+with a best guess so each side always has 11 markers, and those guesses are
+marked low confidence on the plot.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from film_analysis.teams.players import PlayerBox, find_players
+from film_analysis.chart.isolate import split_players
 from film_analysis.teams.uniforms import Uniform
 
 _TEAM_SIZE = 11
@@ -282,39 +282,12 @@ def _team_points(
     offense: Uniform,
     defense: Uniform,
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return [], []
-    array = np.frombuffer(jpeg, dtype=np.uint8)
-    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
-    if image is None or image.size == 0:
-        return [], []
-    height, width = image.shape[:2]
-    if width < 8 or height < 8:
-        return [], []
-    offense_rgb = _rgb(offense.jersey_hex) or _rgb_from_name(offense.jersey)
-    defense_rgb = _rgb(defense.jersey_hex) or _rgb_from_name(defense.jersey)
-    offense_pts: list[tuple[float, float, int]] = []
-    defense_pts: list[tuple[float, float, int]] = []
-    for box in find_players(jpeg):
-        sample = _jersey_sample(image, box)
-        if sample is None:
-            continue
-        own_off = _distance(sample, offense_rgb) if offense_rgb else 10**9
-        own_def = _distance(sample, defense_rgb) if defense_rgb else 10**9
-        x = (box.x + box.width / 2) / width
-        y = (box.y + box.height) / height
-        if own_off <= own_def:
-            offense_pts.append((x, y, box.width * box.height))
-        else:
-            defense_pts.append((x, y, box.width * box.height))
-    offense_pts.sort(key=lambda item: item[2], reverse=True)
-    defense_pts.sort(key=lambda item: item[2], reverse=True)
+    """The isolator's boxes, so the plot uses the same players as the side call."""
+
+    offense_players, defense_players = split_players(jpeg, offense, defense)
     return (
-        [(x, y) for x, y, _area in offense_pts[:_TEAM_SIZE]],
-        [(x, y) for x, y, _area in defense_pts[:_TEAM_SIZE]],
+        [(player.x, player.y) for player in offense_players[:_TEAM_SIZE]],
+        [(player.x, player.y) for player in defense_players[:_TEAM_SIZE]],
     )
 
 
@@ -446,22 +419,6 @@ def _list(value: object) -> list[object]:
     return []
 
 
-def _jersey_sample(image, box: PlayerBox) -> tuple[int, int, int] | None:
-    height, width = image.shape[:2]
-    x0 = max(0, box.x)
-    y0 = max(0, box.y)
-    x1 = min(width, box.x + box.width)
-    y1 = min(height, box.y + max(1, int(box.height * 0.55)))
-    if x1 - x0 < 4 or y1 - y0 < 4:
-        return None
-    crop = image[y0:y1, x0:x1]
-    if crop.size == 0:
-        return None
-    # OpenCV is BGR.
-    mean = crop.reshape(-1, 3).mean(axis=0)
-    return int(mean[2]), int(mean[1]), int(mean[0])
-
-
 def _rgb(hex_color: str) -> tuple[int, int, int] | None:
     text = (hex_color or "").strip()
     if len(text) != 7 or not text.startswith("#"):
@@ -472,34 +429,11 @@ def _rgb(hex_color: str) -> tuple[int, int, int] | None:
         return None
 
 
-def _rgb_from_name(name: str) -> tuple[int, int, int] | None:
-    words = (name or "").lower()
-    if "white" in words:
-        return 244, 241, 234
-    if "red" in words:
-        return 180, 35, 24
-    if "blue" in words:
-        return 28, 63, 115
-    if "black" in words or "dark" in words:
-        return 24, 24, 24
-    if "green" in words:
-        return 28, 110, 48
-    if "yellow" in words or "gold" in words:
-        return 220, 180, 40
-    return None
-
-
 def _bgr_from_hex(hex_color: str) -> tuple[int, int, int] | None:
     rgb = _rgb(hex_color)
     if rgb is None:
         return None
     return rgb[2], rgb[1], rgb[0]
-
-
-def _distance(left: tuple[int, int, int], right: tuple[int, int, int] | None) -> int:
-    if right is None:
-        return 10**9
-    return sum((a - b) ** 2 for a, b in zip(left, right, strict=True))
 
 
 def _clamp(value: float) -> float:

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from film_analysis.scout.report import scouting_blocks, untagged_plays
@@ -379,6 +380,12 @@ def test_formation_setting_runs_during_call_charting(tmp_path: Path) -> None:
     detail = client.get("/api/plays/1-2")
     assert detail.status_code == 200
     assert detail.json()["formation_plot"] == "/projects/1/plays/2/formation.jpg"
+    assert detail.json()["steps"] == {
+        "play": "detected",
+        "side": "detected",
+        "formation": "detected",
+        "reviewed": "reviewed",
+    }
 
 
 def test_report_backfills_a_missing_formation_plot(tmp_path: Path) -> None:
@@ -828,3 +835,119 @@ def test_a_team_with_no_snaps_says_so() -> None:
     assert "Home had the ball on 1 snap: 1 run (100%) and 0 passes (0%)." in text
     assert "Home has no defensive snaps charted in this film." in text
     assert "Away has no offensive snaps" not in text
+
+
+def test_the_play_read_puts_its_best_player_on_each_team_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cv2
+    import numpy as np
+
+    from film_analysis.chart.call import ChartedPlay, PlayerPick
+    from film_analysis.teams.players import crop_picked_player
+
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    frame[:, :] = (40, 140, 40)
+    frame[300:450, 200:250] = (40, 30, 140)
+    frame[280:430, 900:950] = (230, 230, 230)
+    full = cv2.imencode(".jpg", frame)[1].tobytes()
+    monkeypatch.setattr("film_analysis.web.app.full_frame", lambda video, moment: full)
+
+    store = _ready_film(tmp_path)
+    store.set_film_teams(1, FilmTeams("North", "South", "right"))
+    best = (900 / 1280, 280 / 720, 950 / 1280, 430 / 720)
+    weaker = (200 / 1280, 300 / 720, 250 / 1280, 450 / 720)
+    answers = iter(
+        [
+            {"A": PlayerPick(2, best, 9), "B": PlayerPick(1, weaker, 4)},
+            {"A": PlayerPick(3, weaker, 7), "B": PlayerPick(5, weaker, 8)},
+        ]
+    )
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other, kind
+        return ChartedPlay(call="pass", side="offense", players=next(answers))
+
+    client = TestClient(create_app(store=store, chart=chart, workers=1))
+    response = client.post("/api/projects/1/report/live", json={"sections": ["tendencies"]})
+
+    assert response.status_code == 200
+    scouted = store.team_image(1, "right-player")
+    opponent = store.team_image(1, "left-player")
+    assert scouted is not None and opponent is not None
+    assert scouted.read_bytes() == crop_picked_player(full, best)
+    assert opponent.read_bytes() == crop_picked_player(full, weaker)
+    assert store.team_image(1, "right-reference").read_bytes() == scouted.read_bytes()
+
+
+def test_one_report_step_reads_only_the_calls_again(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
+
+    store = _ready_film(tmp_path)
+    store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
+    charted: list[str] = []
+    plotted: list[str] = []
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other
+        charted.append(kind)
+        return ChartedPlay("pass", "offense")
+
+    def name(frames: list[bytes], mine: object, other: object, call: str = "") -> None:
+        del frames, mine, other
+        plotted.append(call)
+
+    client = TestClient(create_app(store=store, chart=chart, formations=name))
+    created = client.post(
+        "/api/projects/1/report",
+        json={"sections": ["calls"], "step": "call", "plays": [1]},
+    )
+
+    assert created.status_code == 200
+    assert charted == ["scrimmage"]
+    assert plotted == []
+    play = store.get_project(1).plays[0]
+    assert (play.play_type, play.unit) == ("pass", "offense")
+
+
+def test_one_report_step_plots_a_formation_again(tmp_path: Path) -> None:
+    from film_analysis.chart.call import ChartedPlay
+    from film_analysis.chart.formation import FormationRead
+
+    store = _ready_film(tmp_path)
+    store.set_play_type(1, 2, "pass", "scrimmage")
+    store.set_play_unit(1, 2, "defense")
+    store.set_play_formation(1, 2, "shotgun")
+    old = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
+    store.save_play_image(1, 2, "formation", old)
+    store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
+    new = old[:-2] + b"\x00\xff\xd9"
+    charted: list[str] = []
+
+    def chart(frames: list[bytes], mine: object, other: object, kind: str) -> ChartedPlay:
+        del frames, mine, other
+        charted.append(kind)
+        return ChartedPlay("run", "offense")
+
+    def name(frames: list[bytes], mine: object, other: object, call: str = "") -> FormationRead:
+        del frames, mine, other, call
+        return FormationRead("trips", plot=new)
+
+    client = TestClient(create_app(store=store, chart=chart, formations=name))
+    created = client.post(
+        "/api/projects/1/report",
+        json={"sections": ["formations"], "step": "formation", "plays": [2]},
+    )
+
+    assert created.status_code == 200
+    assert charted == []
+    assert store.get_project(1).plays[1].formation == "trips"
+    assert client.get("/projects/1/plays/2/formation.jpg").content == new
+
+
+def test_an_unknown_report_step_is_refused(tmp_path: Path) -> None:
+    client = TestClient(create_app(store=_ready_film(tmp_path)))
+
+    response = client.post("/api/projects/1/report/live", json={"step": "teams"})
+
+    assert response.status_code == 422

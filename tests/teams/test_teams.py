@@ -1072,3 +1072,30 @@ def _pixels(still: bytes) -> list[tuple[int, int, int]]:
     from film_analysis.teams.uniforms import _sample_pixels
 
     return _sample_pixels(still)
+
+
+def _field_with_player(x: int, y: int, color: tuple[int, int, int]) -> bytes:
+    """A 1280x720 field with one standing player whose top-left is at (x, y)."""
+
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    image[:, :] = (40, 140, 40)
+    image[y : y + 150, x : x + 50] = color
+    image[y : y + 30, x + 12 : x + 38] = (60, 60, 60)
+    return cv2.imencode(".jpg", image)[1].tobytes()
+
+
+def test_a_picked_player_is_cut_out_as_a_portrait_card() -> None:
+    from film_analysis.teams.players import crop_picked_player
+
+    frame = _field_with_player(600, 300, (40, 30, 140))
+    box = (600 / 1280, 300 / 720, 650 / 1280, 450 / 720)
+
+    card = crop_picked_player(frame, box)
+
+    assert card is not None
+    shown = cv2.imdecode(np.frombuffer(card, dtype=np.uint8), cv2.IMREAD_COLOR)
+    height, width = shown.shape[:2]
+    assert height > width
+    assert 480 <= height <= 640
+    assert crop_picked_player(frame, (0.5, 0.5, 0.51, 0.52)) is None
+    assert crop_picked_player(b"not a jpeg", box) is None
