@@ -120,7 +120,7 @@ def test_full_body_shot_is_one_player_from_this_team(monkeypatch: pytest.MonkeyP
     assert shot.startswith(b"\xff\xd8\xff")
     found = cv2.imdecode(np.frombuffer(shot, dtype=np.uint8), cv2.IMREAD_COLOR)
     assert found is not None
-    assert max(found.shape[:2]) <= 960
+    assert max(found.shape[:2]) <= 1920
     mean = found.reshape(-1, 3).mean(axis=0)
     assert mean[2] > 180
     assert abs(float(mean[2]) - float(mean[0])) < 40
@@ -299,13 +299,10 @@ def test_a_midtone_referee_shirt_is_not_a_team_color(
     assert team_colors_from_players([b"\xff\xd8\xffframe"]) is None
 
 
-def test_a_crop_that_contains_another_player_is_skipped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_same_team_group_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     image = np.zeros((400, 320, 3), dtype=np.uint8)
     image[:, :] = (40, 140, 40)
     image[30:300, 20:160] = (240, 240, 240)
-    monkeypatch.setattr("film_analysis.teams.players._alone", lambda crop: True)
     monkeypatch.setattr(
         "film_analysis.teams.players.find_players",
         lambda frame: [PlayerBox(10, 20, 180, 300), PlayerBox(120, 40, 50, 160)],
@@ -317,35 +314,41 @@ def test_a_crop_that_contains_another_player_is_skipped(
     assert white is not None
     found = cv2.imdecode(np.frombuffer(white, dtype=np.uint8), cv2.IMREAD_COLOR)
     assert found is not None
-    assert found.shape[1] / found.shape[0] < 0.45
+    assert found.reshape(-1, 3).mean() > 160
 
 
-def test_a_player_cut_off_at_the_waist_or_standing_on_the_sideline_is_skipped(
+def test_a_clear_torso_is_kept_and_a_tiny_crop_is_not(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Waist crop: jersey fills the top of the frame, no grass above the helmet.
-    legs = np.zeros((260, 120, 3), dtype=np.uint8)
-    legs[:, :] = (40, 40, 200)
-    legs[180:, :] = (40, 140, 40)
-    sideline = np.zeros((260, 120, 3), dtype=np.uint8)
-    sideline[:, :] = (20, 20, 20)
-    sideline[30:230, 30:90] = (40, 40, 180)
+    torso = np.zeros((260, 120, 3), dtype=np.uint8)
+    torso[:, :] = (40, 40, 200)
+    torso[180:, :] = (40, 140, 40)
+    speck = np.zeros((260, 120, 3), dtype=np.uint8)
+    speck[:, :] = (40, 140, 40)
+    speck[40:70, 40:70] = (40, 40, 200)
     monkeypatch.setattr(
         "film_analysis.teams.players.find_players",
         lambda frame: [PlayerBox(20, 10, 80, 240)],
     )
 
-    assert lone_players([_jpeg(legs)]) == (None, None)
-    assert lone_players([_jpeg(sideline)]) == (None, None)
+    white, colored = lone_players([_jpeg(torso)])
+    assert white is None
+    assert colored is not None
+
+    monkeypatch.setattr(
+        "film_analysis.teams.players.find_players",
+        lambda frame: [PlayerBox(40, 40, 30, 30)],
+    )
+    assert lone_players([_jpeg(speck)]) == (None, None)
 
 
 def test_a_sharp_player_beats_a_taller_blur(monkeypatch: pytest.MonkeyPatch) -> None:
     image = np.zeros((420, 420, 3), dtype=np.uint8)
     image[:, :] = (40, 140, 40)
     image[20:280, 30:120] = (245, 245, 245)
+    image[20:280, 30:120] = cv2.GaussianBlur(image[20:280, 30:120], (0, 0), 9)
     image[90:270, 260:350] = (245, 245, 245)
     image[200:260, 270:340] = (12, 12, 12)
-    monkeypatch.setattr("film_analysis.teams.players._alone", lambda crop: True)
     monkeypatch.setattr(
         "film_analysis.teams.players.find_players",
         lambda frame: [PlayerBox(30, 20, 90, 260), PlayerBox(260, 90, 90, 180)],

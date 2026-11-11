@@ -36,6 +36,7 @@ TEAM_IMAGE_KINDS = frozenset(
         "right-player",
         "left-reference",
         "right-reference",
+        "lineup",
     }
 )
 

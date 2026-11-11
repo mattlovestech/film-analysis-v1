@@ -50,14 +50,14 @@ _MODS = frozenset({"dark", "light"})
 _DETECT_PROMPT = (
     'These frames are from the football film "{title}". '
     "Two teams are in the plays. "
-    "One team wears a white jersey, usually the away team. "
-    "The other wears a solid color jersey, usually the home team. "
+    "One team wears a white jersey, the home team. "
+    "The other wears a solid color jersey, the away team. "
     "Identify those two uniforms. "
     "A referee wears a black-and-white striped shirt and is not either team. "
     "The two jerseys are different colors. Never give both teams the same jersey color. "
     "The left team is lined up on the left side of the frame. "
     "The right team is lined up on the right side of the frame. "
-    "Name the white-jersey team Away and the solid-color team Home. "
+    "Name the white-jersey team Home and the solid-color team Away. "
     "The name is only Home or Away. Do not guess a school, a mascot, or a city. "
     "For each side give jersey, pants, and helmet as color words. "
     "Read each hex from the cloth in these photos, not from a remembered school color. "
@@ -278,19 +278,12 @@ def team_cards(
     right_shot = team_player_shot(frames, right, left, avoid=avoid)
     if left_shot is not None and left_shot == right_shot:
         right_shot = None
-    if left_shot is not None and right_shot is not None:
-        return left_shot, right_shot
-    white, colored = lone_players(frames, avoid)
-    if _lighter(left) and not _lighter(right):
-        spare = (white, colored)
-    elif _lighter(right) and not _lighter(left):
-        spare = (colored, white)
-    else:
-        spare = (white, colored)
-    if left_shot is None:
-        left_shot = _spare_for_uniform(spare[0], left, right)
-    if right_shot is None:
-        right_shot = _spare_for_uniform(spare[1], right, left)
+    if left_shot is None or right_shot is None:
+        white, _colored = lone_players(frames, avoid)
+        if left_shot is None and _lighter(left):
+            left_shot = _spare_for_uniform(white, left, right)
+        if right_shot is None and _lighter(right):
+            right_shot = _spare_for_uniform(white, right, left)
     if left_shot is not None and left_shot == right_shot:
         right_shot = None
     return left_shot, right_shot
@@ -685,14 +678,14 @@ def suggest_team_names(
 
 
 def label_home_away(left: Uniform, right: Uniform) -> tuple[Uniform, Uniform]:
-    """Name the white jersey Away and the colored jersey Home."""
+    """Name the white jersey Home and the colored jersey Away."""
 
     left_white = _white_jersey(left)
     right_white = _white_jersey(right)
     if left_white and not right_white:
-        return replace(left, name="Away"), replace(right, name="Home")
-    if right_white and not left_white:
         return replace(left, name="Home"), replace(right, name="Away")
+    if right_white and not left_white:
+        return replace(left, name="Away"), replace(right, name="Home")
     return replace(left, name="Home"), replace(right, name="Away")
 
 
@@ -704,7 +697,7 @@ def _white_jersey(uniform: Uniform) -> bool:
 
 
 def color_words(value: str) -> str:
-    """A short color name, so the image model does not paint a hex code on the jersey."""
+    """A short color name for this jersey."""
 
     if not _COLOR.fullmatch(value):
         return "the color in the photo"

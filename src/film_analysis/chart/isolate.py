@@ -439,6 +439,72 @@ def _lab_color(rgb: tuple[int, int, int] | None) -> tuple[float, float, float] |
     return float(lab[0]), float(lab[1]), float(lab[2])
 
 
+def mark_both_teams(jpeg: bytes, home: Uniform, away: Uniform) -> bytes | None:
+    """A high-resolution snap with both teams circled in their jersey colors.
+
+    Home is the white jersey. Several teammates in that color stay in the frame,
+    each marked, so the uniform is obvious.
+    """
+
+    image = _bgr(jpeg)
+    if image is None:
+        return None
+    home_color = _bgr_hex(home.jersey_hex) or (240, 240, 240)
+    away_color = _bgr_hex(away.jersey_hex) or (40, 40, 200)
+    try:
+        import cv2
+    except ImportError:
+        return None
+    height, width = image.shape[:2]
+    home_players, away_players = split_players(jpeg, home, away)
+    home_players = [player for player in home_players if _on_field(player)]
+    away_players = [player for player in away_players if _on_field(player)]
+    if len(home_players) < 2 or len(away_players) < 2:
+        return None
+    marked = image.copy()
+    for player, color, word in (
+        *[(player, home_color, "Home") for player in home_players],
+        *[(player, away_color, "Away") for player in away_players],
+    ):
+        center = (int(player.x * width), int(min(height - 8, player.y * height)))
+        radius = max(14, int(min(width, height) * 0.035))
+        cv2.circle(marked, center, radius, (0, 0, 0), 6, cv2.LINE_AA)
+        cv2.circle(marked, center, radius, color, 3, cv2.LINE_AA)
+        cv2.putText(
+            marked,
+            word,
+            (center[0] + radius + 4, center[1]),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+    ok, encoded = cv2.imencode(".jpg", marked, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+    if not ok:
+        return None
+    return encoded.tobytes()
+
+
+def _on_field(player: IsolatedPlayer) -> bool:
+    """The playing surface. The stands and the scoreboard are outside it."""
+
+    return 0.18 < player.y < 0.82 and 0.05 < player.x < 0.95
+
+
+def _bgr_hex(value: str) -> tuple[int, int, int] | None:
+    text = (value or "").strip()
+    if len(text) != 7 or not text.startswith("#"):
+        return None
+    try:
+        red = int(text[1:3], 16)
+        green = int(text[3:5], 16)
+        blue = int(text[5:7], 16)
+    except ValueError:
+        return None
+    return blue, green, red
+
+
 def _dist(
     left: tuple[float, float, float],
     right: tuple[float, float, float],

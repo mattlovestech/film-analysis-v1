@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analyze</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font: 16px/1.4 "Avenir Next", "Segoe UI", sans-serif; background: #f6f4ef; color: #1c1c1a; }
+    header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; padding: 1rem 1.25rem; }
+    nav { display: flex; gap: 0.9rem; align-items: center; }
+    a { color: inherit; }
+    a.quiet { color: #5c5a55; text-decoration: none; }
+    h1 { font-size: 1.4rem; margin: 0; }
+    main { padding: 0 1.25rem 2rem; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
+    th, td { text-align: left; padding: 0.7rem 0.75rem; border-bottom: 1px solid #ece8e0; vertical-align: middle; }
+    th { font-size: 0.85rem; color: #5c5a55; font-weight: 600; }
+    tr.play { cursor: pointer; }
+    tr.play.open { background: #f3f7f1; }
+    .bar { height: 0.45rem; background: #ece8e0; border-radius: 999px; overflow: hidden; min-width: 5.5rem; }
+    .bar span { display: block; height: 100%; background: #2f6b3a; width: 0; }
+    button { border: 0; border-radius: 999px; padding: 0.4rem 0.75rem; background: #1c1c1a; color: #fff; font: inherit; }
+    button:disabled { opacity: 0.45; }
+    #empty, .status { color: #5c5a55; }
+    .panel { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.1fr); gap: 1rem; padding: 0.25rem 0 0.5rem; }
+    video, canvas { width: 100%; border-radius: 8px; background: #111; }
+    canvas { background: #e7f0df; }
+    @media (max-width: 800px) { .panel { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><a href="/projects">Opponent scouting</a></h1>
+    <nav>
+      <a class="quiet" href="/projects">Projects</a>
+      <a class="quiet" href="/analyze">Analyze</a>
+      <a class="quiet" href="/activity">Activity</a>
+      <a class="quiet" href="/settings">Settings</a>
+    </nav>
+  </header>
+  <main>
+    <p id="empty" hidden>No offense or defense plays are stored yet.</p>
+    <p id="loading">Loading the offense and defense plays.</p>
+    <table id="plays" hidden>
+      <thead>
+        <tr>
+          <th>Film</th>
+          <th>Play</th>
+          <th>Clock</th>
+          <th>Type</th>
+          <th>Players</th>
+          <th>Plot</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script>
+    const table = document.querySelector("#plays");
+    const body = table.querySelector("tbody");
+    const empty = document.querySelector("#empty");
+    const loading = document.querySelector("#loading");
+    let openUid = null;
+    let listed = "";
+    let refreshToken = 0;
+
+    function bar(percent) {
+      const cell = document.createElement("td");
+      const track = document.createElement("div");
+      track.className = "bar";
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-valuenow", String(percent));
+      const fill = document.createElement("span");
+      fill.style.width = `${percent}%`;
+      track.append(fill);
+      cell.append(track);
+      return cell;
+    }
+
+    function setBar(cell, percent) {
+      const track = cell.querySelector("[role=progressbar]");
+      track.setAttribute("aria-valuenow", String(percent));
+      track.querySelector("span").style.width = `${percent}%`;
+    }
+
+    function playRow(row) {
+      const tr = document.createElement("tr");
+      tr.className = "play";
+      tr.dataset.uid = row.uid;
+      const film = document.createElement("td");
+      film.textContent = row.name;
+      const play = document.createElement("td");
+      play.textContent = String(row.play);
+      const clock = document.createElement("td");
+      clock.textContent = row.clock;
+      const action = document.createElement("td");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = row.running ? "Reading" : "Run";
+      button.disabled = row.running;
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        start(row.uid, button);
+      });
+      action.append(button);
+      tr.append(film, play, clock, bar(row.type), bar(row.players), bar(row.plot), action);
+      tr.addEventListener("click", () => toggle(row.uid));
+      return tr;
+    }
+
+    function updateRow(tr, row) {
+      tr.children[0].textContent = row.name;
+      tr.children[1].textContent = String(row.play);
+      tr.children[2].textContent = row.clock;
+      setBar(tr.children[3], row.type);
+      setBar(tr.children[4], row.players);
+      setBar(tr.children[5], row.plot);
+      const button = tr.querySelector("button");
+      button.textContent = row.running ? "Reading" : "Run";
+      button.disabled = row.running;
+      tr.classList.toggle("open", row.uid === openUid);
+    }
+
+    function paint(rows) {
+      loading.hidden = true;
+      empty.hidden = rows.length > 0;
+      table.hidden = rows.length === 0;
+      const next = rows.map((row) => row.uid).join("\n");
+      const plays = new Map([...body.querySelectorAll("tr.play")].map((tr) => [tr.dataset.uid, tr]));
+      if (next === listed && plays.size === rows.length) {
+        for (const row of rows) updateRow(plays.get(row.uid), row);
+        if (openUid) refreshOpen();
+        return;
+      }
+      listed = next;
+      const details = new Map([...body.querySelectorAll("tr.detail")].map((tr) => [tr.dataset.uid, tr]));
+      const seen = new Set();
+      for (const row of rows) {
+        seen.add(row.uid);
+        let tr = plays.get(row.uid);
+        if (!tr) tr = playRow(row);
+        else updateRow(tr, row);
+        body.append(tr);
+        const detail = details.get(row.uid);
+        if (detail) body.append(detail);
+      }
+      for (const [uid, tr] of plays) {
+        if (seen.has(uid)) continue;
+        details.get(uid)?.remove();
+        tr.remove();
+      }
+      if (openUid) refreshOpen();
+    }
+
+    function toggle(uid) {
+      const current = body.querySelector(`tr.detail[data-uid="${cssAttr(uid)}"]`);
+      for (const open of [...body.querySelectorAll("tr.detail")]) {
+        if (open !== current) open.remove();
+      }
+      for (const tr of body.querySelectorAll("tr.play")) tr.classList.remove("open");
+      if (current) {
+        current.remove();
+        openUid = null;
+        return;
+      }
+      openUid = uid;
+      const play = body.querySelector(`tr.play[data-uid="${cssAttr(uid)}"]`);
+      play.classList.add("open");
+      const detail = document.createElement("tr");
+      detail.className = "detail";
+      detail.dataset.uid = uid;
+      const cell = document.createElement("td");
+      cell.colSpan = 7;
+      const panel = document.createElement("div");
+      panel.className = "panel";
+      const side = document.createElement("div");
+      const status = document.createElement("p");
+      status.className = "status";
+      status.textContent = "Loading this play.";
+      const video = document.createElement("video");
+      video.controls = true;
+      video.playsInline = true;
+      const parts = uid.split("-");
+      video.src = `/projects/${parts[0]}/plays/${parts[1]}`;
+      side.append(status, video);
+      const canvas = document.createElement("canvas");
+      canvas.width = 720;
+      canvas.height = 520;
+      panel.append(side, canvas);
+      cell.append(panel);
+      detail.append(cell);
+      play.after(detail);
+      refreshOpen();
+    }
+
+    async function refreshOpen() {
+      if (!openUid) return;
+      const uid = openUid;
+      const token = ++refreshToken;
+      const detail = body.querySelector(`tr.detail[data-uid="${cssAttr(uid)}"]`);
+      if (!detail) return;
+      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
+      if (!response.ok || token !== refreshToken || uid !== openUid) return;
+      const payload = await response.json();
+      const status = detail.querySelector(".status");
+      if (!payload.diagram) {
+        status.textContent = payload.running ? "Reading this play." : "Run this play to place the players.";
+        return;
+      }
+      const teams = payload.diagram.teams || {};
+      status.textContent = `${teams.offense || "Offense"} on offense, ${teams.defense || "defense"} on defense.`;
+      draw(detail.querySelector("canvas"), payload.diagram);
+    }
+
+    async function start(uid, button) {
+      button.disabled = true;
+      button.textContent = "Reading";
+      await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, { method: "POST" });
+      if (openUid === uid) refreshOpen();
+    }
+
+    function draw(canvas, diagram) {
+      const ctx = canvas.getContext("2d");
+      const width = canvas.width;
+      const height = canvas.height;
+      const left = 48;
+      const right = width - 20;
+      const top = 28;
+      const bottom = height - 28;
+      const field = diagram.field || {};
+      const xMax = Number(field.width || 53.3) / 2;
+      const people = [...(diagram.offense || []), ...(diagram.defense || [])];
+      let yMin = -12;
+      let yMax = 12;
+      for (const player of people) {
+        const y = Number(player.y) || 0;
+        yMin = Math.min(yMin, y);
+        yMax = Math.max(yMax, y);
+      }
+      const pad = Math.max(2, (yMax - yMin) * 0.08);
+      yMin -= pad;
+      yMax += pad;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#e7f0df";
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = "#b7c7ae";
+      ctx.fillStyle = "#5d6b58";
+      ctx.font = "13px sans-serif";
+      ctx.lineWidth = 1;
+      const startYard = Math.ceil(yMin / 5) * 5;
+      const endYard = Math.floor(yMax / 5) * 5;
+      for (let yard = startYard; yard <= endYard; yard += 5) {
+        const y = mapY(yard);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.fillText(String(50 - yard), 6, y + 4);
+      }
+      ctx.strokeStyle = "#1c1c1a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(left, mapY(0));
+      ctx.lineTo(right, mapY(0));
+      ctx.stroke();
+      ctx.fillStyle = "#1c1c1a";
+      ctx.fillText("goal", right - 40, 18);
+      paintSide(diagram.offense || [], field.offense_color || "#f4f4f4");
+      paintSide(diagram.defense || [], field.defense_color || "#c4382c");
+
+      function mapX(x) {
+        return left + ((Number(x) + xMax) / (xMax * 2)) * (right - left);
+      }
+      function mapY(y) {
+        return bottom - ((y - yMin) / (yMax - yMin)) * (bottom - top);
+      }
+      function paintSide(players, fill) {
+        for (const player of players) {
+          const x = mapX(player.x);
+          const y = mapY(Number(player.y) || 0);
+          ctx.beginPath();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#1c1c1a";
+          ctx.fillStyle = player.seen === false ? "transparent" : fill;
+          if (player.symbol === "square") ctx.rect(x - 8, y - 8, 16, 16);
+          else ctx.arc(x, y, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (player.label) {
+            ctx.fillStyle = "#1c1c1a";
+            ctx.fillText(String(player.label), x + 10, y - 8);
+          }
+        }
+      }
+    }
+
+    function cssAttr(value) {
+      return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    }
+
+    async function load() {
+      const response = await fetch("/api/analyze");
+      if (!response.ok) return;
+      paint(await response.json());
+    }
+
+    load();
+    setInterval(load, 1500);
+  </script>
+</body>
+</html>

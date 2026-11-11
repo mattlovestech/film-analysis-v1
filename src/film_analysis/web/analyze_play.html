@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play diagram</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font: 16px/1.4 "Avenir Next", "Segoe UI", sans-serif; background: #f6f4ef; color: #1c1c1a; }
+    header, main { padding: 1rem 1.25rem; }
+    header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+    nav, .facts { display: flex; gap: 0.9rem; align-items: center; flex-wrap: wrap; }
+    a { color: inherit; }
+    a.quiet { color: #5c5a55; text-decoration: none; }
+    h1 { font-size: 1.35rem; margin: 0; }
+    main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.1fr); gap: 1.25rem; }
+    video, canvas { width: 100%; border-radius: 8px; background: #111; }
+    canvas { background: #e7f0df; }
+    .bars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin: 0.8rem 0; }
+    .bar { height: 0.45rem; background: #ece8e0; border-radius: 999px; overflow: hidden; }
+    .bar span { display: block; height: 100%; width: 0; background: #2f6b3a; }
+    button { border: 0; border-radius: 999px; padding: 0.5rem 0.85rem; background: #1c1c1a; color: #fff; font: inherit; }
+    #status { color: #5c5a55; }
+    pre { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; background: #fff; border-radius: 8px; padding: 0.75rem; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Play</h1>
+    <nav>
+      <a class="quiet" href="/analyze">Analyze</a>
+      <a class="quiet" href="/projects">Projects</a>
+    </nav>
+  </header>
+  <main>
+    <section>
+      <p id="status">Reading this play.</p>
+      <div class="bars">
+        <div><div>Teams</div><div class="bar" data-step="teams" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
+        <div><div>Call</div><div class="bar" data-step="call" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
+        <div><div>Place</div><div class="bar" data-step="place" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
+        <div><div>Formation</div><div class="bar" data-step="formation" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
+      </div>
+      <p class="facts" id="facts"></p>
+      <video id="clip" controls playsinline></video>
+      <button id="again" type="button">Run again</button>
+    </section>
+    <section>
+      <canvas id="field" width="720" height="520"></canvas>
+      <pre id="json" hidden></pre>
+    </section>
+  </main>
+  <script>
+    const uid = location.pathname.split("/").filter(Boolean).pop();
+    const title = document.querySelector("#title");
+    const status = document.querySelector("#status");
+    const facts = document.querySelector("#facts");
+    const clip = document.querySelector("#clip");
+    const canvas = document.querySelector("#field");
+    const dump = document.querySelector("#json");
+    const again = document.querySelector("#again");
+    const parts = String(uid || "").split("-");
+    if (parts.length === 2 && parts.every((part) => /^\d+$/.test(part))) {
+      title.textContent = `Play ${parts[1]}`;
+      clip.src = `/projects/${parts[0]}/plays/${parts[1]}`;
+    }
+
+    again.addEventListener("click", () => run(true));
+    run(false);
+
+    async function run(force) {
+      again.disabled = true;
+      const current = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
+      const saved = current.ok ? await current.json() : null;
+      if (force || !saved || (!saved.diagram && !saved.running)) {
+        status.textContent = "Reading this play.";
+        await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, { method: "POST" });
+      } else {
+        show(saved);
+      }
+      again.disabled = false;
+    }
+
+    function show(body) {
+      const steps = body.steps || {};
+      for (const name of ["teams", "call", "place", "formation"]) {
+        const percent = Number(steps[name] || 0);
+        const track = document.querySelector(`.bar[data-step="${name}"]`);
+        track.setAttribute("aria-valuenow", String(percent));
+        track.querySelector("span").style.width = `${percent}%`;
+      }
+      const diagram = body.diagram;
+      if (!diagram) {
+        status.textContent = body.detail || (body.running ? "Reading this play." : "This play has not been placed.");
+        return;
+      }
+      const teams = diagram.teams || {};
+      const call = diagram.call ? diagram.call : "call open";
+      const formation = diagram.formation ? diagram.formation : "formation open";
+      facts.textContent = `${teams.offense || "Offense"} on offense, ${teams.defense || "defense"} on defense. ${call}. ${formation}.`;
+      status.textContent = body.running
+        ? "Reading this play."
+        : diagram.formation
+          ? "The points are saved. The formation is named from them."
+          : "The points are saved. The formation is still open.";
+      draw(diagram);
+      dump.hidden = false;
+      dump.textContent = JSON.stringify(diagram, null, 2);
+    }
+
+    let polling = false;
+    async function poll() {
+      if (polling) return;
+      polling = true;
+      try {
+        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
+        if (response.ok) show(await response.json());
+      } finally {
+        polling = false;
+      }
+    }
+    setInterval(poll, 1200);
+
+    function draw(diagram) {
+      const ctx = canvas.getContext("2d");
+      const width = canvas.width;
+      const height = canvas.height;
+      const left = 48;
+      const right = width - 20;
+      const top = 28;
+      const bottom = height - 28;
+      const field = diagram.field || {};
+      const xMax = Number(field.width || 53.3) / 2;
+      const yMin = -15;
+      const yMax = 30;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#e7f0df";
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = "#b7c7ae";
+      ctx.fillStyle = "#5d6b58";
+      ctx.font = "13px sans-serif";
+      ctx.lineWidth = 1;
+      for (let yard = -10; yard <= 25; yard += 5) {
+        const y = mapY(yard);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.fillText(String(50 - yard), 6, y + 4);
+      }
+      ctx.strokeStyle = "#1c1c1a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(left, mapY(0));
+      ctx.lineTo(right, mapY(0));
+      ctx.stroke();
+      ctx.fillStyle = "#1c1c1a";
+      ctx.fillText("goal", right - 40, 18);
+      paintSide(diagram.offense || [], field.offense_color || "#f4f4f4");
+      paintSide(diagram.defense || [], field.defense_color || "#c4382c");
+
+      function mapX(x) {
+        return left + ((Number(x) + xMax) / (xMax * 2)) * (right - left);
+      }
+      function mapY(y) {
+        return bottom - ((y - yMin) / (yMax - yMin)) * (bottom - top);
+      }
+      function paintSide(players, fill) {
+        for (const player of players) {
+          const x = mapX(player.x);
+          const y = mapY(Number(player.y) || 0);
+          ctx.beginPath();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#1c1c1a";
+          ctx.fillStyle = player.seen === false ? "transparent" : fill;
+          if (player.symbol === "square") ctx.rect(x - 8, y - 8, 16, 16);
+          else ctx.arc(x, y, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (player.label) {
+            ctx.fillStyle = "#1c1c1a";
+            ctx.fillText(String(player.label), x + 10, y - 8);
+          }
+        }
+      }
+    }
+  </script>
+</body>
+</html>

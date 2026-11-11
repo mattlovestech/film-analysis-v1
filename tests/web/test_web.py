@@ -355,10 +355,6 @@ def test_team_analysis_starts_when_the_plays_are_ready() -> None:
             duration=_duration,
             frames=_frames,
             lineup=lambda video, at: (b"left", b"right"),
-            portrait=lambda uniform, still=None, other=None: (
-                f"<svg>{uniform.name}</svg>".encode(),
-                ".svg",
-            ),
         )
     )
 

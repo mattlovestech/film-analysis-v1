@@ -216,8 +216,8 @@ def test_a_model_reply_becomes_two_uniforms() -> None:
 
     left, right = parse_uniforms(reply, "Kentucky vs LSU")
 
-    assert left == Uniform("Away", "white", "white", "white")
-    assert right.name == "Home"
+    assert left == Uniform("Home", "white", "white", "white")
+    assert right.name == "Away"
     assert right.jersey == "purple"
     assert right.pants == "gold"
     assert "logo" not in right.jersey
@@ -488,7 +488,6 @@ def test_each_team_card_uses_the_film_photo(
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=lambda uniform, still=b"", other=None: (b"drawn", ".jpg"),
         )
     )
 
@@ -511,10 +510,6 @@ def test_naming_teams_saves_stills_and_portraits(
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=lambda uniform, still=b"", other=None: (
-                f"<svg>{uniform.name}</svg>".encode(),
-                ".svg",
-            ),
         )
     )
 
@@ -579,7 +574,6 @@ def test_a_visit_keeps_the_saved_players_until_generate_again(
         create_app(
             store=store,
             lineup=lineup,
-            portrait=lambda uniform, still=b"", other=None: (b"drawn", ".jpg"),
         )
     )
 
@@ -621,7 +615,6 @@ def test_one_team_photo_can_be_regenerated(
         create_app(
             store=store,
             lineup=lineup,
-            portrait=lambda uniform, still=b"", other=None: (b"drawn", ".jpg"),
         )
     )
     first = client.post("/api/projects/1/teams/stills")
@@ -655,7 +648,6 @@ def test_opening_a_film_replaces_the_old_generated_players(
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=lambda uniform, still=b"", other=None: (b"drawn", ".jpg"),
         )
     )
 
@@ -690,7 +682,6 @@ def test_opening_a_film_replaces_a_shot_that_is_too_small(
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=lambda uniform, still=b"", other=None: (b"drawn", ".jpg"),
         )
     )
 
@@ -710,25 +701,16 @@ def test_opening_a_film_keeps_a_player_at_512_by_768(tmp_path: Path) -> None:
     store.save_team_image(1, "left-player", current, ".jpg")
     store.save_team_image(1, "right-player", current, ".jpg")
     store.set_film_teams(1, FilmTeams("North", "South", None, ""))
-    count = {"n": 0}
-
-    def portrait(uniform, still=b"", other=None):
-        del uniform, still, other
-        count["n"] += 1
-        return b"new-player", ".svg"
-
     client = TestClient(
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=portrait,
         )
     )
 
     visit = client.get("/api/projects/1")
 
     assert visit.status_code == 200
-    assert count["n"] == 0
     assert client.get(visit.json()["teams"]["left_player"]).content == current
 
 
@@ -743,7 +725,6 @@ def test_team_build_reports_loading_telemetry(
         create_app(
             store=store,
             lineup=lambda video, at: (b"left-jpeg", b"right-jpeg"),
-            portrait=lambda uniform, still=b"", other=None: (b"drawn", ".jpg"),
         )
     )
 
@@ -795,7 +776,6 @@ def test_regenerate_clears_the_old_team_photos_first(
         create_app(
             store=store,
             lineup=lambda video, at: (b"fresh-left", b"fresh-right"),
-            portrait=lambda uniform, still=b"", other=None: (b"<svg>unused</svg>", ".svg"),
         )
     )
 
@@ -853,7 +833,6 @@ def test_reset_rebuilds_team_photos_for_every_ready_film(
         create_app(
             store=store,
             lineup=lineup,
-            portrait=lambda uniform, still=b"", other=None: (b"<svg>unused</svg>", ".svg"),
         )
     )
 
@@ -930,7 +909,6 @@ def test_reset_can_retry_only_the_failed_films(
         create_app(
             store=store,
             lineup=lineup,
-            portrait=lambda uniform, still=b"", other=None: (b"<svg>unused</svg>", ".svg"),
         )
     )
 
@@ -1099,3 +1077,67 @@ def test_a_picked_player_is_cut_out_as_a_portrait_card() -> None:
     assert 480 <= height <= 640
     assert crop_picked_player(frame, (0.5, 0.5, 0.51, 0.52)) is None
     assert crop_picked_player(b"not a jpeg", box) is None
+
+
+def test_a_scrimmage_play_gets_both_lineups_without_a_scouted_team(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from film_analysis.web.app import _chart_formation_play
+
+    store = _ready_film(tmp_path)
+    project = store.get_project(1)
+    assert project is not None
+    play = project.plays[0]
+    assert play.unit not in {"offense", "defense"}
+    seen: dict[str, str] = {}
+
+    def drawn(frames, offense, defense, focus="offense"):
+        seen["focus"] = focus
+        seen["offense"] = offense.name
+        seen["defense"] = defense.name
+        return SimpleNamespace(plot=b"both-plot", offense=[], defense=[], guessed="")
+
+    monkeypatch.setattr("film_analysis.web.app._scrimmage_frames", lambda *_a, **_k: [b"snap"])
+    monkeypatch.setattr(
+        "film_analysis.web.app.isolate_play",
+        lambda frames, first, second: SimpleNamespace(unit="offense"),
+    )
+    monkeypatch.setattr("film_analysis.web.app.plot_formation", drawn)
+    monkeypatch.setattr(
+        "film_analysis.web.app.layout_payload",
+        lambda layout, focus="offense", **_k: {
+            "offense": [{"role": "left"}],
+            "defense": [{"role": "right"}],
+            "focus": focus,
+        },
+    )
+
+    _chart_formation_play(
+        store,
+        project,
+        play,
+        Uniform("Home", "white", "white", "white"),
+        Uniform("Away", "blue", "white", "blue"),
+        lambda *_a, **_k: None,
+    )
+
+    image = store.play_image(1, 1, "formation")
+    assert image is not None
+    assert image.read_bytes() == b"both-plot"
+    layout = store.play_layout(1, 1)
+    assert layout is not None
+    assert layout["focus"] == "both"
+    assert layout["offense"] and layout["defense"]
+    assert seen == {"focus": "both", "offense": "Home", "defense": "Away"}
+
+
+def test_the_report_still_waits_for_a_scouted_team(tmp_path: Path) -> None:
+    store = _ready_film(tmp_path)
+    client = TestClient(create_app(store=store, lineup=lambda video, at: (b"left", b"right")))
+
+    refused = client.get("/api/projects/1/report")
+
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == "Label your team before the scouting report."

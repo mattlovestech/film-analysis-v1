@@ -203,21 +203,23 @@ def render_formation_plot(
     )
     offense_color = _bgr_from_hex(offense_uniform.jersey_hex) or (240, 240, 240)
     defense_color = _bgr_from_hex(defense_uniform.jersey_hex) or (40, 40, 200)
-    offense_primary = focus != "defense"
+    both = focus == "both"
+    offense_primary = both or focus != "defense"
+    defense_primary = both or focus == "defense"
     box = (left, top, right, bottom)
     for player in defense:
         _draw_marker(
             chart,
             player,
-            defense_color if not offense_primary else _mute(defense_color),
+            defense_color,
             box,
-            primary=not offense_primary,
+            primary=defense_primary,
         )
     for player in offense:
         _draw_marker(
             chart,
             player,
-            offense_color if offense_primary else _mute(offense_color),
+            offense_color,
             box,
             primary=offense_primary,
         )
@@ -227,7 +229,7 @@ def render_formation_plot(
         (left, height - 18),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.5,
-        offense_color if offense_primary else _mute(offense_color),
+        offense_color,
         1,
         cv2.LINE_AA,
     )
@@ -237,7 +239,7 @@ def render_formation_plot(
         (left, 24),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.5,
-        defense_color if not offense_primary else _mute(defense_color),
+        defense_color,
         1,
         cv2.LINE_AA,
     )

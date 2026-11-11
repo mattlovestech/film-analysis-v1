@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generate diagram test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f6f4; --panel: #fff; --ink: #18181a; --muted: #6b6b70; --line: #e4e4e0;
+      --ok: #2f7d46; --warn: #b7791f; --fail: #c0392b; --skip: #8a8a8f; --run: #2b6cb0; --queue: #9aa0a6;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.45 "Avenir Next", "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.9rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+    h1 { font-size: 1.15rem; margin: 0; }
+    h2 { font-size: 0.95rem; margin: 0 0 0.6rem; }
+    a { color: inherit; }
+    nav a { color: var(--muted); text-decoration: none; margin-left: 0.9rem; }
+    .stats { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .chip { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 0.15rem 0.6rem; font-size: 12px; white-space: nowrap; }
+    .chip b { font-weight: 600; }
+    main { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 1rem; padding: 1rem 1.25rem; align-items: start; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; }
+    .toolbar { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.6rem; align-items: center; }
+    button { border: 1px solid var(--ink); border-radius: 999px; padding: 0.35rem 0.8rem; background: var(--ink); color: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+    button.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+    button:disabled { opacity: 0.4; cursor: default; }
+    select { font: inherit; font-size: 13px; padding: 0.25rem; border-radius: 6px; border: 1px solid var(--line); }
+    #plays { max-height: calc(100vh - 200px); overflow: auto; }
+    .film { font-size: 12px; color: var(--muted); margin: 0.7rem 0 0.25rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .play { display: grid; grid-template-columns: auto 1fr auto; gap: 0.5rem; align-items: center; padding: 0.35rem 0.4rem; border-radius: 6px; cursor: pointer; }
+    .play:hover { background: var(--bg); }
+    .play.active { background: #ecf1fa; }
+    .play small { color: var(--muted); }
+    .pill { font-size: 11px; border-radius: 999px; padding: 0.05rem 0.5rem; color: #fff; background: var(--queue); }
+    .pill.none { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    .s-queued { background: var(--queue); } .s-running { background: var(--run); } .s-done { background: var(--ok); }
+    .s-failed { background: var(--fail); } .s-skipped { background: var(--skip); } .s-ok { background: var(--ok); }
+    .s-warn { background: var(--warn); }
+    .steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.4rem; margin-bottom: 0.8rem; }
+    .step { border: 1px solid var(--line); border-radius: 8px; padding: 0.45rem 0.55rem; background: var(--bg); min-height: 58px; }
+    .step .code { font-size: 11px; color: var(--muted); }
+    .step .name { font-weight: 600; }
+    .step .ms { font-size: 12px; color: var(--muted); }
+    .step.ok { border-color: var(--ok); } .step.warn { border-color: var(--warn); } .step.failed { border-color: var(--fail); background: #fdf1ef; }
+    .step.skipped { opacity: 0.6; } .step.running { border-color: var(--run); background: #eef4fc; }
+    .waterfall { position: relative; height: 18px; background: var(--bg); border-radius: 4px; margin-bottom: 0.8rem; overflow: hidden; }
+    .waterfall span { position: absolute; top: 0; bottom: 0; border-right: 1px solid #fff; }
+    .runhead { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; flex-wrap: wrap; margin-bottom: 0.7rem; }
+    .runhead .meta { color: var(--muted); font-size: 12px; }
+    .detail-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1rem; }
+    svg.field { width: 100%; height: auto; display: block; border-radius: 10px; background: #f5f5f5; border: 1px solid var(--line); }
+    .tabs { display: flex; gap: 0.3rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+    .tabs button { background: transparent; color: var(--muted); border-color: var(--line); }
+    .tabs button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
+    .images figure { margin: 0; } .images img { width: 100%; border-radius: 6px; display: block; cursor: zoom-in; }
+    .images figcaption { font-size: 11px; color: var(--muted); }
+    pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border-radius: 8px; padding: 0.6rem; margin: 0; max-height: 460px; overflow: auto; }
+    .log div { font: 12px/1.5 ui-monospace, Menlo, monospace; }
+    .log .warn { color: var(--warn); } .log .error { color: var(--fail); }
+    .warnings { margin: 0 0 0.8rem; padding: 0.5rem 0.7rem; border-radius: 8px; background: #fdf6e7; color: #7a5212; font-size: 13px; }
+    .warnings:empty { display: none; }
+    .error { color: var(--fail); }
+    .legend { display: flex; gap: 0.8rem; font-size: 12px; color: var(--muted); margin-top: 0.4rem; flex-wrap: wrap; align-items: center; }
+    .legend label { display: inline-flex; gap: 0.3rem; align-items: center; }
+    video { width: 100%; border-radius: 8px; background: #111; }
+    .empty { color: var(--muted); padding: 2rem; text-align: center; }
+    #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 10; cursor: zoom-out; }
+    #lightbox img { max-width: 95vw; max-height: 95vh; }
+    @media (max-width: 960px) { main, .detail-grid { grid-template-columns: 1fr; } .steps { grid-template-columns: repeat(3, 1fr); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Generate diagram · test bench</h1>
+      <div class="meta" style="color:var(--muted);font-size:12px">Cut play → 2a classify → 2b players → 2c pre-snap plot</div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <nav><a href="/analyze">Analyze</a><a href="/projects">Projects</a></nav>
+  </header>
+  <main>
+    <section class="panel">
+      <div class="toolbar">
+        <button id="runSelected" type="button" disabled>Run selected</button>
+        <button id="runFiltered" type="button" class="ghost">Run all shown</button>
+        <select id="filter" aria-label="Filter plays">
+          <option value="all">All plays</option>
+          <option value="never">Never run</option>
+          <option value="done">Done</option>
+          <option value="failed">Failed</option>
+          <option value="skipped">Skipped</option>
+          <option value="active">Queued / running</option>
+        </select>
+      </div>
+      <div id="plays"><p class="empty">Loading plays…</p></div>
+    </section>
+    <section class="panel" id="detail"><p class="empty">Pick a play to see its runs.</p></section>
+  </main>
+  <div id="lightbox"><img alt=""></div>
+  <script>
+    const STEPS = [
+      ["load", "1", "Load"], ["classify", "2a", "Classify"], ["frames", "2b", "Frames"],
+      ["players", "2b", "Players"], ["plot", "2c", "Plot"], ["save", "", "Save"],
+    ];
+    const COLORS = { ok: "#2f7d46", warn: "#b7791f", failed: "#c0392b", skipped: "#8a8a8f", running: "#2b6cb0" };
+    const state = { plays: [], selected: new Set(), uid: null, runId: null, run: null, tab: "images", showDefense: true, teamColors: false };
+    const $ = (sel) => document.querySelector(sel);
+    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const ms = (value) => value == null ? "—" : value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`;
+
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || response.statusText);
+      return response.json();
+    }
+
+    function renderStats(workers) {
+      if (!workers) return;
+      const runs = workers.runs || {};
+      const avg = Object.entries(workers.avg_step_ms || {}).map(([k, v]) => `${k} ${ms(v)}`).join(" · ");
+      $("#stats").innerHTML = [
+        `<span class="chip">Workers <b>${workers.busy}/${workers.workers}</b> busy</span>`,
+        `<span class="chip">Queued <b>${runs.queued || 0}</b></span>`,
+        `<span class="chip">Running <b>${runs.running || 0}</b></span>`,
+        `<span class="chip">Done <b>${runs.done || 0}</b></span>`,
+        `<span class="chip">Failed <b>${runs.failed || 0}</b></span>`,
+        `<span class="chip">Skipped <b>${runs.skipped || 0}</b></span>`,
+        `<span class="chip">Success <b>${workers.success_rate == null ? "—" : Math.round(workers.success_rate * 100) + "%"}</b></span>`,
+        `<span class="chip">Avg <b>${ms(workers.avg_total_ms)}</b> · p95 <b>${ms(workers.p95_total_ms)}</b></span>`,
+        avg ? `<span class="chip" title="Average time per step">${esc(avg)}</span>` : "",
+      ].join("");
+    }
+
+    function matches(play) {
+      const filter = $("#filter").value;
+      const status = play.run?.status;
+      if (filter === "all") return true;
+      if (filter === "never") return !play.run;
+      if (filter === "active") return status === "queued" || status === "running";
+      return status === filter;
+    }
+
+    function renderPlays() {
+      const shown = state.plays.filter(matches);
+      if (!shown.length) { $("#plays").innerHTML = '<p class="empty">No plays here.</p>'; return; }
+      let film = null;
+      const parts = [];
+      for (const play of shown) {
+        if (play.film + play.project !== film) {
+          film = play.film + play.project;
+          parts.push(`<div class="film">${esc(play.film)}</div>`);
+        }
+        const status = play.run?.status;
+        const pill = status
+          ? `<span class="pill s-${status}" title="${esc(play.run.detail)}">${status}${status === "running" && play.run.step ? " · " + esc(play.run.step) : ""}</span>`
+          : '<span class="pill none">not run</span>';
+        parts.push(`<div class="play ${play.uid === state.uid ? "active" : ""}" data-uid="${play.uid}">
+          <input type="checkbox" data-check="${play.uid}" ${state.selected.has(play.uid) ? "checked" : ""} aria-label="Select play ${play.play}">
+          <div>Play ${play.play} <small>${esc(play.clock)}${play.run && play.run.offense ? ` · ${play.run.offense}v${play.run.defense}` : ""}</small></div>
+          ${pill}</div>`);
+      }
+      $("#plays").innerHTML = parts.join("");
+      $("#runSelected").disabled = state.selected.size === 0;
+      $("#runSelected").textContent = state.selected.size ? `Run selected (${state.selected.size})` : "Run selected";
+    }
+
+    async function loadPlays() {
+      const data = await api("/api/diagram-test/plays");
+      state.plays = data.plays;
+      renderStats(data.workers);
+      renderPlays();
+      return data;
+    }
+
+    async function start(uids) {
+      if (!uids.length) return;
+      const data = await api("/api/diagram-test/runs", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uids }),
+      });
+      if (uids.includes(state.uid)) {
+        const mine = data.runs.find((run) => run.uid === state.uid);
+        if (mine) state.runId = mine.run_id;
+      }
+      await refresh();
+    }
+
+    async function openPlay(uid) {
+      state.uid = uid;
+      const play = state.plays.find((item) => item.uid === uid);
+      state.runId = play?.run?.run_id || null;
+      state.run = null;
+      renderPlays();
+      await loadRun();
+    }
+
+    async function loadRun() {
+      if (!state.uid) return;
+      state.run = state.runId ? await api(`/api/diagram-test/runs/${state.runId}`).catch(() => null) : null;
+      renderDetail();
+    }
+
+    function renderDetail() {
+      const play = state.plays.find((item) => item.uid === state.uid);
+      if (!play) return;
+      const run = state.run;
+      const [project, number] = play.uid.split("-");
+      const head = `<div class="runhead">
+          <div><h2 style="margin:0">${esc(play.film)} · Play ${play.play}</h2>
+          <div class="meta">${esc(play.clock)}${run ? ` · run ${run.run_id} · ${esc(run.worker || "waiting for a worker")} · waited ${ms(run.wait_ms)} · took ${ms(run.total_ms)}` : ""}</div></div>
+          <div class="toolbar" style="margin:0"><button type="button" id="runOne">${run ? "Run again" : "Run"}</button></div>
+        </div>`;
+      if (!run) {
+        $("#detail").innerHTML = head + `<p class="empty">This play has not been run yet.</p><video controls playsinline src="/projects/${project}/plays/${number}"></video>`;
+        $("#runOne").onclick = () => start([play.uid]);
+        return;
+      }
+      const byName = Object.fromEntries((run.steps || []).map((step) => [step.name, step]));
+      const steps = STEPS.map(([name, code, label]) => {
+        const step = byName[name];
+        const cls = step ? step.status : "";
+        return `<div class="step ${cls}" title="${esc(step?.detail || "")}">
+          <div class="code">${code ? "Step " + code : "&nbsp;"}</div><div class="name">${label}</div>
+          <div class="ms">${step ? `${step.status} · ${ms(step.ms)}` : run.status === "queued" ? "queued" : "—"}</div></div>`;
+      }).join("");
+      const total = Math.max(1, (run.steps || []).reduce((sum, step) => sum + (step.ms || 0), 0));
+      let left = 0;
+      const bars = (run.steps || []).map((step) => {
+        const width = ((step.ms || 0) / total) * 100;
+        const bar = `<span style="left:${left}%;width:${Math.max(width, 0.6)}%;background:${COLORS[step.status] || "#999"}" title="${step.name} ${ms(step.ms)}"></span>`;
+        left += width;
+        return bar;
+      }).join("");
+      const warnings = (run.steps || []).flatMap((step) => (step.warnings || []).map((text) => `<div>⚠ <b>${step.name}</b> ${esc(text)}</div>`));
+      const failure = run.status === "failed" ? `<p class="error"><b>Failed:</b> ${esc(run.detail)}</p>` : run.status === "skipped" ? `<p><b>Skipped:</b> ${esc(run.detail)}</p>` : "";
+      $("#detail").innerHTML = head + `<div class="steps">${steps}</div><div class="waterfall">${bars}</div>${failure}
+        <div class="warnings">${warnings.join("")}</div>
+        <div class="detail-grid">
+          <div>${run.diagram ? diagramSvg(run.diagram) : '<p class="empty">No diagram yet.</p>'}
+            <div class="legend">
+              <label><input type="checkbox" id="showDefense" ${state.showDefense ? "checked" : ""}> Defense</label>
+              <label><input type="checkbox" id="teamColors" ${state.teamColors ? "checked" : ""}> Jersey colors</label>
+              ${run.diagram ? `<span>${esc(run.diagram.teams?.offense || "Offense")} on offense (${(run.diagram.offense || []).length}) · ${esc(run.diagram.teams?.defense || "Defense")} on defense (${(run.diagram.defense || []).length})</span>` : ""}
+            </div>
+          </div>
+          <div>
+            <div class="tabs">${["images", "data", "log", "clip", "json"].map((tab) => `<button type="button" data-tab="${tab}" class="${state.tab === tab ? "on" : ""}">${tab}</button>`).join("")}</div>
+            <div id="tab">${renderTab(run, project, number)}</div>
+          </div>
+        </div>`;
+      $("#runOne").onclick = () => start([play.uid]);
+      $("#showDefense").onchange = (event) => { state.showDefense = event.target.checked; renderDetail(); };
+      $("#teamColors").onchange = (event) => { state.teamColors = event.target.checked; renderDetail(); };
+    }
+
+    function renderTab(run, project, number) {
+      if (state.tab === "images") {
+        const figures = (run.steps || []).flatMap((step) => (step.artifacts || []).map((name) =>
+          `<figure><img loading="lazy" src="/api/diagram-test/runs/${run.run_id}/images/${encodeURIComponent(name)}" alt="${esc(name)}"><figcaption>${esc(step.name)} · ${esc(name)}</figcaption></figure>`));
+        return figures.length ? `<div class="images">${figures.join("")}</div>` : '<p class="empty">No images yet.</p>';
+      }
+      if (state.tab === "data") {
+        return (run.steps || []).map((step) => `<h2>${esc(step.code)} ${esc(step.name)} <span class="pill s-${step.status}">${step.status}</span> <small>${ms(step.ms)}</small></h2>
+          ${step.detail ? `<p>${esc(step.detail)}</p>` : ""}<pre>${esc(JSON.stringify(step.data, null, 2))}</pre><br>`).join("") || '<p class="empty">No steps yet.</p>';
+      }
+      if (state.tab === "log") {
+        const start = run.queued_at;
+        const lines = (run.log || []).map((entry) => `<div class="${entry.level}">+${((entry.t - start) * 1000).toFixed(0).padStart(6)} ms  ${entry.level.padEnd(5)} ${esc(entry.message)}</div>`).join("");
+        return `<div class="log">${lines}</div>${run.error && run.error.includes("\n") ? `<pre class="error">${esc(run.error)}</pre>` : ""}`;
+      }
+      if (state.tab === "clip") return `<video controls playsinline src="/projects/${project}/plays/${number}"></video>`;
+      return `<pre>${esc(JSON.stringify(run.diagram, null, 2))}</pre>`;
+    }
+
+    // Aerial pre-snap diagram. Units are yards; the ball is (0, 0) and the offense attacks up.
+    function diagramSvg(diagram) {
+      const S = 20, half = (diagram.field?.width || 53.3) / 2, top = 18, bottom = -16;
+      const W = half * 2 * S, H = (top - bottom) * S;
+      const X = (x) => (x + half) * S, Y = (y) => (top - y) * S;
+      const parts = [`<svg class="field" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pre-snap diagram">`];
+      for (let y = Math.ceil(bottom); y <= top; y++) {
+        if (y % 5 === 0) {
+          parts.push(`<line x1="0" x2="${W}" y1="${Y(y)}" y2="${Y(y)}" stroke="#d2d2d2" stroke-width="${y === 0 ? 0 : 1.5}"/>`);
+        }
+        for (const hx of [-half + 0.6, -8.9, 8.9, half - 0.6]) {
+          parts.push(`<line x1="${X(hx) - 9}" x2="${X(hx) + 9}" y1="${Y(y)}" y2="${Y(y)}" stroke="#cfcfcf" stroke-width="1.5"/>`);
+        }
+      }
+      parts.push(`<line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="#7ea6d8" stroke-width="2" stroke-dasharray="8 6"/>`);
+      parts.push(`<text x="8" y="${Y(0) - 6}" font-size="13" fill="#7ea6d8" font-family="system-ui">LOS</text>`);
+      const offColor = state.teamColors ? (diagram.teams?.offense_hex || "#fff") : "#fff";
+      const defColor = state.teamColors ? (diagram.teams?.defense_hex || "#c0392b") : "#c0392b";
+      if (state.showDefense) {
+        for (const p of diagram.defense || []) {
+          const cx = X(p.x), cy = Y(p.y), r = 15;
+          parts.push(`<path d="M${cx - r} ${cy - r * 0.7} L${cx + r} ${cy - r * 0.7} L${cx} ${cy + r * 0.9} Z" fill="${state.teamColors ? defColor : "none"}" stroke="${state.teamColors ? "#111" : defColor}" stroke-width="2.5"/>`);
+          if (p.label) parts.push(`<text x="${cx}" y="${cy - r * 0.95}" text-anchor="middle" font-size="13" font-weight="700" fill="${state.teamColors ? "#111" : defColor}" font-family="system-ui">${esc(p.label)}</text>`);
+        }
+      }
+      for (const p of diagram.offense || []) {
+        const cx = X(p.x), cy = Y(p.y), r = 22;
+        if (p.symbol === "square" || p.role === "center") {
+          parts.push(`<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" fill="${offColor}" stroke="#111" stroke-width="4"/>`);
+        } else {
+          parts.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${offColor}" stroke="#111" stroke-width="4"/>`);
+        }
+        if (p.label) parts.push(`<text x="${cx}" y="${cy + 6}" text-anchor="middle" font-size="${p.label.length > 1 ? 15 : 18}" font-weight="700" fill="#111" font-family="system-ui">${esc(p.label)}</text>`);
+      }
+      parts.push("</svg>");
+      return parts.join("");
+    }
+
+    async function refresh() {
+      const data = await loadPlays().catch(() => null);
+      if (state.uid) {
+        const play = state.plays.find((item) => item.uid === state.uid);
+        if (play?.run && play.run.run_id !== state.runId && (!state.run || ["done", "failed", "skipped"].includes(state.run.status))) {
+          state.runId = play.run.run_id;
+        }
+        const live = state.run && ["queued", "running"].includes(state.run.status);
+        const changed = live || (state.runId || null) !== (state.run?.run_id || null)
+          || (state.run && state.run.status !== play?.run?.status);
+        if (changed) await loadRun();
+      }
+      return data;
+    }
+
+    async function loop() {
+      const data = await refresh().catch(() => null);
+      const busy = data && ((data.workers.runs.queued || 0) + (data.workers.runs.running || 0)) > 0;
+      setTimeout(loop, busy ? 1000 : 5000);
+    }
+
+    $("#plays").addEventListener("click", (event) => {
+      const check = event.target.closest("[data-check]");
+      if (check) {
+        const uid = check.dataset.check;
+        check.checked ? state.selected.add(uid) : state.selected.delete(uid);
+        renderPlays();
+        return;
+      }
+      const row = event.target.closest("[data-uid]");
+      if (row) openPlay(row.dataset.uid);
+    });
+    $("#detail").addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-tab]");
+      if (tab) { state.tab = tab.dataset.tab; renderDetail(); return; }
+      const image = event.target.closest(".images img");
+      if (image) { $("#lightbox img").src = image.src; $("#lightbox").style.display = "flex"; }
+    });
+    $("#lightbox").onclick = () => { $("#lightbox").style.display = "none"; };
+    $("#filter").onchange = renderPlays;
+    $("#runSelected").onclick = async () => { const uids = [...state.selected]; state.selected.clear(); await start(uids); };
+    $("#runFiltered").onclick = () => {
+      const uids = state.plays.filter(matches).map((play) => play.uid);
+      if (uids.length > 20 && !confirm(`Queue ${uids.length} plays?`)) return;
+      start(uids);
+    };
+    loop();
+  </script>
+</body>
+</html>
