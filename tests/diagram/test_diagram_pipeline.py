@@ -68,8 +68,26 @@ def _isolate(frames, mine, other) -> PlayIsolation:
     )
 
 
-def _pipeline(source: FakeSource, root: Path | None = None) -> DiagramPipeline:
-    return DiagramPipeline(source, RunStore(root), isolate=_isolate, mark=lambda jpeg, a, b: jpeg)
+def _empty(frames, mine, other) -> PlayIsolation:
+    return PlayIsolation()
+
+
+def _pipeline(
+    source: FakeSource,
+    root: Path | None = None,
+    *,
+    isolate=_isolate,
+    loose=_empty,
+    ask_model=lambda frames, home, away: None,
+) -> DiagramPipeline:
+    return DiagramPipeline(
+        source,
+        RunStore(root),
+        isolate=isolate,
+        mark=lambda jpeg, a, b: jpeg,
+        loose=loose,
+        ask_model=ask_model,
+    )
 
 
 def test_a_scrimmage_play_is_traced_and_saved(tmp_path: Path) -> None:
@@ -85,6 +103,7 @@ def test_a_scrimmage_play_is_traced_and_saved(tmp_path: Path) -> None:
         "classify",
         "frames",
         "players",
+        "model",
         "plot",
         "save",
     ]
@@ -96,7 +115,7 @@ def test_a_scrimmage_play_is_traced_and_saved(tmp_path: Path) -> None:
     assert labels == sorted(["LT", "LG", "C", "RG", "RT", "Y", "X", "Z", "H", "QB", "RB"])
     players = next(step for step in run.steps if step.name == "players")
     assert players.data["home_players"] == 11
-    assert any(name.endswith("players-marked.jpg") for name in players.artifacts)
+    assert any(name.endswith("players-color.jpg") for name in players.artifacts)
     # The trace and its images survive a restart.
     again = RunStore(tmp_path)
     loaded = again.get(run.run_id)
@@ -117,15 +136,15 @@ def test_special_teams_is_skipped_at_classify() -> None:
     assert source.saved == {}
 
 
-def test_missing_uniforms_fail_at_load_with_a_reason() -> None:
+def test_missing_uniforms_still_draw_a_guess() -> None:
     pipeline = _pipeline(FakeSource(uniforms=False))
     run = pipeline.store.create("1-1", 1, 1)
 
     pipeline.run(run)
 
-    assert run.status == "failed"
-    assert run.steps[0].status == "failed"
-    assert "uniforms" in run.detail
+    assert run.status == "done"
+    assert run.steps[0].status == "warn"
+    assert "uniforms" in run.steps[0].warnings[0]
 
 
 def test_short_frames_warn_but_finish() -> None:
@@ -144,7 +163,7 @@ def test_a_crash_inside_a_step_is_kept_with_its_traceback() -> None:
     def broken(frames, mine, other):
         raise RuntimeError("detector exploded")
 
-    pipeline = DiagramPipeline(FakeSource(), RunStore(None), isolate=broken)
+    pipeline = _pipeline(FakeSource(), isolate=broken)
     run = pipeline.store.create("1-1", 1, 1)
 
     pipeline.run(run)
@@ -195,3 +214,61 @@ def test_home_is_the_white_jersey_whichever_side_it_came_from() -> None:
     load = run.steps[0]
     assert load.data["home"]["hex"] == "#ffffff"
     assert load.data["away"]["hex"] == "#aa2222"
+
+
+def _few(frames, mine, other) -> PlayIsolation:
+    return PlayIsolation((), (IsolatedPlayer(0.5, 0.45),), None, "low", frames[0])
+
+
+def test_too_few_jerseys_falls_back_to_the_loose_split() -> None:
+    pipeline = _pipeline(FakeSource(), isolate=_few, loose=_isolate)
+    run = pipeline.store.create("1-1", 1, 1)
+
+    pipeline.run(run)
+
+    assert run.status == "done"
+    players = next(step for step in run.steps if step.name == "players")
+    assert players.data["method"] == "loose"
+    model = next(step for step in run.steps if step.name == "model")
+    assert model.status == "skipped"
+    assert run.diagram["method"] == "loose"
+    assert run.diagram["guessed"] == {"offense": 0, "defense": 0}
+
+
+def _line(count: int, y: float) -> list[dict[str, object]]:
+    return [
+        {"x": float(i - count // 2), "y": y, "role": "line", "symbol": "open", "seen": True}
+        for i in range(count)
+    ]
+
+
+def test_claude_places_the_players_when_the_film_cannot() -> None:
+    def ask(frames, home, away):
+        return {"offense": _line(9, -0.5), "defense": _line(8, 1.0)}, "away"
+
+    pipeline = _pipeline(FakeSource(), isolate=_few, ask_model=ask)
+    run = pipeline.store.create("1-1", 1, 1)
+
+    pipeline.run(run)
+
+    assert run.status == "done"
+    assert run.diagram["method"] == "model"
+    assert run.diagram["teams"]["offense"] == "Away"
+    assert len(run.diagram["offense"]) == 11
+    assert len(run.diagram["defense"]) == 11
+    assert run.diagram["guessed"] == {"offense": 2, "defense": 3}
+
+
+def test_nothing_found_still_gives_an_eleven_on_eleven_template() -> None:
+    pipeline = _pipeline(FakeSource(), isolate=_empty)
+    run = pipeline.store.create("1-1", 1, 1)
+
+    pipeline.run(run)
+
+    assert run.status == "done"
+    assert run.diagram["method"] == "template"
+    assert len(run.diagram["offense"]) == 11
+    assert len(run.diagram["defense"]) == 11
+    assert all(p["seen"] is False for p in run.diagram["offense"])
+    labels = {p["label"] for p in run.diagram["offense"]}
+    assert {"C", "QB", "LT", "RT"} <= labels

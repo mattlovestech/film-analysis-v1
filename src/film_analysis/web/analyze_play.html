@@ -76,8 +76,11 @@
       if (force || !saved || (!saved.diagram && !saved.running)) {
         status.textContent = "Reading this play.";
         await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, { method: "POST" });
+        watch();
+        poll();
       } else {
         show(saved);
+        if (saved.running) watch();
       }
       again.disabled = false;
     }
@@ -109,18 +112,28 @@
       dump.textContent = JSON.stringify(diagram, null, 2);
     }
 
+    let timer = null;
     let polling = false;
+    function watch() {
+      if (timer === null) timer = setInterval(poll, 1200);
+    }
     async function poll() {
       if (polling) return;
       polling = true;
       try {
         const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
-        if (response.ok) show(await response.json());
+        if (!response.ok) return;
+        const body = await response.json();
+        show(body);
+        if (body.running) watch();
+        else if (timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
       } finally {
         polling = false;
       }
     }
-    setInterval(poll, 1200);
 
     function draw(diagram) {
       const ctx = canvas.getContext("2d");

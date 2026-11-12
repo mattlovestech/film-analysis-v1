@@ -67,6 +67,8 @@ def test_a_queued_play_runs_and_exposes_trace_images_and_diagram(
     )
     monkeypatch.setattr("film_analysis.diagram.pipeline.isolate_play", _isolate)
     monkeypatch.setattr("film_analysis.diagram.pipeline.mark_both_teams", lambda jpeg, a, b: None)
+    monkeypatch.setattr("film_analysis.diagram.pipeline.loose_split", lambda *a: PlayIsolation())
+    monkeypatch.setattr("film_analysis.diagram.pipeline.model_points", lambda *a: None)
     store = _film(tmp_path)
     client = TestClient(create_app(store=store))
 
@@ -83,6 +85,7 @@ def test_a_queued_play_runs_and_exposes_trace_images_and_diagram(
         "classify",
         "frames",
         "players",
+        "model",
         "plot",
         "save",
     ]

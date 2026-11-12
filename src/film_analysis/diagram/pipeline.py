@@ -15,11 +15,21 @@ from typing import Protocol
 
 from film_analysis.chart.call import SPECIAL_CALLS
 from film_analysis.chart.isolate import PlayIsolation, isolate_play, mark_both_teams
-from film_analysis.chart.play_diagram import _plot_players, _sides
+from film_analysis.chart.play_diagram import _label_defense, _plot_players, _sides, blank_diagram
+from film_analysis.diagram.fallbacks import (
+    DEFENSE_TEMPLATE,
+    OFFENSE_TEMPLATE,
+    fill_to_eleven,
+    loose_split,
+    mark_players,
+    model_points,
+)
 from film_analysis.diagram.trace import Run, RunStore, StepFailed, StepSkipped
 from film_analysis.teams.uniforms import Uniform, label_home_away, uniform_line
 
 TEAM_SIZE = 11
+# Fewer than this many players on either jersey sends the play to the next method.
+GOOD_SIDE = 7
 _JPEG = b"\xff\xd8\xff"
 
 
@@ -46,6 +56,17 @@ class PlaySource(Protocol):
 
 Isolate = Callable[[Sequence[bytes], Uniform, Uniform], PlayIsolation]
 Mark = Callable[[bytes, Uniform, Uniform], bytes | None]
+AskModel = Callable[[Sequence[bytes], Uniform, Uniform], tuple[dict[str, object], str] | None]
+
+
+@dataclass
+class Placement:
+    """Players found for the plot, and which method found them."""
+
+    method: str
+    found: PlayIsolation
+    model: dict[str, object] | None = None
+    model_offense: str = "home"
 
 
 class DiagramPipeline:
@@ -58,17 +79,29 @@ class DiagramPipeline:
         *,
         isolate: Isolate | None = None,
         mark: Mark | None = None,
+        loose: Isolate | None = None,
+        ask_model: AskModel | None = None,
     ) -> None:
         self.source = source
         self.store = store
         self._isolate = isolate
         self._mark = mark
+        self._loose = loose
+        self._ask_model = ask_model
 
     def isolate(self, frames: Sequence[bytes], home: Uniform, away: Uniform) -> PlayIsolation:
         return (self._isolate or isolate_play)(frames, home, away)
 
     def mark(self, jpeg: bytes, home: Uniform, away: Uniform) -> bytes | None:
         return (self._mark or mark_both_teams)(jpeg, home, away)
+
+    def loose(self, frames: Sequence[bytes], home: Uniform, away: Uniform) -> PlayIsolation:
+        return (self._loose or loose_split)(frames, home, away)
+
+    def ask_model(
+        self, frames: Sequence[bytes], home: Uniform, away: Uniform
+    ) -> tuple[dict[str, object], str] | None:
+        return (self._ask_model or model_points)(frames, home, away)
 
     def run(self, run: Run, worker: str = "") -> Run:
         store = self.store
@@ -78,8 +111,9 @@ class DiagramPipeline:
             info, home, away = self._load(run)
             self._classify(run, info)
             frames = self._frames(run, info)
-            found = self._players(run, frames, home, away)
-            diagram = self._plot(run, found, home, away)
+            placement = self._players(run, frames, home, away)
+            placement = self._model(run, frames, home, away, placement)
+            diagram = self._plot(run, placement, home, away)
             self._save(run, info, diagram)
         except StepSkipped as reason:
             store.set_state(run, "skipped", detail=str(reason), ended_at=_now())
@@ -113,7 +147,12 @@ class DiagramPipeline:
             )
             pair = self.source.uniforms(run.project)
             if pair is None:
-                raise StepFailed("This film has no uniforms yet. Pick the two teams first.")
+                # Guess light against dark so the play still gets a diagram.
+                pair = (
+                    Uniform("Home", "white", "white", "white", jersey_hex="#f2f2f2"),
+                    Uniform("Away", "dark", "dark", "dark", jersey_hex="#2b2f4a"),
+                )
+                step.warnings.append("No uniforms picked for this film; guessed light vs dark.")
             first, second = label_home_away(*pair)
             # label_home_away renames in place; it does not put Home first.
             home, away = (first, second) if first.name == "Home" else (second, first)
@@ -154,70 +193,135 @@ class DiagramPipeline:
                 step.warnings.append(f"Only {len(frames)} snap frames; expected 4.")
             return frames
 
-    def _players(
-        self, run: Run, frames: list[bytes], home: Uniform, away: Uniform
-    ) -> PlayIsolation:
+    def _players(self, run: Run, frames: list[bytes], home: Uniform, away: Uniform) -> Placement:
         with self.store.step(run, "players", "2b") as step:
-            found = self.isolate(frames, home, away)
+            strict = self.isolate(frames, home, away)
+            placement = Placement("color", strict)
+            step.data["color"] = _counts(strict, frames)
+            if _side_score(strict) < GOOD_SIDE:
+                loose = self.loose(frames, home, away)
+                step.data["loose"] = _counts(loose, frames)
+                if _score(loose) > _score(strict):
+                    placement = Placement("loose", loose)
+            found = placement.found
             mine, other = len(found.mine), len(found.other)
-            chosen = frames.index(found.frame) + 1 if found.frame in frames else None
             step.data.update(
                 {
+                    "method": placement.method,
                     "home_players": mine,
                     "away_players": other,
                     "unit": found.unit,
                     "confidence": found.confidence,
-                    "best_frame": chosen,
                 }
             )
             if found.frame:
-                marked = self.mark(found.frame, home, away)
+                marked = (
+                    self.mark(found.frame, home, away)
+                    if placement.method == "color"
+                    else mark_players(found.frame, found, home, away)
+                )
                 if marked:
-                    self.store.put_image(run, step, "players-marked", marked)
-            if not mine or not other:
-                raise StepFailed(
-                    f"Found {mine} {home.name or 'home'} and {other} {away.name or 'away'} "
-                    "players. Both jerseys are needed."
+                    self.store.put_image(run, step, f"players-{placement.method}", marked)
+            if placement.method != "color":
+                step.warnings.append(
+                    "Strict jersey match found too few players; using every person "
+                    "sent to the nearer jersey."
                 )
             for count, name in ((mine, home.name or "home"), (other, away.name or "away")):
                 if count < TEAM_SIZE:
                     step.warnings.append(f"{count} of {TEAM_SIZE} {name} players found.")
-            if found.unit not in {"offense", "defense"}:
-                step.warnings.append("Side of the ball guessed from depth, not lineup shape.")
-            step.detail = f"{mine} + {other} players on frame {chosen}."
-            return found
+            step.detail = f"{mine} + {other} players by {placement.method}."
+            return placement
+
+    def _model(
+        self,
+        run: Run,
+        frames: list[bytes],
+        home: Uniform,
+        away: Uniform,
+        placement: Placement,
+    ) -> Placement:
+        with self.store.step(run, "model", "2b") as step:
+            if _side_score(placement.found) >= GOOD_SIDE:
+                step.skip(f"Not needed: {placement.method} found enough players.")
+                return placement
+            answer = self.ask_model(frames, home, away)
+            if answer is None:
+                step.warnings.append("Claude did not place the players (no key or no reply).")
+                return placement
+            diagram, offense_side = answer
+            offense = [p for p in diagram.get("offense") or [] if isinstance(p, dict)]
+            defense = [p for p in diagram.get("defense") or [] if isinstance(p, dict)]
+            seen = sum(1 for p in (*offense, *defense) if p.get("seen", True))
+            step.data.update(
+                {
+                    "offense_team": offense_side,
+                    "offense": len(offense),
+                    "defense": len(defense),
+                    "seen": seen,
+                }
+            )
+            if min(len(offense), len(defense)) <= _side_score(placement.found):
+                step.warnings.append("Claude placed fewer players than the film; kept the film.")
+                return placement
+            step.detail = f"Claude placed {len(offense)} + {len(defense)} ({seen} seen)."
+            return Placement("model", placement.found, diagram, offense_side)
 
     def _plot(
-        self, run: Run, found: PlayIsolation, home: Uniform, away: Uniform
+        self, run: Run, placement: Placement, home: Uniform, away: Uniform
     ) -> dict[str, object]:
         with self.store.step(run, "plot", "2c") as step:
-            offense, defense, offense_players, defense_players = _sides(found, home, away)
-            diagram = _plot_players(offense, defense, offense_players, defense_players)
+            if placement.model is not None:
+                offense, defense = (
+                    (home, away) if placement.model_offense == "home" else (away, home)
+                )
+                diagram = blank_diagram(offense, defense)
+                diagram["offense"] = [dict(p) for p in placement.model.get("offense") or []]
+                diagram["defense"] = [dict(p) for p in placement.model.get("defense") or []]
+                diagram["source"] = "model"
+            else:
+                offense, defense, offense_players, defense_players = _sides(
+                    placement.found, home, away
+                )
+                diagram = _plot_players(offense, defense, offense_players, defense_players)
+            off = diagram["offense"]
+            dfn = diagram["defense"]
+            seen_off, seen_def = len(off), len(dfn)
+            added_off = fill_to_eleven(off, OFFENSE_TEMPLATE)
+            added_def = fill_to_eleven(dfn, DEFENSE_TEMPLATE)
             position_labels(diagram)
-            off = [p for p in diagram["offense"] if isinstance(p, dict)]
-            dfn = [p for p in diagram["defense"] if isinstance(p, dict)]
+            _label_defense(dfn)
+            method = placement.method if seen_off or seen_def else "template"
+            diagram["method"] = method
+            diagram["guessed"] = {"offense": added_off, "defense": added_def}
             line = [p for p in off if p.get("role") in {"line", "center"}]
             step.data.update(
                 {
+                    "method": method,
                     "offense_team": offense.name,
                     "defense_team": defense.name,
-                    "offense": len(off),
-                    "defense": len(dfn),
+                    "offense_seen": seen_off,
+                    "defense_seen": seen_def,
+                    "offense_guessed": added_off,
+                    "defense_guessed": added_def,
                     "on_line": len(line),
                     "center": any(p.get("role") == "center" for p in off),
                     "qb": any(p.get("label") == "QB" for p in off),
                 }
             )
-            if not step.data["center"]:
-                step.warnings.append("No center found at the ball.")
+            if added_off or added_def:
+                step.warnings.append(
+                    f"Filled {added_off} offense and {added_def} defense spots from a "
+                    "standard shotgun / 4-2-5 look."
+                )
             if len(line) < 7:
                 step.warnings.append(
                     f"{len(line)} offensive players on the line; a legal set has 7."
                 )
-            if not off and not dfn:
-                raise StepFailed("No player could be placed.")
             run.diagram = diagram
-            step.detail = f"{len(off)} offense, {len(dfn)} defense placed."
+            step.detail = (
+                f"{seen_off}+{added_off} offense, {seen_def}+{added_def} defense ({method})."
+            )
             return diagram
 
     def _save(self, run: Run, info: PlayInfo, diagram: dict[str, object]) -> None:
@@ -303,6 +407,22 @@ def position_labels(diagram: dict[str, object]) -> None:
             player["label"] = take("RB", "FB", "F")
         else:
             player["label"] = take("H", "F", "W")
+
+
+def _score(found: PlayIsolation) -> int:
+    return _side_score(found) * 100 + len(found.mine) + len(found.other)
+
+
+def _side_score(found: PlayIsolation) -> int:
+    return min(len(found.mine), len(found.other))
+
+
+def _counts(found: PlayIsolation, frames: list[bytes]) -> dict[str, object]:
+    return {
+        "home": len(found.mine),
+        "away": len(found.other),
+        "frame": frames.index(found.frame) + 1 if found.frame in frames else None,
+    }
 
 
 def _now() -> float:

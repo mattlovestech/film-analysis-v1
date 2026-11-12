@@ -38,7 +38,7 @@
     .s-queued { background: var(--queue); } .s-running { background: var(--run); } .s-done { background: var(--ok); }
     .s-failed { background: var(--fail); } .s-skipped { background: var(--skip); } .s-ok { background: var(--ok); }
     .s-warn { background: var(--warn); }
-    .steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.4rem; margin-bottom: 0.8rem; }
+    .steps { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.4rem; margin-bottom: 0.8rem; }
     .step { border: 1px solid var(--line); border-radius: 8px; padding: 0.45rem 0.55rem; background: var(--bg); min-height: 58px; }
     .step .code { font-size: 11px; color: var(--muted); }
     .step .name { font-weight: 600; }
@@ -103,7 +103,7 @@
   <script>
     const STEPS = [
       ["load", "1", "Load"], ["classify", "2a", "Classify"], ["frames", "2b", "Frames"],
-      ["players", "2b", "Players"], ["plot", "2c", "Plot"], ["save", "", "Save"],
+      ["players", "2b", "Players"], ["model", "2b", "Claude"], ["plot", "2c", "Plot"], ["save", "", "Save"],
     ];
     const COLORS = { ok: "#2f7d46", warn: "#b7791f", failed: "#c0392b", skipped: "#8a8a8f", running: "#2b6cb0" };
     const state = { plays: [], selected: new Set(), uid: null, runId: null, run: null, tab: "images", showDefense: true, teamColors: false };
@@ -242,7 +242,7 @@
             <div class="legend">
               <label><input type="checkbox" id="showDefense" ${state.showDefense ? "checked" : ""}> Defense</label>
               <label><input type="checkbox" id="teamColors" ${state.teamColors ? "checked" : ""}> Jersey colors</label>
-              ${run.diagram ? `<span>${esc(run.diagram.teams?.offense || "Offense")} on offense (${(run.diagram.offense || []).length}) · ${esc(run.diagram.teams?.defense || "Defense")} on defense (${(run.diagram.defense || []).length})</span>` : ""}
+              ${run.diagram ? `<span class="pill s-${run.diagram.method === "color" ? "ok" : "warn"}">placed by ${esc(run.diagram.method || "color")}</span><span>dashed = guessed (${(run.diagram.guessed?.offense || 0) + (run.diagram.guessed?.defense || 0)})</span><span>${esc(run.diagram.teams?.offense || "Offense")} on offense (${(run.diagram.offense || []).length}) · ${esc(run.diagram.teams?.defense || "Defense")} on defense (${(run.diagram.defense || []).length})</span>` : ""}
             </div>
           </div>
           <div>
@@ -294,17 +294,17 @@
       const defColor = state.teamColors ? (diagram.teams?.defense_hex || "#c0392b") : "#c0392b";
       if (state.showDefense) {
         for (const p of diagram.defense || []) {
-          const cx = X(p.x), cy = Y(p.y), r = 15;
-          parts.push(`<path d="M${cx - r} ${cy - r * 0.7} L${cx + r} ${cy - r * 0.7} L${cx} ${cy + r * 0.9} Z" fill="${state.teamColors ? defColor : "none"}" stroke="${state.teamColors ? "#111" : defColor}" stroke-width="2.5"/>`);
+          const cx = X(p.x), cy = Y(p.y), r = 15, dash = p.seen === false ? ' stroke-dasharray="5 4" opacity="0.6"' : "";
+          parts.push(`<path d="M${cx - r} ${cy - r * 0.7} L${cx + r} ${cy - r * 0.7} L${cx} ${cy + r * 0.9} Z" fill="${state.teamColors ? defColor : "none"}" stroke="${state.teamColors ? "#111" : defColor}" stroke-width="2.5"${dash}/>`);
           if (p.label) parts.push(`<text x="${cx}" y="${cy - r * 0.95}" text-anchor="middle" font-size="13" font-weight="700" fill="${state.teamColors ? "#111" : defColor}" font-family="system-ui">${esc(p.label)}</text>`);
         }
       }
       for (const p of diagram.offense || []) {
-        const cx = X(p.x), cy = Y(p.y), r = 22;
+        const cx = X(p.x), cy = Y(p.y), r = 22, dash = p.seen === false ? ' stroke-dasharray="7 5" opacity="0.55"' : "";
         if (p.symbol === "square" || p.role === "center") {
-          parts.push(`<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" fill="${offColor}" stroke="#111" stroke-width="4"/>`);
+          parts.push(`<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" fill="${offColor}" stroke="#111" stroke-width="4"${dash}/>`);
         } else {
-          parts.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${offColor}" stroke="#111" stroke-width="4"/>`);
+          parts.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${offColor}" stroke="#111" stroke-width="4"${dash}/>`);
         }
         if (p.label) parts.push(`<text x="${cx}" y="${cy + 6}" text-anchor="middle" font-size="${p.label.length > 1 ? 15 : 18}" font-weight="700" fill="#111" font-family="system-ui">${esc(p.label)}</text>`);
       }

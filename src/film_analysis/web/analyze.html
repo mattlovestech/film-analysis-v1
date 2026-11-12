@@ -133,7 +133,6 @@
       const plays = new Map([...body.querySelectorAll("tr.play")].map((tr) => [tr.dataset.uid, tr]));
       if (next === listed && plays.size === rows.length) {
         for (const row of rows) updateRow(plays.get(row.uid), row);
-        if (openUid) refreshOpen();
         return;
       }
       listed = next;
@@ -153,7 +152,6 @@
         details.get(uid)?.remove();
         tr.remove();
       }
-      if (openUid) refreshOpen();
     }
 
     function toggle(uid) {
@@ -219,8 +217,11 @@
     async function start(uid, button) {
       button.disabled = true;
       button.textContent = "Reading";
+      following = true;
+      if (timer === null) timer = setInterval(load, 1500);
       await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, { method: "POST" });
       if (openUid === uid) refreshOpen();
+      load();
     }
 
     function draw(canvas, diagram) {
@@ -302,14 +303,41 @@
       return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     }
 
+    let timer = null;
+    let following = false;
+    let loadingList = false;
+
+    function follow(rows) {
+      const busy = rows.some((row) => row.running);
+      const open = openUid ? rows.find((row) => row.uid === openUid) : null;
+      if (open && (open.running || (following && !busy))) refreshOpen();
+      if (busy) {
+        following = true;
+        if (timer === null) timer = setInterval(load, 1500);
+        return;
+      }
+      following = false;
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }
+
     async function load() {
-      const response = await fetch("/api/analyze");
-      if (!response.ok) return;
-      paint(await response.json());
+      if (loadingList) return;
+      loadingList = true;
+      try {
+        const response = await fetch("/api/analyze");
+        if (!response.ok) return;
+        const rows = await response.json();
+        paint(rows);
+        follow(rows);
+      } finally {
+        loadingList = false;
+      }
     }
 
     load();
-    setInterval(load, 1500);
   </script>
 </body>
 </html>

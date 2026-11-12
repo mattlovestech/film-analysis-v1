@@ -44,6 +44,13 @@ class Step:
     data: dict[str, object] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
+    skipped: bool = False
+
+    def skip(self, reason: str) -> None:
+        """Mark this step skipped without stopping the run."""
+
+        self.skipped = True
+        self.detail = reason
 
     @property
     def ms(self) -> int | None:
@@ -199,7 +206,10 @@ class RunStore:
             current.detail = current.detail or f"{type(error).__name__}: {error}"
             raise
         else:
-            current.status = "warn" if current.warnings else "ok"
+            if current.skipped:
+                current.status = "skipped"
+            else:
+                current.status = "warn" if current.warnings else "ok"
         finally:
             current.ended = time.time()
             level = "error" if current.status == "failed" else "info"
@@ -309,6 +319,7 @@ def _run_from_json(raw: dict[str, object]) -> Run:
                 data=dict(item.get("data") or {}),
                 warnings=list(item.get("warnings") or []),
                 artifacts=list(item.get("artifacts") or []),
+                skipped=bool(item.get("skipped")),
             )
         )
     diagram = raw.get("diagram")
