@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from film_analysis.chart.isolate import (
     IsolatedPlayer,
@@ -84,6 +84,12 @@ _MODEL_PROMPT = (
 )
 
 
+def standard_prompt(home: Uniform, away: Uniform) -> str:
+    """The placement prompt, with this film's two jerseys filled in."""
+
+    return _MODEL_PROMPT.format(first=uniform_line(home), second=uniform_line(away))
+
+
 def loose_split(frames: Sequence[bytes], home: Uniform, away: Uniform) -> PlayIsolation:
     """Every person found, sent to the nearer jersey. Best frame wins."""
 
@@ -137,13 +143,16 @@ class ModelRead:
     sent: bool
     error: str = ""
     stop: str = ""
+    usage: dict[str, object] = field(default_factory=dict)
 
 
-def model_points(frames: Sequence[bytes], home: Uniform, away: Uniform) -> ModelRead:
+def model_points(
+    frames: Sequence[bytes], home: Uniform, away: Uniform, prompt: str = ""
+) -> ModelRead:
     """Claude's placement of both teams, and the exact call that asked for it."""
 
-    prompt = _MODEL_PROMPT.format(first=uniform_line(home), second=uniform_line(away))
-    exchange = _exchange(frames, prompt, limit=4, tokens=8000, plain_retry=True)
+    text = prompt.strip() or standard_prompt(home, away)
+    exchange = _exchange(frames, text, limit=4, tokens=8000, plain_retry=True)
     diagram: dict[str, object] | None = None
     side = "home"
     if exchange.sent and exchange.reply:
@@ -167,6 +176,7 @@ def model_points(frames: Sequence[bytes], home: Uniform, away: Uniform) -> Model
         exchange.sent,
         exchange.error,
         exchange.stop,
+        exchange.usage(),
     )
 
 

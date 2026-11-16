@@ -41,7 +41,7 @@ TEAM_IMAGE_KINDS = frozenset(
 )
 
 
-PLAY_IMAGE_KINDS = frozenset({"formation"})
+PLAY_IMAGE_KINDS = frozenset({"formation", "diagram"})
 PLAY_LAYOUT_KIND = "formation-layout"
 
 
@@ -282,6 +282,17 @@ class ReportAnalysis:
 
 
 @dataclass(frozen=True)
+class DiagramExample:
+    """One saved formation frame and the points a coach kept with it."""
+
+    project_id: int
+    play_number: int
+    saved_at: str
+    prompt: str
+    points: dict[str, object]
+
+
+@dataclass(frozen=True)
 class FilmTeams:
     """Names for the two sides of a lineup, and which side is the user's team."""
 
@@ -454,6 +465,25 @@ class Catalog(Protocol):
 
     def report_spend(self) -> dict[int, tuple[float, int, int, str]]:
         """Each film's scouting-report cost, tokens, and model names."""
+
+    def save_diagram_example(
+        self,
+        project_id: int,
+        play_number: int,
+        prompt: str,
+        points: dict[str, object],
+        image: bytes,
+    ) -> None:
+        """Keep a formation frame with the points and prompt that placed it."""
+
+    def diagram_example(self, project_id: int, play_number: int) -> DiagramExample | None:
+        """Return the saved frame's points and prompt, when this play has one."""
+
+    def placement_prompt(self, project_id: int) -> str:
+        """The saved placement prompt, or empty when this film still uses the built-in one."""
+
+    def set_placement_prompt(self, project_id: int, prompt: str) -> None:
+        """Remember the prompt Place should send. A blank prompt restores the built-in one."""
 
     def save_source(self, project_id: int, source: Path) -> None:
         """Keep the film the plays were cut from."""
@@ -761,6 +791,8 @@ class MemoryCatalog:
         self._teams: dict[int, FilmTeams] = {}
         self._reads: dict[int, list[ReadNote]] = {}
         self._report: dict[int, dict[int, ReportAnalysis]] = {}
+        self._diagrams: dict[tuple[int, int], DiagramExample] = {}
+        self._prompts: dict[int, str] = {}
         self._edits: list[CoachEdit] = []
         self._guidance = ""
         self._edit_next = 1
@@ -1099,6 +1131,44 @@ class MemoryCatalog:
             ]
         return summarize_reads(rows)
 
+    def save_diagram_example(
+        self,
+        project_id: int,
+        play_number: int,
+        prompt: str,
+        points: dict[str, object],
+        image: bytes,
+    ) -> None:
+        self._clips.save_play_image(project_id, play_number, "diagram", image)
+        saved = DiagramExample(
+            project_id,
+            play_number,
+            datetime.now(UTC).isoformat(),
+            prompt,
+            points,
+        )
+        with self._lock:
+            self._require(project_id)
+            self._diagrams[(project_id, play_number)] = saved
+
+    def diagram_example(self, project_id: int, play_number: int) -> DiagramExample | None:
+        with self._lock:
+            return self._diagrams.get((project_id, play_number))
+
+    def placement_prompt(self, project_id: int) -> str:
+        with self._lock:
+            return self._prompts.get(project_id, "")
+
+    def set_placement_prompt(self, project_id: int, prompt: str) -> None:
+        text = prompt.strip()
+        with self._lock:
+            if project_id != 0:
+                self._require(project_id)
+            if text:
+                self._prompts[project_id] = text
+            else:
+                self._prompts.pop(project_id, None)
+
     def play_read_costs(self) -> dict[int, list[tuple[int, float]]]:
         from film_analysis.ingest.cost import cost_per_play
 
@@ -1322,6 +1392,10 @@ class MemoryCatalog:
             self._teams.pop(project_id, None)
             self._reads.pop(project_id, None)
             self._report.pop(project_id, None)
+            self._diagrams = {
+                key: value for key, value in self._diagrams.items() if key[0] != project_id
+            }
+            self._prompts.pop(project_id, None)
             self._edits = [edit for edit in self._edits if edit.project_id != project_id]
         self._clips.remove(project_id)
 
@@ -2214,6 +2288,8 @@ class D1Catalog:
                     "plays",
                     "teams",
                     "coach_edits",
+                    "diagram_examples",
+                    "placement_prompts",
                 )
             ]
             + [("delete from projects where id = ?", [project_id])]
@@ -2249,6 +2325,88 @@ class D1Catalog:
         if not self._project_exists(project_id):
             return None
         return self._clips.play_layout(project_id, play_number)
+
+    def save_diagram_example(
+        self,
+        project_id: int,
+        play_number: int,
+        prompt: str,
+        points: dict[str, object],
+        image: bytes,
+    ) -> None:
+        if not self._project_exists(project_id):
+            raise CatalogError(f"Project {project_id} was not found.")
+        self._clips.save_play_image(project_id, play_number, "diagram", image)
+        self._execute(
+            """
+            insert into diagram_examples (
+                project_id, play_number, saved_at, prompt, points
+            )
+            values (?, ?, ?, ?, ?)
+            on conflict(project_id, play_number) do update set
+                saved_at = excluded.saved_at,
+                prompt = excluded.prompt,
+                points = excluded.points
+            """,
+            [
+                project_id,
+                play_number,
+                datetime.now(UTC).isoformat(),
+                prompt,
+                json.dumps(points),
+            ],
+        )
+
+    def diagram_example(self, project_id: int, play_number: int) -> DiagramExample | None:
+        rows = self._query(
+            """
+            select project_id, play_number, saved_at, prompt, points
+            from diagram_examples
+            where project_id = ? and play_number = ?
+            """,
+            [project_id, play_number],
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        try:
+            points = json.loads(str(row.get("points") or "{}"))
+        except json.JSONDecodeError:
+            points = {}
+        if not isinstance(points, dict):
+            points = {}
+        return DiagramExample(
+            int(row.get("project_id") or 0),
+            int(row.get("play_number") or 0),
+            str(row.get("saved_at") or ""),
+            str(row.get("prompt") or ""),
+            points,
+        )
+
+    def placement_prompt(self, project_id: int) -> str:
+        rows = self._query(
+            "select prompt from placement_prompts where project_id = ?",
+            [project_id],
+        )
+        if not rows:
+            return ""
+        return str(rows[0].get("prompt") or "")
+
+    def set_placement_prompt(self, project_id: int, prompt: str) -> None:
+        if project_id != 0 and not self._project_exists(project_id):
+            raise CatalogError(f"Project {project_id} was not found.")
+        text = prompt.strip()
+        if not text:
+            self._execute("delete from placement_prompts where project_id = ?", [project_id])
+            return
+        self._execute(
+            """
+            insert into placement_prompts (project_id, prompt)
+            values (?, ?)
+            on conflict(project_id) do update set prompt = excluded.prompt
+            """,
+            [project_id, text],
+        )
 
     def _query(self, sql: str, params: list[object] | None = None) -> list[dict[str, object]]:
         result = self._execute(sql, params)
@@ -2435,6 +2593,22 @@ class D1Catalog:
             )
             """,
             "alter table teams add column uniforms text",
+            """
+            create table if not exists diagram_examples (
+                project_id integer not null,
+                play_number integer not null,
+                saved_at text not null,
+                prompt text not null,
+                points text not null,
+                primary key (project_id, play_number)
+            )
+            """,
+            """
+            create table if not exists placement_prompts (
+                project_id integer primary key,
+                prompt text not null
+            )
+            """,
         )
         statements = (*statements, *_D1_INDEXES)
         with _SCHEMA_LOCK:

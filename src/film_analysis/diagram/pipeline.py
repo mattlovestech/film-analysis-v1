@@ -290,6 +290,7 @@ class DiagramPipeline:
                 step.call = {
                     "sent": read.sent,
                     "model": read.model,
+                    **read.usage,
                     "prompt": read.prompt,
                     "reply": read.reply,
                     "frames": read.frames,

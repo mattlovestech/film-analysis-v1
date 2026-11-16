@@ -1,6 +1,7 @@
 """Serve the upload page and run the play-boundary agent."""
 
 import asyncio
+import base64
 import contextlib
 import csv
 import inspect
@@ -22,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import (
@@ -44,7 +46,8 @@ from film_analysis.chart.formation import (
 )
 from film_analysis.chart.formation_plot import layout_payload, plot_formation
 from film_analysis.chart.isolate import isolate_play, mark_both_teams
-from film_analysis.chart.play_diagram import steps_done
+from film_analysis.chart.play_diagram import _exchange, blank_diagram, parse_points, steps_done
+from film_analysis.diagram.fallbacks import standard_prompt
 from film_analysis.diagram.pipeline import DiagramPipeline, PlayInfo
 from film_analysis.diagram.trace import RunStore
 from film_analysis.diagram.workers import DiagramWorkers
@@ -421,6 +424,35 @@ def create_app(
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/diagram")
+    def diagram_page() -> HTMLResponse:
+        return HTMLResponse(
+            _ANALYZE_PLAY_PAGE.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/diagram/prompt")
+    def standalone_diagram_prompt() -> dict[str, str]:
+        return {"prompt": _stored_prompt(catalog, 0) or standard_prompt(*_default_uniforms())}
+
+    @app.put("/api/diagram/prompt")
+    def save_standalone_diagram_prompt(body: _SavedPrompt) -> dict[str, object]:
+        return _remember_prompt(catalog, 0, body.prompt)
+
+    @app.post("/api/diagram/pass")
+    async def place_any_frame(
+        prompt: Annotated[str, Form()] = "",
+        image: Annotated[UploadFile, File()] = None,
+    ) -> dict[str, object]:
+        if image is None:
+            raise HTTPException(status_code=400, detail="Drop a JPEG or PNG of the formation.")
+        jpeg = _as_jpeg(await image.read())
+        if jpeg is None:
+            raise HTTPException(status_code=400, detail="Drop a JPEG or PNG of the formation.")
+        home, away = _default_uniforms()
+        text = prompt.strip() or _stored_prompt(catalog, 0) or standard_prompt(home, away)
+        return await asyncio.to_thread(_model_place, jpeg, text, home, away)
+
     @app.get("/analyze/play/{uid}")
     def analyze_play_page(uid: str) -> HTMLResponse:
         if _parse_play_uid(uid) is None:
@@ -437,6 +469,44 @@ def create_app(
     @app.get("/api/plays/{uid}/diagram")
     def play_diagram(uid: str) -> dict[str, object]:
         return _diagram_view(catalog, uid, diagram_workers)
+
+    @app.get("/api/plays/{uid}/diagram/prompt")
+    def play_diagram_prompt(uid: str) -> dict[str, str]:
+        project, _play = _scrimmage_play(catalog, uid)
+        return {"prompt": _diagram_prompt(catalog, project)}
+
+    @app.put("/api/plays/{uid}/diagram/prompt")
+    def save_play_diagram_prompt(uid: str, body: _SavedPrompt) -> dict[str, object]:
+        project, _play = _scrimmage_play(catalog, uid)
+        return _remember_prompt(catalog, project.project, body.prompt, project)
+
+    @app.post("/api/plays/{uid}/diagram/pass")
+    async def place_dropped_frame(
+        uid: str,
+        prompt: Annotated[str, Form()] = "",
+        image: Annotated[UploadFile, File()] = None,
+    ) -> dict[str, object]:
+        if image is None:
+            raise HTTPException(status_code=400, detail="Drop a JPEG or PNG of the formation.")
+        raw = await image.read()
+        jpeg = _as_jpeg(raw)
+        if jpeg is None:
+            raise HTTPException(status_code=400, detail="Drop a JPEG or PNG of the formation.")
+        project, _play = _scrimmage_play(catalog, uid)
+        text = prompt.strip() or _diagram_prompt(catalog, project)
+        return await asyncio.to_thread(_place_from_prompt, catalog, uid, jpeg, text)
+
+    @app.get("/api/plays/{uid}/diagram/frame")
+    def play_diagram_frame(uid: str) -> Response:
+        project, play = _scrimmage_play(catalog, uid)
+        frame = _formation_frame(catalog, project, play)
+        if frame is None:
+            raise HTTPException(status_code=404, detail="No formation frame for this play.")
+        return Response(content=frame, media_type="image/jpeg")
+
+    @app.post("/api/plays/{uid}/diagram/example")
+    def save_play_diagram_example(uid: str, body: _MovedDiagram) -> dict[str, object]:
+        return _lock_diagram_example(catalog, uid, body)
 
     @app.put("/api/plays/{uid}/diagram")
     def move_play_diagram(uid: str, body: _MovedDiagram) -> dict[str, object]:
@@ -2662,6 +2732,167 @@ def _scrimmage_index(
     return found
 
 
+def _diagram_prompt(catalog: Catalog, project: ProjectDetail) -> str:
+    """The placement prompt for this film: the saved one, or the built-in jersey prompt."""
+
+    saved = _stored_prompt(catalog, project.project)
+    if saved:
+        return saved
+    home, away = _prompt_uniforms(catalog, project)
+    return standard_prompt(home, away)
+
+
+def _stored_prompt(catalog: Catalog, project_id: int) -> str:
+    return catalog.placement_prompt(project_id).strip()
+
+
+def _remember_prompt(
+    catalog: Catalog,
+    project_id: int,
+    prompt: str,
+    project: ProjectDetail | None = None,
+) -> dict[str, object]:
+    """Store the prompt Place should use, and return the text the box should show."""
+
+    catalog.set_placement_prompt(project_id, prompt)
+    saved = bool(_stored_prompt(catalog, project_id))
+    if project is not None:
+        text = _diagram_prompt(catalog, project)
+    else:
+        text = _stored_prompt(catalog, 0) or standard_prompt(*_default_uniforms())
+    return {"prompt": text, "saved": saved}
+
+
+def _place_from_prompt(catalog: Catalog, uid: str, jpeg: bytes, prompt: str) -> dict[str, object]:
+    """One model pass on a dropped frame, saved as this play's points."""
+
+    project, play = _scrimmage_play(catalog, uid)
+    home, away = _prompt_uniforms(catalog, project)
+    result = _model_place(jpeg, prompt, home, away)
+    diagram = result["diagram"]
+    if isinstance(diagram, dict):
+        catalog.save_play_layout(project.project, play.play_number, diagram)
+    return result
+
+
+def _model_place(jpeg: bytes, prompt: str, home: Uniform, away: Uniform) -> dict[str, object]:
+    """One model pass on a frame, then the points it returned. Nothing is saved."""
+
+    exchange = _exchange([jpeg], prompt, limit=1, tokens=8000, plain_retry=True)
+    parsed = parse_points(exchange.reply) if exchange.reply else None
+    diagram: dict[str, object] | None = None
+    if isinstance(parsed, dict):
+        offense_side = "home"
+        try:
+            start = exchange.reply.index("{")
+            payload = json.loads(exchange.reply[start : exchange.reply.rindex("}") + 1])
+            if str(payload.get("offense_team") or "").strip().upper() == "B":
+                offense_side = "away"
+        except (ValueError, AttributeError):
+            pass
+        offense, defense = (home, away) if offense_side == "home" else (away, home)
+        diagram = blank_diagram(offense, defense)
+        diagram["offense"] = parsed.get("offense") or []
+        diagram["defense"] = parsed.get("defense") or []
+        diagram["source"] = "pass"
+        diagram["method"] = "model"
+    error = exchange.error
+    if exchange.sent and not diagram and not error:
+        error = "The reply did not include both teams' points."
+    if not exchange.sent and not error:
+        error = "The model was not called."
+    return {
+        "diagram": diagram,
+        "prompt": exchange.prompt,
+        "reply": exchange.reply,
+        "error": error,
+        "model": exchange.model,
+        "call": {
+            "sent": exchange.sent,
+            "frames": exchange.frames,
+            "image_bytes": len(jpeg),
+            "prompt_chars": len(exchange.prompt),
+            **exchange.usage(),
+        },
+    }
+
+
+def _default_uniforms() -> tuple[Uniform, Uniform]:
+    return (
+        Uniform("Home", "white", "white", "white", jersey_hex="#f2f2f2"),
+        Uniform("Away", "dark", "dark", "dark", jersey_hex="#2b2f4a"),
+    )
+
+
+def _prompt_uniforms(catalog: Catalog, project: ProjectDetail) -> tuple[Uniform, Uniform]:
+    teams = catalog.film_teams(project.project)
+    if teams is None:
+        return _default_uniforms()
+    first, second = label_home_away(*_side_uniforms(teams))
+    if first.name == "Home":
+        return first, second
+    return second, first
+
+
+def _as_jpeg(raw: bytes) -> bytes | None:
+    if raw.startswith(b"\xff\xd8\xff"):
+        return raw
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return None
+    ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    if not ok:
+        return None
+    return encoded.tobytes()
+
+
+def _formation_frame(
+    catalog: Catalog, project: ProjectDetail, play: PlayRecord
+) -> bytes | None:
+    """The first snap frame, while both teams are still in formation."""
+
+    for frame in _scrimmage_frames(catalog, project, play, snap=True):
+        if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff"):
+            return frame
+    return None
+
+
+def _lock_diagram_example(catalog: Catalog, uid: str, body: "_MovedDiagram") -> dict[str, object]:
+    """Keep the formation frame and the corrected points together."""
+
+    project, play = _scrimmage_play(catalog, uid)
+    frame = None
+    if body.image:
+        try:
+            frame = _as_jpeg(base64.b64decode(body.image))
+        except ValueError:
+            frame = None
+    if frame is None:
+        frame = _formation_frame(catalog, project, play)
+    if frame is None:
+        raise HTTPException(status_code=404, detail="No formation frame for this play.")
+    _store_moved_points(catalog, uid, body)
+    layout = _saved_layout(catalog, project.project, play.play_number) or {}
+    catalog.save_diagram_example(
+        project.project,
+        play.play_number,
+        body.prompt,
+        {
+            "offense": layout.get("offense") or [],
+            "defense": layout.get("defense") or [],
+            "field": layout.get("field"),
+            "teams": layout.get("teams"),
+        },
+        frame,
+    )
+    return {"saved": True, "uid": f"{project.project}-{play.play_number}"}
+
+
 def _store_moved_points(catalog: Catalog, uid: str, body: "_MovedDiagram") -> None:
     """Replace the saved player spots with the points the coach dragged."""
 
@@ -2745,6 +2976,10 @@ def _bars_from_run(run: object) -> dict[str, int]:
     }
 
 
+class _SavedPrompt(BaseModel):
+    prompt: str = ""
+
+
 class _MovedPoint(BaseModel):
     x: float
     y: float
@@ -2757,6 +2992,8 @@ class _MovedPoint(BaseModel):
 class _MovedDiagram(BaseModel):
     offense: list[_MovedPoint] = Field(min_length=1, max_length=11)
     defense: list[_MovedPoint] = Field(min_length=1, max_length=11)
+    image: str = ""
+    prompt: str = ""
 
 
 class _DiagramTestStart(BaseModel):

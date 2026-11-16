@@ -295,6 +295,29 @@
       return box;
     }
 
+    function modelFacts(call) {
+      const model = call.model || call.requested_model || "";
+      const asked = call.requested_model && call.requested_model !== model
+        ? ` (asked for ${call.requested_model})`
+        : "";
+      const rows = [["Model", model + asked]];
+      if (call.input_tokens || call.output_tokens) {
+        rows.push(["Tokens", `${call.input_tokens || 0} in · ${call.output_tokens || 0} out`]);
+      }
+      if (call.cost_usd) rows.push(["Cost", `$${Number(call.cost_usd).toFixed(4)}`]);
+      if (call.ms) rows.push(["Time", `${(call.ms / 1000).toFixed(1)} s`]);
+      if (call.max_tokens) {
+        const setup = [
+          call.thinking ? "thinking on" : "thinking off",
+          `max ${call.max_tokens} tokens`,
+        ];
+        if (call.retried) setup.push("retried without thinking after running out of tokens");
+        rows.push(["Setup", setup.join(", ")]);
+      }
+      if (call.stop) rows.push(["Stopped", call.stop]);
+      return rows;
+    }
+
     function callTable(step, run) {
       const call = step && step.call;
       const wrap = document.createElement("div");
@@ -316,7 +339,7 @@
         return wrap;
       }
       for (const [label, text] of [
-        ["Model", call.model || ""],
+        ...modelFacts(call),
         ["Frames", String(call.frames ?? 0)],
         ["Prompt", call.prompt || ""],
         ["Reply", call.reply || ""],

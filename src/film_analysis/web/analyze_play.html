@@ -8,63 +8,163 @@
     :root { color-scheme: light; }
     body { margin: 0; font: 16px/1.4 "Avenir Next", "Segoe UI", sans-serif; background: #f6f4ef; color: #1c1c1a; }
     header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; padding: 1rem 1.25rem; }
-    nav { display: flex; gap: 0.9rem; align-items: center; }
+    nav { display: flex; gap: 0.75rem; align-items: center; }
     a { color: inherit; }
     a.quiet { color: #5c5a55; text-decoration: none; }
     h1 { font-size: 1.4rem; margin: 0; }
+    h2 { margin: 0; padding: 0.7rem 0.9rem 0.2rem; font-size: 0.95rem; }
     main { padding: 0 1.25rem 2rem; }
-    canvas { width: 100%; max-width: 960px; height: auto; border-radius: 10px; background: #e7f0df; touch-action: none; cursor: grab; }
-    canvas:active { cursor: grabbing; }
+    button { border: 0; border-radius: 999px; padding: 0.45rem 0.9rem; background: #1c1c1a; color: #fff; font: inherit; }
+    button:disabled { opacity: 0.45; }
     #status { color: #5c5a55; }
-    details { max-width: 960px; margin-top: 1rem; background: #fff; border-radius: 10px; }
-    summary { padding: 0.75rem 1rem; cursor: pointer; font-weight: 600; }
-    pre { margin: 0; padding: 0 1rem 1rem; white-space: pre-wrap; font: 0.85rem/1.45 ui-monospace, monospace; }
+    .stage { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: stretch; }
+    .debug { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; margin-top: 1rem; }
+    .drop { position: relative; min-height: 320px; border: 1.5px dashed #c8c2b6; border-radius: 10px; background: #fff; display: grid; place-items: center; overflow: hidden; cursor: pointer; }
+    .drop.over { border-color: #1d4ed8; background: #f3f7ff; }
+    .drop p { margin: 0; color: #5c5a55; padding: 1.5rem; text-align: center; }
+    .drop img { width: 100%; height: 100%; object-fit: contain; background: #111; }
+    canvas { width: 100%; height: 100%; min-height: 320px; border-radius: 10px; background: #e7f0df; touch-action: none; cursor: grab; }
+    canvas:active { cursor: grabbing; }
+    .debug section, .debug details { background: #fff; border-radius: 10px; min-width: 0; }
+    .debug summary { cursor: pointer; padding: 0.7rem 0.9rem 0.2rem; font-weight: 600; font-size: 0.95rem; list-style: none; }
+    .debug summary::-webkit-details-marker { display: none; }
+    .debug details:not([open]) > summary { padding-bottom: 0.7rem; }
+    .debug summary::before { content: ""; display: inline-block; width: 0.4rem; height: 0.4rem; margin-right: 0.45rem; border-right: 2px solid #5c5a55; border-bottom: 2px solid #5c5a55; transform: rotate(-45deg); vertical-align: 0.05rem; }
+    .debug details[open] > summary::before { transform: rotate(45deg); }
+    #call { grid-column: 1 / -1; }
+    #call[hidden] { display: none; }
+    #call table { border-collapse: collapse; margin: 0.3rem 0.9rem 0.9rem; font-size: 0.9rem; }
+    #call td { padding: 0.2rem 1rem 0.2rem 0; vertical-align: top; }
+    #call td:first-child { color: #5c5a55; font-weight: 600; }
+    pre, textarea { margin: 0; padding: 0.6rem 0.9rem 0.9rem; width: 100%; min-height: 18rem; box-sizing: border-box; border: 0; background: transparent; white-space: pre-wrap; font: 0.85rem/1.45 ui-monospace, monospace; resize: vertical; }
+    #reply { min-height: 0; max-height: 16rem; overflow: auto; }
+    input[type=file] { display: none; }
+    #progress { position: fixed; top: 0; left: 0; right: 0; height: 4px; background: #e2ddd2; z-index: 10; transition: opacity 0.4s; }
+    #progress[hidden] { display: block; opacity: 0; pointer-events: none; }
+    #progress-fill { height: 100%; width: 0; background: #1d4ed8; transition: width 0.2s linear; }
+    #progress[data-state="failed"] #progress-fill { background: #dc2626; }
+    @media (max-width: 800px) { .stage, .debug { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
+  <div id="progress" hidden role="progressbar" aria-label="Placing the players" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <div id="progress-fill"></div>
+  </div>
   <header>
     <h1 id="title">Diagram</h1>
     <nav>
+      <button id="place" type="button" disabled>Place</button>
+      <button id="save" type="button" disabled>Save</button>
       <a class="quiet" href="/analyze">Analyze</a>
-      <a class="quiet" href="/projects">Projects</a>
     </nav>
   </header>
   <main>
-    <p id="status">Loading this diagram.</p>
-    <canvas id="field" width="960" height="640"></canvas>
-    <details id="points-panel" open>
-      <summary>Points</summary>
-      <pre id="points"></pre>
-    </details>
+    <p id="status">Drop a formation frame, then place the players.</p>
+    <div class="stage">
+      <div id="drop" class="drop">
+        <p id="hint">Drop the formation frame here.</p>
+        <img id="frame" alt="Formation frame" hidden>
+        <input id="file" type="file" accept="image/*">
+      </div>
+      <canvas id="field" width="960" height="640"></canvas>
+    </div>
+    <div class="debug">
+      <details open>
+        <summary>Points</summary>
+        <pre id="points"></pre>
+      </details>
+      <details open>
+        <summary>Prompt</summary>
+        <textarea id="prompt" spellcheck="false"></textarea>
+      </details>
+      <section id="call" hidden>
+        <h2>Model call</h2>
+        <table><tbody id="call-rows"></tbody></table>
+        <pre id="reply" hidden></pre>
+      </section>
+    </div>
   </main>
   <script>
-    const uid = location.pathname.split("/").filter(Boolean).pop();
+    const standalone = location.pathname.replace(/\/+$/, "") === "/diagram";
+    const uid = standalone ? "" : location.pathname.split("/").filter(Boolean).pop();
+    const api = standalone ? "/api/diagram" : `/api/plays/${encodeURIComponent(uid)}/diagram`;
     const title = document.querySelector("#title");
     const status = document.querySelector("#status");
     const canvas = document.querySelector("#field");
     const points = document.querySelector("#points");
+    const promptBox = document.querySelector("#prompt");
+    const callBox = document.querySelector("#call");
+    const callRows = document.querySelector("#call-rows");
+    const replyBox = document.querySelector("#reply");
+    const progress = document.querySelector("#progress");
+    const progressFill = document.querySelector("#progress-fill");
+    const PLACE_MS_KEY = "diagram-place-ms";
+    let progressHide = null;
+    const saveButton = document.querySelector("#save");
+    const placeButton = document.querySelector("#place");
+    const drop = document.querySelector("#drop");
+    const hint = document.querySelector("#hint");
+    const reference = document.querySelector("#frame");
+    const fileInput = document.querySelector("#file");
     const parts = String(uid || "").split("-");
     if (parts.length === 2 && parts.every((part) => /^\d+$/.test(part))) {
       title.textContent = `Play ${parts[1]}`;
+    }
+    if (standalone) {
+      // No play to save to: calls are tried here and kept only on the page.
+      saveButton.hidden = true;
+      status.textContent = "Drop, paste, or pick a formation frame, then press Place.";
+      document.querySelector("#hint").textContent = "Drop a frame here, paste one (⌘V), or click to pick a file.";
     }
 
     let diagram = null;
     let frame = null;
     let drag = null;
+    let dropped = null;
+    let placing = null;
 
-    load();
+    loadPrompt();
+    drop.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => takeFile(fileInput.files && fileInput.files[0]));
+    drop.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      drop.classList.add("over");
+    });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      drop.classList.remove("over");
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      takeFile(file);
+    });
+    document.addEventListener("paste", (event) => {
+      if (event.target === promptBox) return;
+      const items = [...((event.clipboardData && event.clipboardData.items) || [])];
+      const item = items.find((entry) => entry.type.startsWith("image/"));
+      if (!item) return;
+      event.preventDefault();
+      takeFile(item.getAsFile());
+    });
+    placeButton.addEventListener("click", place);
+    saveButton.addEventListener("click", lock);
 
     canvas.addEventListener("pointerdown", (event) => {
+      if (!diagram) return;
       const hit = playerAt(event);
       if (!hit) return;
       drag = hit;
-      canvas.setPointerCapture(event.pointerId);
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch (error) {
+        /* A pointer that cannot be captured still moves the point. */
+      }
     });
     canvas.addEventListener("pointermove", (event) => {
       if (!drag) return;
       const spot = fromPointer(event);
       drag.player.x = spot.x;
       drag.player.y = spot.y;
+      if (saveButton.textContent === "Saved") saveButton.textContent = "Save";
       paint();
       showPoints();
     });
@@ -74,23 +174,201 @@
       save();
     });
 
-    async function load() {
-      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
+    function takeFile(file) {
+      if (!file || !file.type.startsWith("image/")) {
+        status.textContent = "Drop an image of the formation.";
+        return;
+      }
+      dropped = file;
+      reference.hidden = false;
+      hint.hidden = true;
+      reference.src = URL.createObjectURL(file);
+      placeButton.disabled = false;
+      status.textContent = "Frame ready. Place the players.";
+    }
+
+    async function loadPrompt() {
+      const response = await fetch(`${api}/prompt`);
       if (!response.ok) {
         status.textContent = "This play is not available.";
         return;
       }
       const payload = await response.json();
+      promptBox.value = payload.prompt || "";
+    }
+
+    async function place() {
+      if (!dropped) return;
+      placeButton.disabled = true;
+      placeButton.textContent = "Placing";
+      const started = performance.now();
+      const outgoing = {
+        waiting: true,
+        sent: true,
+        frames: 1,
+        image_bytes: dropped.size,
+        prompt_chars: promptBox.value.length,
+      };
+      watchPlace(started, outgoing);
+      const body = new FormData();
+      body.append("image", dropped);
+      body.append("prompt", promptBox.value);
+      let response;
+      try {
+        response = await fetch(`${api}/pass`, {
+          method: "POST",
+          body,
+        });
+      } catch (error) {
+        stopPlace();
+        endProgress(false);
+        placeButton.disabled = false;
+        placeButton.textContent = "Place";
+        status.textContent = "The model call did not finish.";
+        return;
+      }
+      stopPlace();
+      placeButton.disabled = false;
+      placeButton.textContent = "Place";
+      const waited = Math.round(performance.now() - started);
+      if (!response.ok) {
+        endProgress(false);
+        showCall({ ...outgoing, waiting: false, sent: false, ms: waited }, "");
+        status.textContent = "The players were not placed.";
+        return;
+      }
+      localStorage.setItem(PLACE_MS_KEY, String(waited));
+      const payload = await response.json();
+      if (payload.prompt) promptBox.value = payload.prompt;
+      const call = payload.call || {};
+      if (!call.ms) call.ms = waited;
+      showCall(call, payload.reply || "", payload.diagram);
+      endProgress(Boolean(payload.diagram));
       if (!payload.diagram) {
-        status.textContent = "Run this play on Analyze before opening the diagram.";
+        points.textContent = payload.reply || payload.error || "No points came back.";
+        status.textContent = payload.error || "The reply had no points.";
         return;
       }
       diagram = payload.diagram;
-      const teams = diagram.teams || {};
-      status.textContent = `${teams.offense || "Offense"} on offense, ${teams.defense || "Defense"} on defense. Drag a player to move that point.`;
       frame = measure(diagram);
       paint();
       showPoints();
+      saveButton.disabled = false;
+      const seconds = ((call.ms || waited) / 1000).toFixed(1);
+      const offense = (diagram.offense || []).length;
+      const defense = (diagram.defense || []).length;
+      status.textContent = `Placed ${offense} offense and ${defense} defense in ${seconds} s. Drag a player to move that point.`;
+    }
+
+    function watchPlace(started, outgoing) {
+      stopPlace();
+      startProgress();
+      const expected = Number(localStorage.getItem(PLACE_MS_KEY)) || 20000;
+      const paintWait = () => {
+        const ms = Math.round(performance.now() - started);
+        status.textContent = `Waiting on the model. ${(ms / 1000).toFixed(1)} s so far.`;
+        showCall({ ...outgoing, ms }, "");
+        // The API sends no progress, so ease toward 95% over the last call's time.
+        setProgress(95 * (1 - Math.exp(-ms / expected)));
+      };
+      paintWait();
+      placing = setInterval(paintWait, 200);
+    }
+
+    function stopPlace() {
+      if (placing) clearInterval(placing);
+      placing = null;
+    }
+
+    function startProgress() {
+      clearTimeout(progressHide);
+      delete progress.dataset.state;
+      progressFill.style.transition = "none";
+      setProgress(0);
+      void progressFill.offsetWidth;
+      progressFill.style.transition = "";
+      progress.hidden = false;
+    }
+
+    function setProgress(percent) {
+      const value = Math.max(0, Math.min(100, percent));
+      progressFill.style.width = `${value}%`;
+      progress.setAttribute("aria-valuenow", String(Math.round(value)));
+    }
+
+    function endProgress(ok) {
+      if (!ok) progress.dataset.state = "failed";
+      setProgress(100);
+      clearTimeout(progressHide);
+      progressHide = setTimeout(() => {
+        progress.hidden = true;
+      }, ok ? 600 : 2500);
+    }
+
+    function showCall(call, reply, placed) {
+      callBox.hidden = !call;
+      if (!call) return;
+      const model = call.model || call.requested_model || "";
+      const asked = call.requested_model && call.requested_model !== model
+        ? ` (asked for ${call.requested_model})`
+        : "";
+      const rows = [];
+      if (model) rows.push(["Model", model + asked]);
+      if (call.waiting) rows.push(["Status", "Waiting on the model"]);
+      else if (!call.sent) rows.push(["Sent", "No. The model was not called."]);
+      rows.push(["Frames", String(call.frames ?? 0)]);
+      if (call.image_bytes) rows.push(["Image", fileSize(call.image_bytes)]);
+      if (call.prompt_chars) rows.push(["Prompt", `${call.prompt_chars} characters`]);
+      if (call.input_tokens || call.output_tokens) {
+        rows.push(["Tokens", `${call.input_tokens || 0} in, ${call.output_tokens || 0} out`]);
+      }
+      if (call.output_tokens && call.ms && !call.waiting) {
+        const rate = call.output_tokens / (call.ms / 1000);
+        rows.push(["Speed", `${rate.toFixed(1)} tokens/s`]);
+      }
+      if (call.cost_usd) rows.push(["Cost", `$${Number(call.cost_usd).toFixed(4)}`]);
+      if (call.ms) {
+        rows.push(["Time", call.waiting ? `${(call.ms / 1000).toFixed(1)} s so far` : `${(call.ms / 1000).toFixed(1)} s`]);
+      }
+      if (call.attempt_ms && call.attempt_ms.length > 1) {
+        rows.push(["Attempts", call.attempt_ms.map((ms) => `${(ms / 1000).toFixed(1)} s`).join(", then ")]);
+      }
+      if (call.max_tokens) {
+        const setup = [
+          call.thinking ? "thinking on" : "thinking off",
+          `max ${call.max_tokens} tokens`,
+        ];
+        if (call.retried) setup.push("retried without thinking after running out of tokens");
+        rows.push(["Setup", setup.join(", ")]);
+      }
+      if (call.stop) rows.push(["Stopped", call.stop]);
+      if (!call.waiting) rows.push(["Result", placedResult(call, placed)]);
+      callRows.replaceChildren(
+        ...rows.map(([label, text]) => {
+          const row = document.createElement("tr");
+          const name = document.createElement("td");
+          name.textContent = label;
+          const value = document.createElement("td");
+          value.textContent = text;
+          row.append(name, value);
+          return row;
+        }),
+      );
+      replyBox.hidden = call.waiting || reply == null;
+      replyBox.textContent = reply || "";
+    }
+
+    function placedResult(call, placed) {
+      const offense = placed && placed.offense ? placed.offense.length : 0;
+      const defense = placed && placed.defense ? placed.defense.length : 0;
+      if (offense || defense) return `${offense} offense, ${defense} defense`;
+      if (!call.sent) return "The model was not called.";
+      return "No points";
+    }
+
+    function fileSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
     }
 
     function showPoints() {
@@ -102,18 +380,53 @@
     }
 
     async function save() {
-      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, {
+      if (!diagram || standalone) return;
+      const response = await fetch(api, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ offense: diagram.offense, defense: diagram.defense }),
       });
-      if (!response.ok) {
-        status.textContent = "The moved points were not saved.";
-        return;
-      }
+      if (!response.ok) return;
       const payload = await response.json();
       diagram = payload.diagram || diagram;
       showPoints();
+    }
+
+    async function lock() {
+      if (!diagram || standalone) return;
+      saveButton.disabled = true;
+      saveButton.textContent = "Saving";
+      const image = dropped ? await fileBase64(dropped) : "";
+      const response = await fetch(`${api}/example`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          offense: diagram.offense,
+          defense: diagram.defense,
+          image,
+          prompt: promptBox.value,
+        }),
+      });
+      saveButton.disabled = false;
+      if (!response.ok) {
+        saveButton.textContent = "Save";
+        status.textContent = "This frame and these points were not saved.";
+        return;
+      }
+      saveButton.textContent = "Saved";
+      status.textContent = "Saved this frame with these points.";
+    }
+
+    function fileBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const text = String(reader.result || "");
+          resolve(text.slice(text.indexOf(",") + 1));
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
     }
 
     function measure(source) {

@@ -11,12 +11,14 @@ import base64
 import json
 import os
 import re
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from film_analysis.chart.formation import parse_formation
 from film_analysis.chart.formation_plot import normalize_to_los
 from film_analysis.chart.isolate import isolate_play
+from film_analysis.ingest.cost import read_cost
 from film_analysis.plays.boundaries import DEFAULT_MODEL
 from film_analysis.teams.uniforms import Uniform, label_home_away, uniform_line
 
@@ -320,27 +322,90 @@ def _exchange(
         if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff")
     ][:limit]
     if limit and not jpegs:
-        return _Exchange(model, prompt, 0, "", False)
+        return _Exchange(model, prompt, 0, "", False, max_tokens=tokens)
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
-        return _Exchange(model, prompt, len(jpegs), "", False)
+        return _Exchange(
+            model, prompt, len(jpegs), "", False, "No ANTHROPIC_API_KEY.", max_tokens=tokens
+        )
     content: list[dict[str, object]] = [{"type": "text", "text": prompt}]
     for index, frame in enumerate(jpegs, start=1):
         content.append({"type": "text", "text": f"Frame {index}"})
         content.append(_image_block(frame))
+    started = time.monotonic()
+    budget = tokens
+    thinking = True
+    retried = False
+    incoming = outgoing = 0
+    served = ""
+    attempts: list[int] = []
+
+    def _stamp(mark: float) -> None:
+        attempts.append(int((time.monotonic() - mark) * 1000))
+
     try:
         import anthropic
 
         client = anthropic.Anthropic(api_key=api_key)
-        message = _complete(client, model, tokens, content, thinking=True)
+        call_started = time.monotonic()
+        message = _complete(client, model, budget, content, thinking=True)
+        _stamp(call_started)
+        incoming, outgoing, served = _usage(message, incoming, outgoing, served)
         reply, stop, error = _reply_text(message)
         if plain_retry and not reply and stop == "max_tokens":
-            message = _complete(client, model, max(tokens, 4000), content, thinking=False)
+            budget, thinking, retried = max(tokens, 4000), False, True
+            call_started = time.monotonic()
+            message = _complete(client, model, budget, content, thinking=False)
+            _stamp(call_started)
+            incoming, outgoing, served = _usage(message, incoming, outgoing, served)
             reply, stop, error = _reply_text(message)
     except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"
-        return _Exchange(model, prompt, len(jpegs), "", True, detail[:240], "")
-    return _Exchange(model, prompt, len(jpegs), reply, True, error, stop)
+        return _Exchange(
+            model,
+            prompt,
+            len(jpegs),
+            "",
+            True,
+            detail[:240],
+            "",
+            served_model=served,
+            input_tokens=incoming,
+            output_tokens=outgoing,
+            ms=int((time.monotonic() - started) * 1000),
+            max_tokens=budget,
+            thinking=thinking,
+            retried=retried,
+            attempt_ms=tuple(attempts),
+        )
+    return _Exchange(
+        model,
+        prompt,
+        len(jpegs),
+        reply,
+        True,
+        error,
+        stop,
+        served_model=served,
+        input_tokens=incoming,
+        output_tokens=outgoing,
+        ms=int((time.monotonic() - started) * 1000),
+        max_tokens=budget,
+        thinking=thinking,
+        retried=retried,
+        attempt_ms=tuple(attempts),
+    )
+
+
+def _usage(message: object, incoming: int, outgoing: int, served: str) -> tuple[int, int, str]:
+    """Add one reply's tokens. A retry is billed too, so both calls count."""
+
+    usage = getattr(message, "usage", None)
+    return (
+        incoming + int(getattr(usage, "input_tokens", 0) or 0),
+        outgoing + int(getattr(usage, "output_tokens", 0) or 0),
+        str(getattr(message, "model", "") or served),
+    )
 
 
 def _complete(
@@ -385,6 +450,34 @@ class _Exchange:
     sent: bool
     error: str = ""
     stop: str = ""
+    served_model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    ms: int = 0
+    max_tokens: int = 0
+    thinking: bool = False
+    retried: bool = False
+    attempt_ms: tuple[int, ...] = ()
+
+    def usage(self) -> dict[str, object]:
+        """Which model answered, what it cost, and how the call was set up."""
+
+        return {
+            "model": self.served_model or self.model,
+            "requested_model": self.model,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cost_usd": round(
+                read_cost(self.served_model or self.model, self.input_tokens, self.output_tokens),
+                6,
+            ),
+            "ms": self.ms,
+            "max_tokens": self.max_tokens,
+            "thinking": self.thinking,
+            "retried": self.retried,
+            "attempt_ms": list(self.attempt_ms),
+            "stop": self.stop,
+        }
 
 
 def _field(offense: Uniform | None, defense: Uniform | None) -> dict[str, object]:

@@ -292,6 +292,7 @@ def test_the_model_step_keeps_the_exact_call() -> None:
             '{"offense_team":"B"}',
             4,
             True,
+            usage={"model": "test-model-0501", "input_tokens": 1200, "output_tokens": 300},
         )
 
     pipeline = _pipeline(FakeSource(), isolate=_few, ask_model=ask)
@@ -302,7 +303,9 @@ def test_the_model_step_keeps_the_exact_call() -> None:
     model = next(step for step in run.steps if step.name == "model")
     assert model.call == {
         "sent": True,
-        "model": "test-model",
+        "model": "test-model-0501",
+        "input_tokens": 1200,
+        "output_tokens": 300,
         "prompt": "Team A wears white.",
         "reply": '{"offense_team":"B"}',
         "frames": 4,

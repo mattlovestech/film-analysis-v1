@@ -1,5 +1,6 @@
 """The analyze table lists scrimmage plays and shows type, players, then the plot."""
 
+import base64
 import time
 from pathlib import Path
 
@@ -128,8 +129,27 @@ def test_running_a_play_saves_the_plotted_players(tmp_path: Path, monkeypatch) -
     page = client.get("/analyze/play/1-1")
     assert page.status_code == 200
     assert "<canvas" in page.text
-    assert "<details" in page.text
+    assert 'id="drop"' in page.text
+    assert ">Place<" in page.text
+    assert ">Save<" in page.text
     assert ">Points<" in page.text
+    assert ">Prompt<" in page.text
+    assert page.text.count("<details") == 2
+    frame = client.get("/api/plays/1-1/diagram/frame")
+    assert frame.status_code == 200
+    assert frame.content.startswith(b"\xff\xd8\xff")
+    locked = client.post(
+        "/api/plays/1-1/diagram/example",
+        json={"offense": offense, "defense": diagram["defense"]},
+    )
+    assert locked.status_code == 200
+    assert locked.json()["saved"] is True
+    example = store.diagram_example(1, 1)
+    assert example is not None
+    assert example.points["offense"][0]["x"] == 4.2
+    image = store.play_image(1, 1, "diagram")
+    assert image is not None
+    assert image.read_bytes().startswith(b"\xff\xd8\xff")
     again = client.get("/api/plays/1-1/diagram").json()
     assert again["diagram"]["offense"][0]["x"] == 4.2
     saved = store.get_project(1)
@@ -137,3 +157,127 @@ def test_running_a_play_saves_the_plotted_players(tmp_path: Path, monkeypatch) -
     assert play.play_type is None
     assert play.formation is None
     assert play.unit is None
+
+
+def test_a_dropped_frame_is_placed_with_the_standard_prompt(tmp_path: Path, monkeypatch) -> None:
+    from film_analysis.chart.play_diagram import _Exchange
+
+    def exchange(frames, prompt, *, limit, tokens, plain_retry=False):
+        assert frames[0].startswith(b"\xff\xd8\xff")
+        assert "Team A wears" in prompt
+        reply = (
+            '{"offense_team":"B","offense":[{"x":0,"y":-0.5,"role":"center",'
+            '"symbol":"square","seen":true}],"defense":[{"x":1,"y":2,"role":"line",'
+            '"symbol":"open","seen":true}]}'
+        )
+        return _Exchange(
+            "claude-sonnet-5-5",
+            prompt,
+            1,
+            reply,
+            True,
+            stop="end_turn",
+            served_model="claude-sonnet-5-5-20261001",
+            input_tokens=1_000_000,
+            output_tokens=100_000,
+            ms=4200,
+            max_tokens=8000,
+            thinking=True,
+        )
+
+    monkeypatch.setattr("film_analysis.web.app._exchange", exchange)
+    store = _film(tmp_path)
+    client = TestClient(create_app(store=store))
+
+    prompt = client.get("/api/plays/1-1/diagram/prompt")
+    assert prompt.status_code == 200
+    assert "Team A wears" in prompt.json()["prompt"]
+    assert "JSON only" in prompt.json()["prompt"]
+
+    placed = client.post(
+        "/api/plays/1-1/diagram/pass",
+        data={"prompt": prompt.json()["prompt"]},
+        files={"image": ("frame.jpg", b"\xff\xd8\xff" + b"0" * 16, "image/jpeg")},
+    )
+    assert placed.status_code == 200
+    body = placed.json()
+    assert body["error"] == ""
+    assert body["call"] == {
+        "sent": True,
+        "frames": 1,
+        "model": "claude-sonnet-5-5-20261001",
+        "requested_model": "claude-sonnet-5-5",
+        "input_tokens": 1_000_000,
+        "output_tokens": 100_000,
+        "cost_usd": 3.0,
+        "ms": 4200,
+        "max_tokens": 8000,
+        "thinking": True,
+        "retried": False,
+        "attempt_ms": [],
+        "stop": "end_turn",
+        "image_bytes": len(b"\xff\xd8\xff" + b"0" * 16),
+        "prompt_chars": len(prompt.json()["prompt"]),
+    }
+    assert body["diagram"]["offense"][0]["symbol"] == "square"
+    assert body["diagram"]["defense"][0]["y"] == 2.0
+    saved = client.post(
+        "/api/plays/1-1/diagram/example",
+        json={
+            "offense": body["diagram"]["offense"],
+            "defense": body["diagram"]["defense"],
+            "prompt": prompt.json()["prompt"],
+            "image": base64.b64encode(b"\xff\xd8\xff" + b"0" * 16).decode(),
+        },
+    )
+    assert saved.status_code == 200
+    row = store.diagram_example(1, 1)
+    assert row is not None
+    assert row.prompt.startswith("These frames")
+    assert row.points["offense"][0]["symbol"] == "square"
+    page = client.get("/analyze/play/1-1")
+    assert "Drop the formation frame here." in page.text
+    assert 'id="prompt"' in page.text
+    assert 'id="points"' in page.text
+    assert 'id="reply"' in page.text
+    assert "Waiting on the model" in page.text
+    assert "tokens/s" in page.text
+
+
+def test_the_diagram_page_places_any_frame_without_a_film(tmp_path: Path, monkeypatch) -> None:
+    from film_analysis.chart.play_diagram import _Exchange
+
+    def exchange(frames, prompt, *, limit, tokens, plain_retry=False):
+        assert prompt == "Place everyone."
+        reply = (
+            '{"offense_team":"A","offense":[{"x":0,"y":-0.5,"role":"center",'
+            '"symbol":"square","seen":true}],"defense":[{"x":1,"y":2,"role":"line",'
+            '"symbol":"open","seen":true}]}'
+        )
+        return _Exchange("claude-sonnet-5-5", prompt, 1, reply, True, input_tokens=10)
+
+    monkeypatch.setattr("film_analysis.web.app._exchange", exchange)
+    store = MemoryCatalog(tmp_path)
+    client = TestClient(create_app(store=store))
+
+    page = client.get("/diagram")
+    assert page.status_code == 200
+    assert 'id="prompt"' in page.text
+    prompt = client.get("/api/diagram/prompt")
+    assert "JSON only" in prompt.json()["prompt"]
+
+    placed = client.post(
+        "/api/diagram/pass",
+        data={"prompt": "Place everyone."},
+        files={"image": ("frame.jpg", b"\xff\xd8\xff" + b"0" * 16, "image/jpeg")},
+    )
+    assert placed.status_code == 200
+    body = placed.json()
+    assert body["diagram"]["offense"][0]["symbol"] == "square"
+    assert body["call"]["input_tokens"] == 10
+    assert store.list_projects() == []
+
+    refused = client.post(
+        "/api/diagram/pass", files={"image": ("note.txt", b"not a picture", "text/plain")}
+    )
+    assert refused.status_code == 400
