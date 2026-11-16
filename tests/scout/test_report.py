@@ -298,7 +298,7 @@ def test_special_teams_can_be_the_only_section(tmp_path: Path) -> None:
     assert len(rows) == 2
 
 
-def test_formation_waits_until_the_call_is_known(tmp_path: Path) -> None:
+def test_formation_waits_until_run_or_pass_is_known(tmp_path: Path) -> None:
     store = _ready_film(tmp_path)
     store.set_play_unit(1, 2, "defense")
     store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
@@ -317,7 +317,7 @@ def test_formation_waits_until_the_call_is_known(tmp_path: Path) -> None:
     created = client.post("/api/projects/1/report", json={"sections": ["formations"]})
 
     assert created.status_code == 200
-    assert called == []
+    assert called == ["run"]
     assert store.get_project(1).plays[1].formation is None
 
 
@@ -455,10 +455,19 @@ def test_a_person_can_override_the_formation(tmp_path: Path) -> None:
     assert still.status_code == 200
 
 
-def test_formations_are_read_for_both_offenses(tmp_path: Path) -> None:
+def test_the_jersey_read_decides_which_uniform_is_on_offense(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from film_analysis.chart.call import ChartedPlay
     from film_analysis.chart.formation import FormationRead
+    from film_analysis.chart.isolate import PlayIsolation
+    from film_analysis.web import app as web_app
 
+    def isolate(frames: object, mine: object, other: object) -> PlayIsolation:
+        del frames, mine, other
+        return PlayIsolation(unit="defense")
+
+    monkeypatch.setattr(web_app, "isolate_play", isolate)
     store = _ready_film(tmp_path)
     store.set_play_unit(1, 2, "defense")
     store.set_film_teams(1, FilmTeams("Home", "Away", "left"))
@@ -478,7 +487,7 @@ def test_formations_are_read_for_both_offenses(tmp_path: Path) -> None:
     created = client.post("/api/projects/1/report", json={"sections": ["formations"]})
 
     assert created.status_code == 200
-    assert sorted(seen) == [("dark blue", "pass"), ("white", "run")]
+    assert sorted(seen) == [("dark blue", "pass"), ("dark blue", "run")]
     blocks = created.json()["blocks"]
     text = "\n".join(block["text"] for block in blocks)
     assert "experimental" not in text.lower()

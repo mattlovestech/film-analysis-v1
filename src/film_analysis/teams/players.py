@@ -252,7 +252,7 @@ def full_body_shot(
             crop = _group_crop(image, group)
             if crop is None or not _clear_uniform_crop(crop):
                 continue
-            if not _big_on_frame(crop, image) or _grass(crop) > 0.5 or _broadcast_crowd(crop, image):
+            if _not_a_card(crop, image):
                 continue
             if _broadcast_graphic(crop, target) or _flat_graphic(crop, target):
                 continue
@@ -340,7 +340,7 @@ def lone_players(
                 crop = _group_crop(image, group)
                 if crop is None or not _clear_uniform_crop(crop):
                     continue
-                if not _big_on_frame(crop, image) or _grass(crop) > 0.5 or _broadcast_crowd(crop, image):
+                if _not_a_card(crop, image):
                     continue
                 score = (_cloth_fill(crop), 1 if len(group) > 1 else 0, _sharpness(crop))
                 current = best.get(kind)
@@ -402,9 +402,10 @@ def _flat_graphic(crop, target: tuple[int, int, int]) -> bool:
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     graphic = (hsv[:, :, 1] > 80) & ((hsv[:, :, 0] < 25) | (hsv[:, :, 0] > 85))
     return float(graphic.mean()) > 0.30
-    """A game frame. A title card, a band, or a graphic has no grass."""
 
-    return _grass(image) >= 0.08
+
+def _not_a_card(crop, image) -> bool:
+    return not _big_on_frame(crop, image) or _grass(crop) > 0.5 or _broadcast_crowd(crop, image)
 
 
 def _broadcast_crowd(crop, image) -> bool:

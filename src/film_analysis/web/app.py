@@ -44,7 +44,7 @@ from film_analysis.chart.formation import (
 )
 from film_analysis.chart.formation_plot import layout_payload, plot_formation
 from film_analysis.chart.isolate import isolate_play, mark_both_teams
-from film_analysis.chart.play_diagram import read_scrimmage, steps_done
+from film_analysis.chart.play_diagram import steps_done
 from film_analysis.diagram.pipeline import DiagramPipeline, PlayInfo
 from film_analysis.diagram.trace import RunStore
 from film_analysis.diagram.workers import DiagramWorkers
@@ -119,8 +119,6 @@ from film_analysis.teams.uniforms import (
     label_home_away,
     lineup_moment,
     play_frames,
-    player_action_frames,
-    player_frames,
     portrait_uniform,
     reference_for_model,
     split_lineup,
@@ -434,15 +432,20 @@ def create_app(
 
     @app.get("/api/analyze")
     def analyze_list() -> list[dict[str, object]]:
-        return _scrimmage_rows(catalog)
+        return _scrimmage_rows(catalog, diagram_workers)
 
     @app.get("/api/plays/{uid}/diagram")
     def play_diagram(uid: str) -> dict[str, object]:
-        return _diagram_view(catalog, uid)
+        return _diagram_view(catalog, uid, diagram_workers)
+
+    @app.put("/api/plays/{uid}/diagram")
+    def move_play_diagram(uid: str, body: _MovedDiagram) -> dict[str, object]:
+        _store_moved_points(catalog, uid, body)
+        return _diagram_view(catalog, uid, diagram_workers)
 
     @app.post("/api/plays/{uid}/diagram")
     def start_play_diagram(uid: str) -> dict[str, object]:
-        return _start_diagram(catalog, uid)
+        return _start_diagram(catalog, uid, diagram_workers)
 
     diagram_runs = RunStore(_diagram_runs_dir(catalog))
     diagram_workers = DiagramWorkers(DiagramPipeline(_CatalogPlaySource(catalog), diagram_runs))
@@ -776,7 +779,11 @@ def create_app(
             make_poster=True,
         )
         refreshing = False
-        if saved.status == "ready" and saved.plays and _portraits_need_replacement(catalog, project_id):
+        if (
+            saved.status == "ready"
+            and saved.plays
+            and _portraits_need_replacement(catalog, project_id)
+        ):
             refreshing = _schedule_portrait_refresh(catalog, saved, draw_lineup)
         teams = payload.get("teams")
         if refreshing and isinstance(teams, dict):
@@ -2524,14 +2531,10 @@ def _play_uid(project_id: int, play_number: int) -> str:
     return f"{project_id}-{play_number}"
 
 
-_diagram_jobs: dict[str, dict[str, object]] = {}
-_DIAGRAM_STEPS = ("type", "players", "plot")
-_diagram_lock = threading.Lock()
-
-
-def _scrimmage_rows(catalog: Catalog) -> list[dict[str, object]]:
+def _scrimmage_rows(catalog: Catalog, workers: DiagramWorkers) -> list[dict[str, object]]:
     """Offense and defense clips across films, with each analysis bar."""
 
+    latest = workers.store.latest_by_uid()
     rows: list[dict[str, object]] = []
     for project_id, name, play_number, start, end, _play_type, _formation in _scrimmage_index(
         catalog
@@ -2539,14 +2542,10 @@ def _scrimmage_rows(catalog: Catalog) -> list[dict[str, object]]:
         uid = _play_uid(project_id, play_number)
         layout = _saved_layout(catalog, project_id, play_number)
         steps = steps_done(layout)
-        with _diagram_lock:
-            job = _diagram_jobs.get(uid)
-        running = bool(job and job.get("running"))
+        run = latest.get(uid)
+        running = run is not None and run.status in {"queued", "running"}
         if running:
-            for step in _DIAGRAM_STEPS:
-                live = job.get(step)
-                if isinstance(live, int):
-                    steps[step] = live
+            steps = _bars_from_run(run)
         rows.append(
             {
                 "uid": uid,
@@ -2663,22 +2662,46 @@ def _scrimmage_index(
     return found
 
 
-def _diagram_view(catalog: Catalog, uid: str) -> dict[str, object]:
-    with _diagram_lock:
-        job = dict(_diagram_jobs.get(uid) or {})
-    running = bool(job.get("running"))
-    # A live read already has the bars in memory. Checking the database
+def _store_moved_points(catalog: Catalog, uid: str, body: "_MovedDiagram") -> None:
+    """Replace the saved player spots with the points the coach dragged."""
+
+    project, play = _scrimmage_play(catalog, uid)
+    layout = _saved_layout(catalog, project.project, play.play_number)
+    if not isinstance(layout, dict) or not isinstance(layout.get("field"), dict):
+        raise HTTPException(status_code=404, detail="Run this play before moving the players.")
+    layout["offense"] = [_placed_point(item) for item in body.offense]
+    layout["defense"] = [_placed_point(item) for item in body.defense]
+    catalog.save_play_layout(project.project, play.play_number, layout)
+
+
+def _placed_point(item: "_MovedPoint") -> dict[str, object]:
+    symbol = item.symbol if item.symbol in {"square", "open", "filled"} else "open"
+    if item.x != item.x or item.y != item.y or abs(item.x) > 1e6 or abs(item.y) > 1e6:
+        raise HTTPException(status_code=400, detail="Each point needs an x and a y.")
+    return {
+        "x": round(max(-26.6, min(26.6, item.x)), 1),
+        "y": round(max(-60.0, min(60.0, item.y)), 1),
+        "role": item.role.strip()[:24] or "player",
+        "symbol": symbol,
+        "label": item.label.strip()[:4],
+        "seen": item.seen,
+    }
+
+
+def _diagram_view(catalog: Catalog, uid: str, workers: DiagramWorkers) -> dict[str, object]:
+    run = workers.store.latest_by_uid().get(uid)
+    running = run is not None and run.status in {"queued", "running"}
+    # A live read already has its steps in memory. Checking the database
     # or the clip store here stacks behind that read and the page never moves.
     if running:
         return {
             "uid": uid,
             "running": True,
-            "steps": {
-                name: job[name] if isinstance(job.get(name), int) else 0
-                for name in _DIAGRAM_STEPS
-            },
+            "steps": _bars_from_run(run),
             "diagram": None,
-            "detail": str(job.get("detail") or ""),
+            "detail": run.detail or "Reading this play.",
+            "run": run.full(),
+            "workers": workers.stats(),
         }
     project, play = _scrimmage_play(catalog, uid)
     layout = _saved_layout(catalog, project.project, play.play_number)
@@ -2689,60 +2712,51 @@ def _diagram_view(catalog: Catalog, uid: str) -> dict[str, object]:
         "running": False,
         "steps": steps,
         "diagram": diagram,
-        "detail": str(job.get("detail") or ""),
+        "detail": run.detail if run is not None else "",
+        "run": run.full() if run is not None else None,
+        "workers": workers.stats(),
     }
 
 
-def _start_diagram(catalog: Catalog, uid: str) -> dict[str, object]:
+def _start_diagram(catalog: Catalog, uid: str, workers: DiagramWorkers) -> dict[str, object]:
     project, play = _scrimmage_play(catalog, uid)
-    with _diagram_lock:
-        current = _diagram_jobs.get(uid)
-        already = current is not None and bool(current.get("running"))
-        if not already:
-            _diagram_jobs[uid] = {
-                "running": True,
-                "type": 100,
-                "players": 0,
-                "plot": 0,
-                "detail": "Reading this play.",
-            }
-    if already:
-        return _diagram_view(catalog, uid)
-
-    def work() -> None:
-        try:
-            _run_diagram(catalog, project, play)
-        except Exception:
-            _LOG.exception("diagram %s failed", uid)
-            _set_diagram(uid, detail="Could not read that play.", running=False)
-        else:
-            _set_diagram(uid, running=False)
-
-    threading.Thread(target=work, name=f"diagram-{uid}", daemon=True).start()
-    return _diagram_view(catalog, uid)
+    workers.submit([(project.project, play.play_number)])
+    return _diagram_view(catalog, uid, workers)
 
 
-def _run_diagram(catalog: Catalog, project: ProjectDetail, play: PlayRecord) -> None:
-    uid = _play_uid(project.project, play.play_number)
-    try:
-        teams = catalog.film_teams(project.project)
-    except CatalogError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    if teams is None:
-        _set_diagram(uid, detail="The two uniforms are not known yet.", running=True)
-        return
-    left, right = _side_uniforms(teams)
-    frames = _scrimmage_frames(catalog, project, play, snap=True)
+def _bars_from_run(run: object) -> dict[str, int]:
+    """Move the Players and Plot bars from whichever step the worker is on."""
 
-    def on_step(step: str, percent: int) -> None:
-        _set_diagram(uid, **{step: percent})
+    status = {step.name: step.status for step in getattr(run, "steps", ())}
+    players_started = status.get("players") in {"running", "ok", "warn", "skipped"}
+    players_done = status.get("players") in {"ok", "warn", "skipped"} and status.get("model") in {
+        "ok",
+        "warn",
+        "skipped",
+        None,
+    }
+    if status.get("model") == "running":
+        players_done = False
+    plot_done = status.get("plot") in {"ok", "warn"} or bool(status.get("save"))
+    return {
+        "type": 100,
+        "players": 100 if players_done or status.get("plot") else 40 if players_started else 0,
+        "plot": 100 if plot_done else 40 if status.get("plot") == "running" else 0,
+    }
 
-    diagram = read_scrimmage(frames, left, right, on_step)
-    try:
-        catalog.save_play_layout(project.project, play.play_number, diagram)
-        _set_diagram(uid, detail="")
-    except CatalogError as error:
-        _set_diagram(uid, detail=str(error))
+
+class _MovedPoint(BaseModel):
+    x: float
+    y: float
+    role: str = "player"
+    symbol: str = "open"
+    label: str = ""
+    seen: bool = True
+
+
+class _MovedDiagram(BaseModel):
+    offense: list[_MovedPoint] = Field(min_length=1, max_length=11)
+    defense: list[_MovedPoint] = Field(min_length=1, max_length=11)
 
 
 class _DiagramTestStart(BaseModel):
@@ -2802,15 +2816,6 @@ def _diagram_runs_dir(catalog: Catalog) -> Path | None:
         if isinstance(folder, Path):
             return folder / "diagram-runs"
     return None
-
-
-def _set_diagram(uid: str, **values: object) -> None:
-    with _diagram_lock:
-        job = _diagram_jobs.setdefault(
-            uid,
-            {"running": True, "type": 100, "players": 0, "plot": 0, "detail": ""},
-        )
-        job.update(values)
 
 
 def _scrimmage_play(catalog: Catalog, uid: str) -> tuple[ProjectDetail, PlayRecord]:

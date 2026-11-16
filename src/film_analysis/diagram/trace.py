@@ -41,7 +41,9 @@ class Step:
     started: float = 0.0
     ended: float | None = None
     detail: str = ""
+    incoming: dict[str, object] = field(default_factory=dict)
     data: dict[str, object] = field(default_factory=dict)
+    call: dict[str, object] | None = None
     warnings: list[str] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
     skipped: bool = False
@@ -316,7 +318,9 @@ def _run_from_json(raw: dict[str, object]) -> Run:
                 started=float(item.get("started") or 0.0),
                 ended=float(item["ended"]) if item.get("ended") is not None else None,
                 detail=str(item.get("detail") or ""),
+                incoming=dict(item.get("incoming") or {}),
                 data=dict(item.get("data") or {}),
+                call=dict(item["call"]) if isinstance(item.get("call"), dict) else None,
                 warnings=list(item.get("warnings") or []),
                 artifacts=list(item.get("artifacts") or []),
                 skipped=bool(item.get("skipped")),

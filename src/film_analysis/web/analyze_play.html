@@ -3,150 +3,178 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Play diagram</title>
+  <title>Diagram</title>
   <style>
     :root { color-scheme: light; }
     body { margin: 0; font: 16px/1.4 "Avenir Next", "Segoe UI", sans-serif; background: #f6f4ef; color: #1c1c1a; }
-    header, main { padding: 1rem 1.25rem; }
-    header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
-    nav, .facts { display: flex; gap: 0.9rem; align-items: center; flex-wrap: wrap; }
+    header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; padding: 1rem 1.25rem; }
+    nav { display: flex; gap: 0.9rem; align-items: center; }
     a { color: inherit; }
     a.quiet { color: #5c5a55; text-decoration: none; }
-    h1 { font-size: 1.35rem; margin: 0; }
-    main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.1fr); gap: 1.25rem; }
-    video, canvas { width: 100%; border-radius: 8px; background: #111; }
-    canvas { background: #e7f0df; }
-    .bars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin: 0.8rem 0; }
-    .bar { height: 0.45rem; background: #ece8e0; border-radius: 999px; overflow: hidden; }
-    .bar span { display: block; height: 100%; width: 0; background: #2f6b3a; }
-    button { border: 0; border-radius: 999px; padding: 0.5rem 0.85rem; background: #1c1c1a; color: #fff; font: inherit; }
+    h1 { font-size: 1.4rem; margin: 0; }
+    main { padding: 0 1.25rem 2rem; }
+    canvas { width: 100%; max-width: 960px; height: auto; border-radius: 10px; background: #e7f0df; touch-action: none; cursor: grab; }
+    canvas:active { cursor: grabbing; }
     #status { color: #5c5a55; }
-    pre { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; background: #fff; border-radius: 8px; padding: 0.75rem; }
-    @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+    details { max-width: 960px; margin-top: 1rem; background: #fff; border-radius: 10px; }
+    summary { padding: 0.75rem 1rem; cursor: pointer; font-weight: 600; }
+    pre { margin: 0; padding: 0 1rem 1rem; white-space: pre-wrap; font: 0.85rem/1.45 ui-monospace, monospace; }
   </style>
 </head>
 <body>
   <header>
-    <h1 id="title">Play</h1>
+    <h1 id="title">Diagram</h1>
     <nav>
       <a class="quiet" href="/analyze">Analyze</a>
       <a class="quiet" href="/projects">Projects</a>
     </nav>
   </header>
   <main>
-    <section>
-      <p id="status">Reading this play.</p>
-      <div class="bars">
-        <div><div>Teams</div><div class="bar" data-step="teams" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
-        <div><div>Call</div><div class="bar" data-step="call" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
-        <div><div>Place</div><div class="bar" data-step="place" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
-        <div><div>Formation</div><div class="bar" data-step="formation" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
-      </div>
-      <p class="facts" id="facts"></p>
-      <video id="clip" controls playsinline></video>
-      <button id="again" type="button">Run again</button>
-    </section>
-    <section>
-      <canvas id="field" width="720" height="520"></canvas>
-      <pre id="json" hidden></pre>
-    </section>
+    <p id="status">Loading this diagram.</p>
+    <canvas id="field" width="960" height="640"></canvas>
+    <details id="points-panel" open>
+      <summary>Points</summary>
+      <pre id="points"></pre>
+    </details>
   </main>
   <script>
     const uid = location.pathname.split("/").filter(Boolean).pop();
     const title = document.querySelector("#title");
     const status = document.querySelector("#status");
-    const facts = document.querySelector("#facts");
-    const clip = document.querySelector("#clip");
     const canvas = document.querySelector("#field");
-    const dump = document.querySelector("#json");
-    const again = document.querySelector("#again");
+    const points = document.querySelector("#points");
     const parts = String(uid || "").split("-");
     if (parts.length === 2 && parts.every((part) => /^\d+$/.test(part))) {
       title.textContent = `Play ${parts[1]}`;
-      clip.src = `/projects/${parts[0]}/plays/${parts[1]}`;
     }
 
-    again.addEventListener("click", () => run(true));
-    run(false);
+    let diagram = null;
+    let frame = null;
+    let drag = null;
 
-    async function run(force) {
-      again.disabled = true;
-      const current = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
-      const saved = current.ok ? await current.json() : null;
-      if (force || !saved || (!saved.diagram && !saved.running)) {
-        status.textContent = "Reading this play.";
-        await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, { method: "POST" });
-        watch();
-        poll();
-      } else {
-        show(saved);
-        if (saved.running) watch();
-      }
-      again.disabled = false;
-    }
+    load();
 
-    function show(body) {
-      const steps = body.steps || {};
-      for (const name of ["teams", "call", "place", "formation"]) {
-        const percent = Number(steps[name] || 0);
-        const track = document.querySelector(`.bar[data-step="${name}"]`);
-        track.setAttribute("aria-valuenow", String(percent));
-        track.querySelector("span").style.width = `${percent}%`;
-      }
-      const diagram = body.diagram;
-      if (!diagram) {
-        status.textContent = body.detail || (body.running ? "Reading this play." : "This play has not been placed.");
+    canvas.addEventListener("pointerdown", (event) => {
+      const hit = playerAt(event);
+      if (!hit) return;
+      drag = hit;
+      canvas.setPointerCapture(event.pointerId);
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const spot = fromPointer(event);
+      drag.player.x = spot.x;
+      drag.player.y = spot.y;
+      paint();
+      showPoints();
+    });
+    canvas.addEventListener("pointerup", () => {
+      if (!drag) return;
+      drag = null;
+      save();
+    });
+
+    async function load() {
+      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
+      if (!response.ok) {
+        status.textContent = "This play is not available.";
         return;
       }
-      const teams = diagram.teams || {};
-      const call = diagram.call ? diagram.call : "call open";
-      const formation = diagram.formation ? diagram.formation : "formation open";
-      facts.textContent = `${teams.offense || "Offense"} on offense, ${teams.defense || "defense"} on defense. ${call}. ${formation}.`;
-      status.textContent = body.running
-        ? "Reading this play."
-        : diagram.formation
-          ? "The points are saved. The formation is named from them."
-          : "The points are saved. The formation is still open.";
-      draw(diagram);
-      dump.hidden = false;
-      dump.textContent = JSON.stringify(diagram, null, 2);
-    }
-
-    let timer = null;
-    let polling = false;
-    function watch() {
-      if (timer === null) timer = setInterval(poll, 1200);
-    }
-    async function poll() {
-      if (polling) return;
-      polling = true;
-      try {
-        const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
-        if (!response.ok) return;
-        const body = await response.json();
-        show(body);
-        if (body.running) watch();
-        else if (timer !== null) {
-          clearInterval(timer);
-          timer = null;
-        }
-      } finally {
-        polling = false;
+      const payload = await response.json();
+      if (!payload.diagram) {
+        status.textContent = "Run this play on Analyze before opening the diagram.";
+        return;
       }
+      diagram = payload.diagram;
+      const teams = diagram.teams || {};
+      status.textContent = `${teams.offense || "Offense"} on offense, ${teams.defense || "Defense"} on defense. Drag a player to move that point.`;
+      frame = measure(diagram);
+      paint();
+      showPoints();
     }
 
-    function draw(diagram) {
+    function showPoints() {
+      points.textContent = JSON.stringify(
+        { offense: diagram.offense, defense: diagram.defense },
+        null,
+        2,
+      );
+    }
+
+    async function save() {
+      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offense: diagram.offense, defense: diagram.defense }),
+      });
+      if (!response.ok) {
+        status.textContent = "The moved points were not saved.";
+        return;
+      }
+      const payload = await response.json();
+      diagram = payload.diagram || diagram;
+      showPoints();
+    }
+
+    function measure(source) {
+      const left = 48;
+      const right = canvas.width - 20;
+      const top = 28;
+      const bottom = canvas.height - 36;
+      const field = source.field || {};
+      const xMax = Number(field.width || 53.3) / 2;
+      const people = [...(source.offense || []), ...(source.defense || [])];
+      let yMin = -12;
+      let yMax = 12;
+      for (const player of people) {
+        const y = Number(player.y) || 0;
+        yMin = Math.min(yMin, y);
+        yMax = Math.max(yMax, y);
+      }
+      const pad = Math.max(2, (yMax - yMin) * 0.08);
+      return { left, right, top, bottom, xMax, yMin: yMin - pad, yMax: yMax + pad };
+    }
+
+    function mapX(x) {
+      return frame.left + ((Number(x) + frame.xMax) / (frame.xMax * 2)) * (frame.right - frame.left);
+    }
+    function mapY(y) {
+      return frame.bottom - ((y - frame.yMin) / (frame.yMax - frame.yMin)) * (frame.bottom - frame.top);
+    }
+
+    function fromPointer(event) {
+      const rect = canvas.getBoundingClientRect();
+      const px = (event.clientX - rect.left) * (canvas.width / rect.width);
+      const py = (event.clientY - rect.top) * (canvas.height / rect.height);
+      let x = ((px - frame.left) / (frame.right - frame.left)) * (frame.xMax * 2) - frame.xMax;
+      let y = frame.yMin + ((frame.bottom - py) / (frame.bottom - frame.top)) * (frame.yMax - frame.yMin);
+      x = Math.max(-frame.xMax, Math.min(frame.xMax, x));
+      y = Math.max(frame.yMin, Math.min(frame.yMax, y));
+      return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+    }
+
+    function playerAt(event) {
+      const rect = canvas.getBoundingClientRect();
+      const px = (event.clientX - rect.left) * (canvas.width / rect.width);
+      const py = (event.clientY - rect.top) * (canvas.height / rect.height);
+      let best = null;
+      let bestDistance = 18;
+      for (const player of [...(diagram.offense || []), ...(diagram.defense || [])]) {
+        const dx = mapX(player.x) - px;
+        const dy = mapY(player.y) - py;
+        const distance = Math.hypot(dx, dy);
+        if (distance < bestDistance) {
+          best = player;
+          bestDistance = distance;
+        }
+      }
+      return best ? { player: best } : null;
+    }
+
+    function paint() {
       const ctx = canvas.getContext("2d");
       const width = canvas.width;
       const height = canvas.height;
-      const left = 48;
-      const right = width - 20;
-      const top = 28;
-      const bottom = height - 28;
-      const field = diagram.field || {};
-      const xMax = Number(field.width || 53.3) / 2;
-      const yMin = -15;
-      const yMax = 30;
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = "#e7f0df";
       ctx.fillRect(0, 0, width, height);
@@ -154,48 +182,64 @@
       ctx.fillStyle = "#5d6b58";
       ctx.font = "13px sans-serif";
       ctx.lineWidth = 1;
-      for (let yard = -10; yard <= 25; yard += 5) {
+      const startYard = Math.ceil(frame.yMin / 5) * 5;
+      const endYard = Math.floor(frame.yMax / 5) * 5;
+      for (let yard = startYard; yard <= endYard; yard += 5) {
         const y = mapY(yard);
         ctx.beginPath();
-        ctx.moveTo(left, y);
-        ctx.lineTo(right, y);
+        ctx.moveTo(frame.left, y);
+        ctx.lineTo(frame.right, y);
         ctx.stroke();
         ctx.fillText(String(50 - yard), 6, y + 4);
       }
       ctx.strokeStyle = "#1c1c1a";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(left, mapY(0));
-      ctx.lineTo(right, mapY(0));
+      ctx.moveTo(frame.left, mapY(0));
+      ctx.lineTo(frame.right, mapY(0));
       ctx.stroke();
       ctx.fillStyle = "#1c1c1a";
-      ctx.fillText("goal", right - 40, 18);
-      paintSide(diagram.offense || [], field.offense_color || "#f4f4f4");
-      paintSide(diagram.defense || [], field.defense_color || "#c4382c");
+      ctx.fillText("goal", frame.right - 40, 18);
+      const center = centerOnBall(diagram.offense || []);
+      paintSide(ctx, diagram.offense || [], "#1d4ed8", center);
+      paintSide(ctx, diagram.defense || [], "#dc2626", null);
+      ctx.font = "13px sans-serif";
+      ctx.fillStyle = "#1d4ed8";
+      ctx.fillRect(frame.left, height - 22, 12, 12);
+      ctx.fillStyle = "#1c1c1a";
+      ctx.fillText("Offense", frame.left + 16, height - 12);
+      ctx.fillStyle = "#dc2626";
+      ctx.fillRect(frame.left + 84, height - 22, 12, 12);
+      ctx.fillStyle = "#1c1c1a";
+      ctx.fillText("Defense", frame.left + 100, height - 12);
+    }
 
-      function mapX(x) {
-        return left + ((Number(x) + xMax) / (xMax * 2)) * (right - left);
-      }
-      function mapY(y) {
-        return bottom - ((y - yMin) / (yMax - yMin)) * (bottom - top);
-      }
-      function paintSide(players, fill) {
-        for (const player of players) {
-          const x = mapX(player.x);
-          const y = mapY(Number(player.y) || 0);
-          ctx.beginPath();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = "#1c1c1a";
-          ctx.fillStyle = player.seen === false ? "transparent" : fill;
-          if (player.symbol === "square") ctx.rect(x - 8, y - 8, 16, 16);
-          else ctx.arc(x, y, 8, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          if (player.label) {
-            ctx.fillStyle = "#1c1c1a";
-            ctx.fillText(String(player.label), x + 10, y - 8);
-          }
+    function centerOnBall(players) {
+      let best = null;
+      let bestScore = Infinity;
+      for (const player of players) {
+        if (player.role !== "center" && player.symbol !== "square") continue;
+        const score = Math.abs(Number(player.y) || 0) * 2 + Math.abs(Number(player.x) || 0);
+        if (score < bestScore) {
+          best = player;
+          bestScore = score;
         }
+      }
+      return best;
+    }
+
+    function paintSide(ctx, players, fill, squarePlayer) {
+      for (const player of players) {
+        const x = mapX(player.x);
+        const y = mapY(Number(player.y) || 0);
+        ctx.beginPath();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = fill;
+        ctx.fillStyle = player.seen === false ? "transparent" : fill;
+        if (player === squarePlayer) ctx.rect(x - 8, y - 8, 16, 16);
+        else ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       }
     }
   </script>

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from film_analysis.chart.isolate import (
     IsolatedPlayer,
@@ -27,7 +28,7 @@ from film_analysis.chart.isolate import (
     _swatch,
     _unit,
 )
-from film_analysis.chart.play_diagram import _ask, parse_points
+from film_analysis.chart.play_diagram import _exchange, parse_points
 from film_analysis.teams.uniforms import Uniform, uniform_line
 
 TEAM_SIZE = 11
@@ -123,31 +124,50 @@ def loose_split(frames: Sequence[bytes], home: Uniform, away: Uniform) -> PlayIs
     return PlayIsolation(tuple(best[2]), tuple(best[3]), _unit(best[2], best[3]), "low", best[1])
 
 
-def model_points(
-    frames: Sequence[bytes], home: Uniform, away: Uniform
-) -> tuple[dict[str, object], str] | None:
-    """Claude's placement of both teams, and which team it put on offense."""
+@dataclass(frozen=True)
+class ModelRead:
+    """What was sent to the model, the raw reply, and the points parsed from it."""
 
-    reply = _ask(
-        frames,
-        _MODEL_PROMPT.format(first=uniform_line(home), second=uniform_line(away)),
-        limit=4,
-        tokens=3000,
-    )
-    if reply is None:
-        return None
-    parsed = parse_points(reply)
-    if parsed is None:
-        return None
+    diagram: dict[str, object] | None
+    offense: str
+    model: str
+    prompt: str
+    reply: str
+    frames: int
+    sent: bool
+    error: str = ""
+    stop: str = ""
+
+
+def model_points(frames: Sequence[bytes], home: Uniform, away: Uniform) -> ModelRead:
+    """Claude's placement of both teams, and the exact call that asked for it."""
+
+    prompt = _MODEL_PROMPT.format(first=uniform_line(home), second=uniform_line(away))
+    exchange = _exchange(frames, prompt, limit=4, tokens=8000, plain_retry=True)
+    diagram: dict[str, object] | None = None
     side = "home"
-    try:
-        start = reply.index("{")
-        payload = json.loads(reply[start : reply.rindex("}") + 1])
-        if str(payload.get("offense_team") or "").strip().upper() == "B":
-            side = "away"
-    except (ValueError, AttributeError):
-        pass
-    return parsed, side
+    if exchange.sent and exchange.reply:
+        parsed = parse_points(exchange.reply)
+        if parsed is not None:
+            diagram = parsed
+            try:
+                start = exchange.reply.index("{")
+                payload = json.loads(exchange.reply[start : exchange.reply.rindex("}") + 1])
+                if str(payload.get("offense_team") or "").strip().upper() == "B":
+                    side = "away"
+            except (ValueError, AttributeError):
+                pass
+    return ModelRead(
+        diagram,
+        side,
+        exchange.model,
+        exchange.prompt,
+        exchange.reply,
+        exchange.frames,
+        exchange.sent,
+        exchange.error,
+        exchange.stop,
+    )
 
 
 def fill_to_eleven(players: list[dict[str, object]], template: Sequence[tuple]) -> int:

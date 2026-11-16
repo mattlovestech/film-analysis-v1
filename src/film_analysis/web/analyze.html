@@ -26,6 +26,21 @@
     .panel { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.1fr); gap: 1rem; padding: 0.25rem 0 0.5rem; }
     video, canvas { width: 100%; border-radius: 8px; background: #111; }
     canvas { background: #e7f0df; }
+    .workers { margin: 0.75rem 0 0.4rem; color: #5c5a55; }
+    table.trace { margin-top: 0.25rem; }
+    table.trace th, table.trace td { font-size: 0.92rem; }
+    tr.step { cursor: pointer; }
+    tr.step-detail { background: #f8f6f1; cursor: default; }
+    tr.step-detail h3 { margin: 0.2rem 0; font-size: 0.85rem; }
+    tr.step-detail dl { display: grid; grid-template-columns: 9rem 1fr; gap: 0.15rem 0.6rem; margin: 0 0 0.6rem; }
+    tr.step-detail dt { color: #5c5a55; }
+    tr.step-detail dd { margin: 0; }
+    tr.step-detail img { max-width: 240px; margin: 0.3rem 0.4rem 0 0; border-radius: 6px; }
+    table.call { margin-top: 0.4rem; background: #fff; }
+    table.call th, table.call td { vertical-align: top; }
+    table.call td:first-child { width: 6rem; color: #5c5a55; font-weight: 600; }
+    table.call pre { margin: 0; white-space: pre-wrap; font: 0.85rem/1.4 ui-monospace, monospace; max-height: 16rem; overflow: auto; }
+    .warn { color: #8a5a12; margin: 0.2rem 0; }
     @media (max-width: 800px) { .panel { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -108,6 +123,7 @@
       });
       action.append(button);
       tr.append(film, play, clock, bar(row.type), bar(row.players), bar(row.plot), action);
+      tr.dataset.running = row.running ? "1" : "";
       tr.addEventListener("click", () => toggle(row.uid));
       return tr;
     }
@@ -122,6 +138,7 @@
       const button = tr.querySelector("button");
       button.textContent = row.running ? "Reading" : "Run";
       button.disabled = row.running;
+      tr.dataset.running = row.running ? "1" : "";
       tr.classList.toggle("open", row.uid === openUid);
     }
 
@@ -188,11 +205,204 @@
       const canvas = document.createElement("canvas");
       canvas.width = 720;
       canvas.height = 520;
+      canvas.title = "Open this diagram";
+      canvas.addEventListener("click", () => {
+        if (!detail._trace || !detail._trace.diagram) return;
+        location.assign(`/analyze/play/${encodeURIComponent(uid)}`);
+      });
       panel.append(side, canvas);
-      cell.append(panel);
+      const workers = document.createElement("p");
+      workers.className = "workers";
+      const trace = document.createElement("table");
+      trace.className = "trace";
+      const head = document.createElement("thead");
+      const headings = document.createElement("tr");
+      for (const label of ["Step", "Status", "AI", "In", "Out", "Time"]) {
+        const th = document.createElement("th");
+        th.textContent = label;
+        headings.append(th);
+      }
+      head.append(headings);
+      trace.append(head, document.createElement("tbody"));
+      cell.append(panel, workers, trace);
       detail.append(cell);
       play.after(detail);
-      refreshOpen();
+      if (play.dataset.running) watchPlay(uid);
+      else refreshOpen();
+    }
+
+    const TRACE_STEPS = [
+      ["load", "Load"],
+      ["classify", "Classify"],
+      ["frames", "Frames"],
+      ["players", "Players"],
+      ["model", "Model"],
+      ["plot", "Plot"],
+      ["save", "Save"],
+    ];
+
+    function brief(value) {
+      if (!value || typeof value !== "object") return "";
+      return Object.entries(value).map(([key, item]) => {
+        if (item && typeof item === "object") {
+          const text = item.hex || item.name || item.line || "";
+          return text ? `${key} ${text}` : key;
+        }
+        if (item == null || item === "") return key;
+        return `${key} ${item}`;
+      }).join(" · ");
+    }
+
+    function workersLine(payload) {
+      const pool = payload.workers || {};
+      const busy = Number(pool.busy || 0);
+      const size = Number(pool.workers || 0);
+      const run = payload.run;
+      const who = (run && run.worker) || "";
+      let line = `One worker runs every step below. ${busy} of ${size} workers busy.`;
+      if (run && (run.status === "queued" || run.status === "running")) {
+        const step = (run.steps || []).find((item) => item.status === "running");
+        const name = who || "A worker";
+        line += step ? ` ${name} is on ${step.name}.` : ` ${name} has this play.`;
+      } else if (who) {
+        line += ` ${who} ran this play.`;
+      }
+      line += " Only the Model step calls an AI model.";
+      return line;
+    }
+
+    function fieldList(title, value) {
+      const box = document.createElement("div");
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      box.append(heading);
+      const entries = value && typeof value === "object" ? Object.entries(value) : [];
+      if (!entries.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "Nothing recorded.";
+        box.append(empty);
+        return box;
+      }
+      const list = document.createElement("dl");
+      for (const [key, item] of entries) {
+        const term = document.createElement("dt");
+        term.textContent = key;
+        const description = document.createElement("dd");
+        description.textContent = item && typeof item === "object" ? JSON.stringify(item) : String(item ?? "");
+        list.append(term, description);
+      }
+      box.append(list);
+      return box;
+    }
+
+    function callTable(step, run) {
+      const call = step && step.call;
+      const wrap = document.createElement("div");
+      const heading = document.createElement("h3");
+      heading.textContent = "Call";
+      wrap.append(heading);
+      const table = document.createElement("table");
+      table.className = "call";
+      if (!call || call.sent === false) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 2;
+        cell.textContent = call && call.reason
+          ? `The model was not called. ${call.reason}`
+          : "The model was not called.";
+        row.append(cell);
+        table.append(row);
+        wrap.append(table);
+        return wrap;
+      }
+      for (const [label, text] of [
+        ["Model", call.model || ""],
+        ["Frames", String(call.frames ?? 0)],
+        ["Prompt", call.prompt || ""],
+        ["Reply", call.reply || ""],
+      ].concat(call.error ? [["Error", call.error]] : [])) {
+        const row = document.createElement("tr");
+        const name = document.createElement("td");
+        name.textContent = label;
+        const value = document.createElement("td");
+        const body = document.createElement("pre");
+        body.textContent = text;
+        value.append(body);
+        row.append(name, value);
+        table.append(row);
+      }
+      wrap.append(table);
+      if (run) {
+        for (const image of call.images || []) {
+          const picture = document.createElement("img");
+          picture.alt = image;
+          picture.src = `/api/diagram-test/runs/${encodeURIComponent(run.run_id)}/images/${encodeURIComponent(image)}`;
+          wrap.append(picture);
+        }
+      }
+      return wrap;
+    }
+
+    function paintTrace(detail, payload) {
+      detail._trace = payload;
+      const host = detail.querySelector(".trace");
+      detail.querySelector(".workers").textContent = workersLine(payload);
+      const openName = host.dataset.open || "";
+      const byName = Object.fromEntries(((payload.run && payload.run.steps) || []).map((step) => [step.name, step]));
+      const steps = host.querySelector("tbody");
+      steps.replaceChildren();
+      for (const [name, label] of TRACE_STEPS) {
+        const step = byName[name];
+        const row = document.createElement("tr");
+        row.className = "step";
+        for (const text of [
+          label,
+          step ? step.status : "—",
+          name === "model" ? "Yes" : "No",
+          brief(step && step.incoming),
+          brief(step && step.data),
+          step && step.ms != null ? `${step.ms} ms` : "—",
+        ]) {
+          const cell = document.createElement("td");
+          cell.textContent = text;
+          row.append(cell);
+        }
+        row.addEventListener("click", () => {
+          host.dataset.open = host.dataset.open === name ? "" : name;
+          paintTrace(detail, detail._trace);
+        });
+        steps.append(row);
+        if (openName !== name) continue;
+        const extra = document.createElement("tr");
+        extra.className = "step-detail";
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        cell.append(fieldList("In", step && step.incoming), fieldList("Out", step && step.data));
+        for (const warning of (step && step.warnings) || []) {
+          const note = document.createElement("p");
+          note.className = "warn";
+          note.textContent = warning;
+          cell.append(note);
+        }
+        if (name === "model") {
+          cell.append(callTable(step, payload.run));
+        } else {
+          const note = document.createElement("p");
+          note.textContent = "This step does not call a model. It runs on the same worker as the other steps.";
+          cell.append(note);
+        }
+        const run = payload.run;
+        if (run && step) {
+          for (const image of step.artifacts || []) {
+            const picture = document.createElement("img");
+            picture.alt = image;
+            picture.src = `/api/diagram-test/runs/${encodeURIComponent(run.run_id)}/images/${encodeURIComponent(image)}`;
+            cell.append(picture);
+          }
+        }
+        extra.append(cell);
+        steps.append(extra);
+      }
     }
 
     async function refreshOpen() {
@@ -203,8 +413,12 @@
       if (!detail) return;
       const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
       if (!response.ok || token !== refreshToken || uid !== openUid) return;
-      const payload = await response.json();
+      showPlay(detail, await response.json());
+    }
+
+    function showPlay(detail, payload) {
       const status = detail.querySelector(".status");
+      paintTrace(detail, payload);
       if (!payload.diagram) {
         status.textContent = payload.running ? "Reading this play." : "Run this play to place the players.";
         return;
@@ -217,11 +431,10 @@
     async function start(uid, button) {
       button.disabled = true;
       button.textContent = "Reading";
-      following = true;
-      if (timer === null) timer = setInterval(load, 1500);
+      const row = body.querySelector(`tr.play[data-uid="${cssAttr(uid)}"]`);
+      if (row) row.dataset.running = "1";
       await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`, { method: "POST" });
-      if (openUid === uid) refreshOpen();
-      load();
+      watchPlay(uid);
     }
 
     function draw(canvas, diagram) {
@@ -270,8 +483,12 @@
       ctx.stroke();
       ctx.fillStyle = "#1c1c1a";
       ctx.fillText("goal", right - 40, 18);
-      paintSide(diagram.offense || [], field.offense_color || "#f4f4f4");
-      paintSide(diagram.defense || [], field.defense_color || "#c4382c");
+      const offenseColor = "#1d4ed8";
+      const defenseColor = "#dc2626";
+      const center = centerOnBall(diagram.offense || []);
+      paintSide(diagram.offense || [], offenseColor, center);
+      paintSide(diagram.defense || [], defenseColor, null);
+      paintKey(offenseColor, defenseColor);
 
       function mapX(x) {
         return left + ((Number(x) + xMax) / (xMax * 2)) * (right - left);
@@ -279,48 +496,84 @@
       function mapY(y) {
         return bottom - ((y - yMin) / (yMax - yMin)) * (bottom - top);
       }
-      function paintSide(players, fill) {
+      function centerOnBall(players) {
+        let best = null;
+        let bestScore = Infinity;
+        for (const player of players) {
+          if (player.role !== "center" && player.symbol !== "square") continue;
+          const score = Math.abs(Number(player.y) || 0) * 2 + Math.abs(Number(player.x) || 0);
+          if (score < bestScore) {
+            best = player;
+            bestScore = score;
+          }
+        }
+        return best;
+      }
+      function paintSide(players, fill, squarePlayer) {
         for (const player of players) {
           const x = mapX(player.x);
           const y = mapY(Number(player.y) || 0);
           ctx.beginPath();
           ctx.lineWidth = 2;
-          ctx.strokeStyle = "#1c1c1a";
+          ctx.strokeStyle = fill;
           ctx.fillStyle = player.seen === false ? "transparent" : fill;
-          if (player.symbol === "square") ctx.rect(x - 8, y - 8, 16, 16);
+          if (player === squarePlayer) ctx.rect(x - 8, y - 8, 16, 16);
           else ctx.arc(x, y, 8, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
-          if (player.label) {
-            ctx.fillStyle = "#1c1c1a";
-            ctx.fillText(String(player.label), x + 10, y - 8);
-          }
         }
       }
+      function paintKey(offense, defense) {
+        ctx.font = "13px sans-serif";
+        ctx.fillStyle = offense;
+        ctx.fillRect(left, height - 22, 12, 12);
+        ctx.fillStyle = "#1c1c1a";
+        ctx.fillText("Offense", left + 16, height - 12);
+        ctx.fillStyle = defense;
+        ctx.fillRect(left + 84, height - 22, 12, 12);
+        ctx.fillStyle = "#1c1c1a";
+      ctx.fillText("Defense", left + 100, height - 12);
+      canvas.style.cursor = "pointer";
+    }
     }
 
     function cssAttr(value) {
       return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     }
 
-    let timer = null;
-    let following = false;
+    let watchTimer = null;
+    let watching = null;
     let loadingList = false;
 
-    function follow(rows) {
-      const busy = rows.some((row) => row.running);
-      const open = openUid ? rows.find((row) => row.uid === openUid) : null;
-      if (open && (open.running || (following && !busy))) refreshOpen();
-      if (busy) {
-        following = true;
-        if (timer === null) timer = setInterval(load, 1500);
-        return;
+    function watchPlay(uid) {
+      watching = uid;
+      if (watchTimer === null) watchTimer = setInterval(tickPlay, 1000);
+      tickPlay();
+    }
+
+    async function tickPlay() {
+      if (!watching) return;
+      const uid = watching;
+      const response = await fetch(`/api/plays/${encodeURIComponent(uid)}/diagram`);
+      if (!response.ok || watching !== uid) return;
+      const payload = await response.json();
+      const row = body.querySelector(`tr.play[data-uid="${cssAttr(uid)}"]`);
+      if (row && payload.steps) {
+        setBar(row.children[3], payload.steps.type || 0);
+        setBar(row.children[4], payload.steps.players || 0);
+        setBar(row.children[5], payload.steps.plot || 0);
+        const button = row.querySelector("button");
+        button.textContent = payload.running ? "Reading" : "Run";
+        button.disabled = Boolean(payload.running);
+        row.dataset.running = payload.running ? "1" : "";
       }
-      following = false;
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
+      const detail = body.querySelector(`tr.detail[data-uid="${cssAttr(uid)}"]`);
+      if (detail && openUid === uid) showPlay(detail, payload);
+      if (payload.running) return;
+      clearInterval(watchTimer);
+      watchTimer = null;
+      watching = null;
+      load();
     }
 
     async function load() {
@@ -331,7 +584,6 @@
         if (!response.ok) return;
         const rows = await response.json();
         paint(rows);
-        follow(rows);
       } finally {
         loadingList = false;
       }

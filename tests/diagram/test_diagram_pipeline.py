@@ -115,6 +115,14 @@ def test_a_scrimmage_play_is_traced_and_saved(tmp_path: Path) -> None:
     assert labels == sorted(["LT", "LG", "C", "RG", "RT", "Y", "X", "Z", "H", "QB", "RB"])
     players = next(step for step in run.steps if step.name == "players")
     assert players.data["home_players"] == 11
+    assert players.incoming["frames"] == 4
+    assert players.incoming["home_hex"] == "#ffffff"
+    load = run.steps[0]
+    assert load.incoming == {"project": 1, "play": 1}
+    assert load.data["film"] == "Friday night"
+    model = next(step for step in run.steps if step.name == "model")
+    assert model.call["sent"] is False
+    assert "Not needed" in model.call["reason"]
     assert any(name.endswith("players-color.jpg") for name in players.artifacts)
     # The trace and its images survive a restart.
     again = RunStore(tmp_path)
@@ -240,6 +248,69 @@ def _line(count: int, y: float) -> list[dict[str, object]]:
         {"x": float(i - count // 2), "y": y, "role": "line", "symbol": "open", "seen": True}
         for i in range(count)
     ]
+
+
+def test_an_empty_model_reply_keeps_the_film_players() -> None:
+    from film_analysis.diagram.fallbacks import ModelRead
+
+    def ask(frames, home, away):
+        return ModelRead(
+            None,
+            "home",
+            "test-model",
+            "Team A wears white.",
+            "",
+            4,
+            True,
+            "Claude used the whole token budget thinking and sent no points.",
+            "max_tokens",
+        )
+
+    pipeline = _pipeline(FakeSource(), isolate=_few, ask_model=ask)
+    run = pipeline.store.create("1-1", 1, 1)
+
+    pipeline.run(run)
+
+    model = next(step for step in run.steps if step.name == "model")
+    assert model.data["kept"] in {"color", "loose"}
+    assert "away_players" in model.data
+    assert model.call["error"].startswith("Claude used the whole token budget")
+    assert model.call["stop"] == "max_tokens"
+    assert run.diagram["method"] != "model"
+    assert len(run.diagram["offense"]) == 11
+
+
+def test_the_model_step_keeps_the_exact_call() -> None:
+    from film_analysis.diagram.fallbacks import ModelRead
+
+    def ask(frames, home, away):
+        return ModelRead(
+            {"offense": _line(9, -0.5), "defense": _line(8, 1.0)},
+            "away",
+            "test-model",
+            "Team A wears white.",
+            '{"offense_team":"B"}',
+            4,
+            True,
+        )
+
+    pipeline = _pipeline(FakeSource(), isolate=_few, ask_model=ask)
+    run = pipeline.store.create("1-1", 1, 1)
+
+    pipeline.run(run)
+
+    model = next(step for step in run.steps if step.name == "model")
+    assert model.call == {
+        "sent": True,
+        "model": "test-model",
+        "prompt": "Team A wears white.",
+        "reply": '{"offense_team":"B"}',
+        "frames": 4,
+        "images": model.call["images"],
+    }
+    assert len(model.call["images"]) == 4
+    assert all(name.endswith(".jpg") for name in model.call["images"])
+    assert run.diagram["teams"]["offense"] == "Away"
 
 
 def test_claude_places_the_players_when_the_film_cannot() -> None:

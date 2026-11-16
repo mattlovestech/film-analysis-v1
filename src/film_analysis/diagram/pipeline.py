@@ -19,6 +19,7 @@ from film_analysis.chart.play_diagram import _label_defense, _plot_players, _sid
 from film_analysis.diagram.fallbacks import (
     DEFENSE_TEMPLATE,
     OFFENSE_TEMPLATE,
+    ModelRead,
     fill_to_eleven,
     loose_split,
     mark_players,
@@ -56,7 +57,10 @@ class PlaySource(Protocol):
 
 Isolate = Callable[[Sequence[bytes], Uniform, Uniform], PlayIsolation]
 Mark = Callable[[bytes, Uniform, Uniform], bytes | None]
-AskModel = Callable[[Sequence[bytes], Uniform, Uniform], tuple[dict[str, object], str] | None]
+AskModel = Callable[
+    [Sequence[bytes], Uniform, Uniform],
+    ModelRead | tuple[dict[str, object], str] | None,
+]
 
 
 @dataclass
@@ -67,6 +71,18 @@ class Placement:
     found: PlayIsolation
     model: dict[str, object] | None = None
     model_offense: str = "home"
+
+
+def _model_miss(read: ModelRead | None) -> str:
+    """Why a model step did not become the plotted points."""
+
+    if read is not None and read.error:
+        return read.error
+    if read is not None and read.sent and read.reply:
+        return "Claude replied, but the points could not be read."
+    if read is not None and read.sent:
+        return "Claude was called and returned no text."
+    return "Claude did not place the players (no key or no reply)."
 
 
 class DiagramPipeline:
@@ -136,6 +152,7 @@ class DiagramPipeline:
 
     def _load(self, run: Run) -> tuple[PlayInfo, Uniform, Uniform]:
         with self.store.step(run, "load", "1") as step:
+            step.incoming = {"project": run.project, "play": run.play}
             info = self.source.play(run.project, run.play)
             step.data.update(
                 {
@@ -170,6 +187,7 @@ class DiagramPipeline:
 
     def _classify(self, run: Run, info: PlayInfo) -> None:
         with self.store.step(run, "classify", "2a") as step:
+            step.incoming = {"family": info.family, "play_type": info.play_type}
             special = info.family == "special_teams" or (info.play_type or "") in SPECIAL_CALLS
             kind = "special_teams" if special else "scrimmage"
             step.data.update({"kind": kind, "decided_by": "cut labeler"})
@@ -179,6 +197,7 @@ class DiagramPipeline:
 
     def _frames(self, run: Run, info: PlayInfo) -> list[bytes]:
         with self.store.step(run, "frames", "2b") as step:
+            step.incoming = {"start": info.start, "end": info.end}
             frames = [
                 frame
                 for frame in self.source.snap_frames(info.project, info.play)
@@ -195,6 +214,11 @@ class DiagramPipeline:
 
     def _players(self, run: Run, frames: list[bytes], home: Uniform, away: Uniform) -> Placement:
         with self.store.step(run, "players", "2b") as step:
+            step.incoming = {
+                "frames": len(frames),
+                "home_hex": home.jersey_hex,
+                "away_hex": away.jersey_hex,
+            }
             strict = self.isolate(frames, home, away)
             placement = Placement("color", strict)
             step.data["color"] = _counts(strict, frames)
@@ -242,14 +266,56 @@ class DiagramPipeline:
         placement: Placement,
     ) -> Placement:
         with self.store.step(run, "model", "2b") as step:
+            step.incoming = {
+                "method": placement.method,
+                "home_players": len(placement.found.mine),
+                "away_players": len(placement.found.other),
+            }
             if _side_score(placement.found) >= GOOD_SIDE:
-                step.skip(f"Not needed: {placement.method} found enough players.")
+                reason = f"Not needed: {placement.method} found enough players."
+                step.call = {"sent": False, "reason": reason}
+                step.skip(reason)
                 return placement
             answer = self.ask_model(frames, home, away)
-            if answer is None:
-                step.warnings.append("Claude did not place the players (no key or no reply).")
+            read = answer if isinstance(answer, ModelRead) else None
+            if read is not None:
+                snaps = [
+                    name
+                    for name in next(
+                        (item.artifacts for item in run.steps if item.name == "frames"),
+                        [],
+                    )
+                    if "snap-" in name
+                ]
+                step.call = {
+                    "sent": read.sent,
+                    "model": read.model,
+                    "prompt": read.prompt,
+                    "reply": read.reply,
+                    "frames": read.frames,
+                    "images": snaps[: read.frames],
+                }
+                if read.error:
+                    step.call["error"] = read.error
+                if read.stop:
+                    step.call["stop"] = read.stop
+                diagram, offense_side = read.diagram, read.offense
+            elif isinstance(answer, tuple):
+                diagram, offense_side = answer
+                step.call = {"sent": True, "reply": ""}
+            else:
+                step.call = {"sent": False, "reason": "No key or no reply."}
+                diagram, offense_side = None, "home"
+            if not isinstance(diagram, dict):
+                step.data.update(
+                    {
+                        "kept": placement.method,
+                        "home_players": len(placement.found.mine),
+                        "away_players": len(placement.found.other),
+                    }
+                )
+                step.warnings.append(_model_miss(read))
                 return placement
-            diagram, offense_side = answer
             offense = [p for p in diagram.get("offense") or [] if isinstance(p, dict)]
             defense = [p for p in diagram.get("defense") or [] if isinstance(p, dict)]
             seen = sum(1 for p in (*offense, *defense) if p.get("seen", True))
@@ -271,6 +337,18 @@ class DiagramPipeline:
         self, run: Run, placement: Placement, home: Uniform, away: Uniform
     ) -> dict[str, object]:
         with self.store.step(run, "plot", "2c") as step:
+            if placement.model is not None:
+                step.incoming = {
+                    "method": "model",
+                    "offense": len(placement.model.get("offense") or []),
+                    "defense": len(placement.model.get("defense") or []),
+                }
+            else:
+                step.incoming = {
+                    "method": placement.method,
+                    "home_players": len(placement.found.mine),
+                    "away_players": len(placement.found.other),
+                }
             if placement.model is not None:
                 offense, defense = (
                     (home, away) if placement.model_offense == "home" else (away, home)
@@ -326,7 +404,15 @@ class DiagramPipeline:
 
     def _save(self, run: Run, info: PlayInfo, diagram: dict[str, object]) -> None:
         with self.store.step(run, "save", "-") as step:
+            offense = diagram.get("offense") or []
+            defense = diagram.get("defense") or []
+            step.incoming = {
+                "offense": len(offense) if isinstance(offense, list) else 0,
+                "defense": len(defense) if isinstance(defense, list) else 0,
+                "method": diagram.get("method") or "",
+            }
             self.source.save(info.project, info.play, diagram)
+            step.data["saved"] = True
             step.detail = "Saved as the play layout."
 
 

@@ -12,8 +12,9 @@ import json
 import os
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
-from film_analysis.chart.formation import FORMATIONS, parse_formation
+from film_analysis.chart.formation import parse_formation
 from film_analysis.chart.formation_plot import normalize_to_los
 from film_analysis.chart.isolate import isolate_play
 from film_analysis.plays.boundaries import DEFAULT_MODEL
@@ -203,7 +204,9 @@ def _sides(
     home_players = tuple(getattr(found, "mine", ()) or ())
     away_players = tuple(getattr(found, "other", ()) or ())
     unit = getattr(found, "unit", None)
-    if unit == "defense" or (unit not in {"offense", "defense"} and _depth(away_players) > _depth(home_players)):
+    if unit == "defense" or (
+        unit not in {"offense", "defense"} and _depth(away_players) > _depth(home_players)
+    ):
         return away, home, away_players, home_players
     return home, away, home_players, away_players
 
@@ -294,16 +297,33 @@ def _ask_formation(diagram: dict[str, object], call: str) -> str | None:
 
 
 def _ask(frames: Sequence[bytes], prompt: str, *, limit: int, tokens: int) -> str | None:
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
+    exchange = _exchange(frames, prompt, limit=limit, tokens=tokens)
+    if not exchange.sent or not exchange.reply:
         return None
+    return exchange.reply
+
+
+def _exchange(
+    frames: Sequence[bytes],
+    prompt: str,
+    *,
+    limit: int,
+    tokens: int,
+    plain_retry: bool = False,
+) -> _Exchange:
+    """The exact request that would be sent, and the text that came back."""
+
+    model = os.environ.get("FILM_ANALYSIS_MODEL", DEFAULT_MODEL)
     jpegs = [
         frame
         for frame in frames
         if isinstance(frame, bytes) and frame.startswith(b"\xff\xd8\xff")
     ][:limit]
     if limit and not jpegs:
-        return None
+        return _Exchange(model, prompt, 0, "", False)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return _Exchange(model, prompt, len(jpegs), "", False)
     content: list[dict[str, object]] = [{"type": "text", "text": prompt}]
     for index, frame in enumerate(jpegs, start=1):
         content.append({"type": "text", "text": f"Frame {index}"})
@@ -312,20 +332,59 @@ def _ask(frames: Sequence[bytes], prompt: str, *, limit: int, tokens: int) -> st
         import anthropic
 
         client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model=os.environ.get("FILM_ANALYSIS_MODEL", DEFAULT_MODEL),
-            max_tokens=tokens,
-            thinking={"type": "between_tools"},
-            messages=[{"role": "user", "content": content}],
-        )
-    except Exception:
-        return None
+        message = _complete(client, model, tokens, content, thinking=True)
+        reply, stop, error = _reply_text(message)
+        if plain_retry and not reply and stop == "max_tokens":
+            message = _complete(client, model, max(tokens, 4000), content, thinking=False)
+            reply, stop, error = _reply_text(message)
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        return _Exchange(model, prompt, len(jpegs), "", True, detail[:240], "")
+    return _Exchange(model, prompt, len(jpegs), reply, True, error, stop)
+
+
+def _complete(
+    client: object,
+    model: str,
+    tokens: int,
+    content: list[dict[str, object]],
+    *,
+    thinking: bool,
+):
+    kwargs: dict[str, object] = {
+        "model": model,
+        "max_tokens": tokens,
+        "messages": [{"role": "user", "content": content}],
+    }
+    if thinking:
+        kwargs["thinking"] = {"type": "between_tools"}
+    return client.messages.create(**kwargs)
+
+
+def _reply_text(message: object) -> tuple[str, str, str]:
+    stop = str(getattr(message, "stop_reason", "") or "")
     texts = [
         block.text
         for block in getattr(message, "content", [])
         if getattr(block, "type", None) == "text" and getattr(block, "text", "")
     ]
-    return "\n".join(texts) or None
+    reply = "\n".join(texts)
+    if reply:
+        return reply, stop, ""
+    if stop == "max_tokens":
+        return "", stop, "Claude used the whole token budget thinking and sent no points."
+    return "", stop, "Claude was called and returned no text."
+
+
+@dataclass(frozen=True)
+class _Exchange:
+    model: str
+    prompt: str
+    frames: int
+    reply: str
+    sent: bool
+    error: str = ""
+    stop: str = ""
 
 
 def _field(offense: Uniform | None, defense: Uniform | None) -> dict[str, object]:
@@ -474,7 +533,11 @@ def _has_points(layout: dict[str, object] | None) -> bool:
 
 
 def _is_point(item: object) -> bool:
-    return isinstance(item, dict) and _number(item.get("x")) is not None and _number(item.get("y")) is not None
+    return (
+        isinstance(item, dict)
+        and _number(item.get("x")) is not None
+        and _number(item.get("y")) is not None
+    )
 
 
 def _number(value: object) -> float | None:
