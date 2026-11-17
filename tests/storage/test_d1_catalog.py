@@ -57,6 +57,8 @@ def _current_master() -> list[dict[str, object]]:
         "teams": "create table teams (project_id integer primary key, uniforms text)",
         "diagram_examples": "create table diagram_examples (project_id integer, "
         "play_number integer, saved_at text, prompt text, points text)",
+        "placement_prompts": "create table placement_prompts (project_id integer primary key, "
+        "prompt text)",
     }
     rows: list[dict[str, object]] = [
         {"type": "table", "name": name, "sql": sql} for name, sql in tables.items()
@@ -150,7 +152,7 @@ def test_deleting_a_film_is_one_request(tmp_path: Path) -> None:
     store.delete_project(3)
 
     assert len(store.requests) == 1
-    assert len(store.requests[0]["batch"]) == 9
+    assert len(store.requests[0]["batch"]) == 10
 
 
 def test_a_coach_edit_keeps_the_id_the_insert_returned(tmp_path: Path) -> None:
